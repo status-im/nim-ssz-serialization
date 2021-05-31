@@ -9,7 +9,9 @@ skipDirs      = @["tests"]
 
 requires "nim >= 1.2.0",
          "serialization",
-         "stew"
+         "json_serialization",
+         "stew",
+         "blscurve"
 
 proc test(env, path: string) =
   # Compilation language is controlled by TEST_LANG
