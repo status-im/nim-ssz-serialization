@@ -9,13 +9,18 @@
 
 import
   std/[options],
-  unittest2, nimcrypto/hash, json_serialization,
+  unittest2, nimcrypto/hash, json_serialization, stew/byteutils,
   ../ssz_serialization/[ssz, navigator, dynamic_navigator, merkleization]
 
 template toSszType(x: auto): auto =
   mixin toSszType
 
   x
+
+template postReadValue(x: auto) = discard
+
+func `$`*(x: Digest): string =
+  x.data.toHex()
 
 type
   SomeEnum = enum

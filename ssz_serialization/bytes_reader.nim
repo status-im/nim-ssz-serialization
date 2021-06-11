@@ -67,7 +67,7 @@ template checkForForbiddenBits(ResulType: type,
 
 func readSszValue*[T](input: openArray[byte],
                       val: var T, updateRoot: bool = true) {.raisesssz.} =
-  mixin fromSszBytes, toSszType
+  mixin fromSszBytes, toSszType, postReadValue
 
   template readOffsetUnchecked(n: int): uint32 {.used.}=
     fromSszBytes(uint32, input.toOpenArray(n, n + offsetSize - 1))
@@ -228,3 +228,5 @@ func readSszValue*[T](input: openArray[byte],
 
   else:
     unsupported T
+
+  postReadValue(val)

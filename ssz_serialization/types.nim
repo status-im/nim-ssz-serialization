@@ -32,9 +32,6 @@ type
 # * vIdx - virtual index in merkle tree - the root is found at index 1, its
 #          two children at 2, 3 then 4, 5, 6, 7 etc
 
-func `$`*(x: Digest): string =
-  x.data.toHex()
-
 func nextPow2Int64(x: int64): int64 =
   # TODO the nextPow2 in bitops2 works with uint64 - there's a bug in the nim
   #      compiler preventing it to be used - it seems that a conversion to
