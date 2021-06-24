@@ -11,7 +11,7 @@ requires "nim >= 1.2.0",
          "serialization",
          "json_serialization",
          "stew",
-         "blscurve"
+         "https://github.com/markspanbroek/nim-blscurve#94ea0bf"
 
 proc test(env, path: string) =
   # Compilation language is controlled by TEST_LANG
