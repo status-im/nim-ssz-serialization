@@ -145,9 +145,6 @@ type
 
 template asSeq*(x: List): auto = distinctBase(x)
 
-template init*[T](L: type List, x: seq[T], N: static Limit): auto =
-  List[T, N](x)
-
 template init*[T, N](L: type List[T, N], x: seq[T]): auto =
   List[T, N](x)
 
