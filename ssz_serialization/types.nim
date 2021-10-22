@@ -145,6 +145,9 @@ type
 
 template asSeq*(x: List): auto = distinctBase(x)
 
+template init*[T](L: type List, x: seq[T], N: static Limit): auto =
+  List[T, N](x)
+
 template init*[T, N](L: type List[T, N], x: seq[T]): auto =
   List[T, N](x)
 
@@ -162,6 +165,7 @@ template items* (x: List): untyped = items(distinctBase x)
 template pairs* (x: List): untyped = pairs(distinctBase x)
 template mitems*(x: var List): untyped = mitems(distinctBase x)
 template mpairs*(x: var List): untyped = mpairs(distinctBase x)
+template contains* (x: List, val: auto): untyped = contains(distinctBase x, val)
 
 proc add*(x: var List, val: auto): bool =
   if x.len < x.maxLen:
