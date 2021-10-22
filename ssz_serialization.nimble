@@ -9,7 +9,12 @@ skipDirs      = @["tests"]
 
 requires "nim >= 1.2.0",
          "serialization",
-         "stew"
+         "json_serialization",
+         "stew",
+         "stint",
+         "nimcrypto",
+         "blscurve",
+         "unittest2"
 
 proc test(env, path: string) =
   # Compilation language is controlled by TEST_LANG
@@ -20,8 +25,8 @@ proc test(env, path: string) =
   if not dirExists "build":
     mkDir "build"
   exec "nim " & lang & " " & env &
-    " -r --hints:off --warnings:off " & path
+    " -r --hints:off --warnings:on " & path
 
 task test, "Run all tests":
-  test "--threads:off", "tests/test_all"
-  test "--threads:on", "tests/test_all"
+  test "--threads:off -d:PREFER_BLST_SHA256=false", "tests/test_all"
+  test "--threads:on -d:PREFER_BLST_SHA256=false", "tests/test_all"
