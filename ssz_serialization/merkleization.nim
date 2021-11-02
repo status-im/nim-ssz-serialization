@@ -592,14 +592,15 @@ func hashTreeRootAux[T](x: T): Digest =
     merkleizeFields(Limit 2):
       addField hashTreeRoot(toSszType(x.value))
   elif T is array|object|tuple:
+    # when T.isCaseObject():
+    #   # TODO: Need to implement this for case object (SSZ Union)
+    #   unsupported T
     trs "MERKLEIZING FIELDS"
     const totalFields = when T is array: len(x)
                         else: totalSerializedFields(T)
     merkleizeFields(Limit totalFields):
       x.enumerateSubFields(f):
         addField f
-  #elif isCaseObject(T):
-  #  # TODO implement this
   else:
     unsupported T
 

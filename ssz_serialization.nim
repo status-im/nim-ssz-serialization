@@ -63,7 +63,7 @@ proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [Defe
       s.writeMemCopy x
   elif x is array:
     when x[0] is byte:
-      trs "APPENDING FIXED SIZE BYTES", x
+      trs "APPENDING FIXED SIZE BYTES: ", x
       s.write x
     else:
       for elem in x:
@@ -71,7 +71,7 @@ proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [Defe
         s.writeFixedSized toSszType(elem)
   elif x is tuple|object:
     enumInstanceSerializedFields(x, fieldName, field):
-      trs "WRITING FIXED SIZE FIELD", fieldName
+      trs "WRITING FIXED SIZE FIELD: ", fieldName
       s.writeFixedSized toSszType(field)
   else:
     unsupported x.type
@@ -162,11 +162,36 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError]
     # to internally match the binary representation of SSZ BitLists in memory.
     writeSeq(w, bytes value)
   elif value is object|tuple|array:
-    trs "WRITING OBJECT OR ARRAY"
-    var ctx = beginRecord(w, type value)
-    enumerateSubFields(value, field):
-      writeField w, ctx, astToStr(field), field
-    endRecord w, ctx
+    when isCaseObject(type(value)):
+      trs "WRITING SSZ Union"
+      # TODO:
+      # - Check for enum size range (< 127 or at least max 1 byte sizeof)
+      # - SSZ Union: "Must have at least 1 type option."
+      # - SSZ Union: "Must have at least 2 type options if the first is None"
+      # - SSZ Union: Empty case (No fields) only as first (0) discriminator
+
+      # toSszType for enum is kept local here as we don't want enums to
+      # serialize in general, only for object variants.
+      # TODO: This is not sufficiant as it will still allow to parse enum
+      # fields in the object variant itself. Will probably need some macro
+      # which enumerates the fields instead to take specific action on the
+      # discriminator.
+      template toSszType[E: enum](x: E): uint8 =
+        uint8(x)
+
+      enumerateSubFields(value, field):
+        type T = type toSszType(field)
+
+        when isFixedSize(T):
+          w.stream.writeFixedSized toSszType(field)
+        else:
+          w.writeVarSizeType toSszType(field)
+    else:
+      trs "WRITING OBJECT OR ARRAY"
+      var ctx = beginRecord(w, type value)
+      enumerateSubFields(value, field):
+        writeField w, ctx, astToStr(field), field
+      endRecord w, ctx
   else:
     unsupported type(value)
 
@@ -211,6 +236,9 @@ func sszSize*(value: auto): int {.gcsafe, raises: [Defect].} =
     sszSize(toSszType value.value) + 1
 
   elif T is object|tuple:
+    when T.isCaseObject():
+      # TODO: Need to add sszSize for case object (SSZ Union)
+      unsupported T
     result = anonConst fixedPortionSize(T)
     enumInstanceSerializedFields(value, _{.used.}, field):
       type FieldType = type toSszType(field)
