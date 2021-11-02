@@ -13,7 +13,7 @@
 
 import
   std/typetraits,
-  stew/[endians2, objects],
+  stew/[endians2, objects], stew/shims/macros,
   ./types
 
 export
@@ -75,7 +75,54 @@ template checkForForbiddenBits(ResulType: type,
     if (input[^1] and forbiddenBitsMask) != 0:
       raiseIncorrectSize ResulType
 
-func readSszValue*[T](input: openArray[byte],
+macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
+  var res = newStmtList()
+  let T = RecordType.getType[1]
+  var recordDef = getImpl(T)
+
+  for field in recordFields(recordDef):
+    if (field.isDiscriminator):
+      let
+        selectorFieldName = field.name
+        selectorFieldType = field.typ
+        SelectorFieldNameLit = newLit($selectorFieldName)
+
+      res.add quote do:
+        block:
+          if `input`.len == 0:
+            raise newException(MalformedSszError, "Invalid empty SSZ Union")
+
+          var selector: `selectorFieldType`
+          # TODO: `checkedEnumAssign` does not check for holes in an enum.
+          # SSZ Union spec also doesn't allow this, so it should be fine, but
+          # nothing stops currently defining an enum with holes and such data
+          # will also be parsed and result in an object like:
+          # `(selector: 2 (invalid data!))`
+          if not checkedEnumAssign(selector, `input`[0]):
+            raise newException(MalformedSszError, "SSZ Union selector is out of bounds")
+
+          var caseObj = `T`(`selectorFieldName`: selector)
+
+          enumInstanceSerializedFields(caseObj, fieldName, field):
+            when fieldName != `SelectorFieldNameLit`:
+              if `input`.len <= 1:
+                raise newException(MalformedSszError, "Invalid empty SSZ Union value for this selector")
+
+              readSszValue(`input`.toOpenArray(1, `input`.len - 1), field)
+
+          caseObj
+
+      # TODO: Add additional checking if it is a case object with only 1 field
+      # for each case and not fields outside of the case.
+      # and static assert in case no object variant / case object.
+      break
+
+  res
+
+func initSszUnion(T: type, input: openArray[byte]): T {.raisesssz.} =
+  initSszUnionImpl(T, input)
+
+proc readSszValue*[T](input: openArray[byte],
                       val: var T) {.raisesssz.} =
   mixin fromSszBytes, toSszType
 
@@ -185,54 +232,57 @@ func readSszValue*[T](input: openArray[byte],
     copyMem(addr val.bytes[0], unsafeAddr input[0], input.len)
 
   elif val is object|tuple:
-    let inputLen = uint32 input.len
-    const minimallyExpectedSize = uint32 fixedPortionSize(T)
+    when type(val).isCaseObject():
+      val = initSszUnion(type(val), input)
+    else:
+      let inputLen = uint32 input.len
+      const minimallyExpectedSize = uint32 fixedPortionSize(T)
 
-    if inputLen < minimallyExpectedSize:
-      raise newException(MalformedSszError, "SSZ input of insufficient size")
+      if inputLen < minimallyExpectedSize:
+        raise newException(MalformedSszError, "SSZ input of insufficient size")
 
-    enumInstanceSerializedFields(val, fieldName, field):
-      const boundingOffsets = getFieldBoundingOffsets(T, fieldName)
+      enumInstanceSerializedFields(val, fieldName, field):
+        const boundingOffsets = getFieldBoundingOffsets(T, fieldName)
 
-      # type FieldType = type field # buggy
-      # For some reason, Nim gets confused about the alias here. This could be a
-      # generics caching issue caused by the use of distinct types. Such an
-      # issue is very scary in general.
-      # The bug can be seen with the two List[uint64, N] types that exist in
-      # the spec, with different N.
+        # type FieldType = type field # buggy
+        # For some reason, Nim gets confused about the alias here. This could be a
+        # generics caching issue caused by the use of distinct types. Such an
+        # issue is very scary in general.
+        # The bug can be seen with the two List[uint64, N] types that exist in
+        # the spec, with different N.
 
-      type SszType = type toSszType(declval type(field))
+        type SszType = type toSszType(declval type(field))
 
-      when isFixedSize(SszType):
-        const
-          startOffset = boundingOffsets[0]
-          endOffset = boundingOffsets[1]
-      else:
-        let
-          startOffset = readOffsetUnchecked(boundingOffsets[0])
-          endOffset = if boundingOffsets[1] == -1: inputLen
-                      else: readOffsetUnchecked(boundingOffsets[1])
+        when isFixedSize(SszType):
+          const
+            startOffset = boundingOffsets[0]
+            endOffset = boundingOffsets[1]
+        else:
+          let
+            startOffset = readOffsetUnchecked(boundingOffsets[0])
+            endOffset = if boundingOffsets[1] == -1: inputLen
+                        else: readOffsetUnchecked(boundingOffsets[1])
 
-        when boundingOffsets.isFirstOffset:
-          if startOffset != minimallyExpectedSize:
-            raise newException(MalformedSszError, "SSZ object dynamic portion starts at invalid offset")
+          when boundingOffsets.isFirstOffset:
+            if startOffset != minimallyExpectedSize:
+              raise newException(MalformedSszError, "SSZ object dynamic portion starts at invalid offset")
 
-        if startOffset > endOffset:
-          raise newException(MalformedSszError, "SSZ field offsets are not monotonically increasing")
-        elif endOffset > inputLen:
-          raise newException(MalformedSszError, "SSZ field offset points past the end of the input")
-        elif startOffset < minimallyExpectedSize:
-          raise newException(MalformedSszError, "SSZ field offset points outside bounding offsets")
+          if startOffset > endOffset:
+            raise newException(MalformedSszError, "SSZ field offsets are not monotonically increasing")
+          elif endOffset > inputLen:
+            raise newException(MalformedSszError, "SSZ field offset points past the end of the input")
+          elif startOffset < minimallyExpectedSize:
+            raise newException(MalformedSszError, "SSZ field offset points outside bounding offsets")
 
-      # TODO The extra type escaping here is a work-around for a Nim issue:
-      when type(field) is type(SszType):
-        readSszValue(
-          input.toOpenArray(int(startOffset), int(endOffset - 1)),
-          field)
-      else:
-        field = fromSszBytes(
-          type(field),
-          input.toOpenArray(int(startOffset), int(endOffset - 1)))
+        # TODO The extra type escaping here is a work-around for a Nim issue:
+        when type(field) is type(SszType):
+          readSszValue(
+            input.toOpenArray(int(startOffset), int(endOffset - 1)),
+            field)
+        else:
+          field = fromSszBytes(
+            type(field),
+            input.toOpenArray(int(startOffset), int(endOffset - 1)))
 
   else:
     unsupported T

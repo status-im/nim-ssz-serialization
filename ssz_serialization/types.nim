@@ -425,10 +425,13 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
   elif T is array|HashArray:
     return isFixedSize(ElemType(T))
   elif T is object|tuple:
-    enumAllSerializedFields(T):
-      when not isFixedSize(FieldType):
-        return false
-    return true
+    when T.isCaseObject():
+      return false
+    else:
+      enumAllSerializedFields(T):
+        when not isFixedSize(FieldType):
+          return false
+      return true
 
 func fixedPortionSize*(T0: type): int {.compileTime.} =
   mixin enumAllSerializedFields, toSszType
