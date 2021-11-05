@@ -163,12 +163,16 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError]
     writeSeq(w, bytes value)
   elif value is object|tuple|array:
     when isCaseObject(type(value)):
+      # TODO: Add an compile time `isUnion` call that checks if the case object
+      # has as first field the discriminator, and that all case branches only
+      # have 1 field, and that no additional fields exist outside of the case
+      # branches. Also following rules should apply:
+      # - enum size range < 127 (or perhaps just max sizeof 1 byte).
+      # - Must have at least 1 type option.
+      # - Must have at least 2 type options if the first is None.
+      # - Empty case branch (No fields) only for first discriminator value (0).
+
       trs "WRITING SSZ Union"
-      # TODO:
-      # - Check for enum size range (< 127 or at least max 1 byte sizeof)
-      # - SSZ Union: "Must have at least 1 type option."
-      # - SSZ Union: "Must have at least 2 type options if the first is None"
-      # - SSZ Union: Empty case (No fields) only as first (0) discriminator
 
       # toSszType for enum is kept local here as we don't want enums to
       # serialize in general, only for object variants.
@@ -179,6 +183,8 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError]
       template toSszType[E: enum](x: E): uint8 =
         uint8(x)
 
+      # TODO: At this point, the assumption is a correct `isUnion` as described
+      # above.
       enumerateSubFields(value, field):
         type T = type toSszType(field)
 

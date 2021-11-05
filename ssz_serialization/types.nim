@@ -425,7 +425,7 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
   elif T is array|HashArray:
     return isFixedSize(ElemType(T))
   elif T is object|tuple:
-    when T.isCaseObject():
+    when isCaseObject(T):
       return false
     else:
       enumAllSerializedFields(T):

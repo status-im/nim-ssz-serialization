@@ -112,9 +112,6 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
 
           caseObj
 
-      # TODO: Add additional checking if it is a case object with only 1 field
-      # for each case and not fields outside of the case.
-      # and static assert in case no object variant / case object.
       break
 
   res
@@ -232,7 +229,9 @@ proc readSszValue*[T](input: openArray[byte],
     copyMem(addr val.bytes[0], unsafeAddr input[0], input.len)
 
   elif val is object|tuple:
-    when type(val).isCaseObject():
+    when isCaseObject(T):
+      # TODO: Same compile time checks on the case object (isUnion) as mentioned
+      # in `writeVarSizeType()` TODO item should be applied here.
       val = initSszUnion(type(val), input)
     else:
       let inputLen = uint32 input.len
