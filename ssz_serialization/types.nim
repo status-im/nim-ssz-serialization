@@ -191,6 +191,7 @@ template `[]`*(x: BitList, idx: auto): auto = BitSeq(x)[idx]
 template `[]=`*(x: var BitList, idx: auto, val: bool) = BitSeq(x)[idx] = val
 template `==`*(a, b: BitList): bool = BitSeq(a) == BitSeq(b)
 template setBit*(x: var BitList, idx: Natural) = setBit(BitSeq(x), idx)
+template getBit*(x: var BitList, idx: Natural): bool = getBit(BitSeq(x), idx)
 template clearBit*(x: var BitList, idx: Natural) = clearBit(BitSeq(x), idx)
 template overlaps*(a, b: BitList): bool = overlaps(BitSeq(a), BitSeq(b))
 template incl*(a: var BitList, b: BitList) = incl(BitSeq(a), BitSeq(b))
