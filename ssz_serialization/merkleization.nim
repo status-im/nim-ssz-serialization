@@ -68,12 +68,13 @@ when USE_BLST_SHA256:
   export blscurve.update
   type DigestCtx* = BLST_SHA256_CTX
 else:
+  export sha2.update
   type DigestCtx* = sha2.sha256
 
 template computeDigest*(body: untyped): Digest =
   ## This little helper will init the hash function and return the sliced
   ## hash:
-  ## let hashOfData = withHash: h.update(data)
+  ## let hashOfData = computeDigest: h.update(data)
   when nimvm:
     # In SSZ, computeZeroHashes require compile-time SHA256
     block:
@@ -391,9 +392,11 @@ template createMerkleizer*(totalElements: static Limit): SszMerkleizerImpl =
   const treeHeight = binaryTreeHeight totalElements
   var combinedChunks {.noInit.}: array[treeHeight, Digest]
 
+  let topIndex = treeHeight - 1
+
   SszMerkleizerImpl(
     combinedChunks: cast[ptr UncheckedArray[Digest]](addr combinedChunks),
-    topIndex: treeHeight - 1,
+    topIndex: if (topIndex < 0): 0 else: topIndex,
     totalChunks: 0)
 
 func getFinalHash*(merkleizer: SszMerkleizerImpl): Digest =
