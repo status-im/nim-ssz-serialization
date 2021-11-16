@@ -464,7 +464,9 @@ template writeBytesLE(chunk: var array[bytesPerChunk, byte], atParam: int,
   chunk[at ..< at + sizeof(val)] = toBytesLE(val)
 
 func chunkedHashTreeRoot[T](
-    merkleizer: var SszMerkleizerImpl, arr: openArray[T]): Digest =
+    totalChunks: static Limit, arr: openArray[T]): Digest =
+  var merkleizer = createMerkleizer(totalChunks)
+
   if arr.len == 0:
     return getFinalHash(merkleizer)
 
@@ -510,10 +512,11 @@ func chunkedHashTreeRoot[T](
 
   getFinalHash(merkleizer)
 
-func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
+func bitListHashTreeRoot(totalChunks: static Limit, x: BitSeq): Digest =
   # TODO: Switch to a simpler BitList representation and
   #       replace this with `chunkedHashTreeRoot`
   var
+    merkleizer = createMerkleizer(totalChunks)
     totalBytes = bytes(x).len
     lastCorrectedByte = bytes(x)[^1]
 
@@ -585,8 +588,8 @@ func hashTreeRootAux[T](x: T): Digest =
           pos += sizeof(E)
     else:
       trs "FIXED TYPE; USE CHUNK STREAM"
-      var merkleizer = createMerkleizer(maxChunksCount(T, Limit x.len))
-      chunkedHashTreeRoot(merkleizer, x)
+      const totalChunks = maxChunksCount(T, x.len)
+      chunkedHashTreeRoot(totalChunks, x)
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
@@ -604,16 +607,13 @@ func hashTreeRootAux[T](x: T): Digest =
     unsupported T
 
 func hashTreeRootList(x: List|BitList): Digest =
-  const maxLen = static(x.maxLen)
-  type T = type(x)
-  const limit = maxChunksCount(T, maxLen)
-  var merkleizer = createMerkleizer(limit)
-
   when x is BitList:
-    let contentsHash = bitListHashTreeRoot(merkleizer, BitSeq x)
+    const totalChunks = maxChunksCount(typeof(x), x.maxLen)
+    let contentsHash = bitListHashTreeRoot(totalChunks, BitSeq x)
     mixInLength(contentsHash, x.len)
   else:
-    let contentsHash = chunkedHashTreeRoot(merkleizer, asSeq x)
+    const totalChunks = maxChunksCount(typeof(x), x.maxLen)
+    let contentsHash = chunkedHashTreeRoot(totalChunks, asSeq x)
     mixInLength(contentsHash, x.len)
 
 func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest =
