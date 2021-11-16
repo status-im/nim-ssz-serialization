@@ -571,6 +571,8 @@ func hashTreeRootAux[T](x: T): Digest =
       result.data[0..<sizeof(x)] = toBytesLE(x)
     else:
       copyMem(addr result.data[0], unsafeAddr x, sizeof x)
+  elif T is BitArray:
+    hashTreeRootAux(x.bytes)
   elif T is array:
     type E = ElemType(T)
     when E is BasicType and sizeof(T) <= sizeof(result.data):
@@ -585,8 +587,6 @@ func hashTreeRootAux[T](x: T): Digest =
       trs "FIXED TYPE; USE CHUNK STREAM"
       var merkleizer = createMerkleizer(maxChunksCount(T, Limit x.len))
       chunkedHashTreeRoot(merkleizer, x)
-  elif T is BitArray:
-    hashTreeRootAux(x.bytes)
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
