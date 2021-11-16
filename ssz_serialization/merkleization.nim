@@ -726,6 +726,6 @@ func hash_tree_root*(x: auto): Digest =
     elif x is List|BitList:
       hashTreeRootList(x)
     else:
-      hashTreeRootAux toSszType(x)
+      hashTreeRootAux(toSszType(x))
 
   trs "HASH TREE ROOT FOR ", name(typeof(x)), " = ", "0x", $result
