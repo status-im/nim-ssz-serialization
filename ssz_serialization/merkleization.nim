@@ -578,8 +578,8 @@ func hashTreeRootAux[T](x: T): Digest =
     hashTreeRootAux(x.bytes)
   elif T is BitList:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    let contentsHash = bitListHashTreeRoot(totalChunks, BitSeq x)
-    mixInLength(contentsHash, x.len)
+    bitListHashTreeRoot(totalChunks, BitSeq x)
+      .mixInLength(x.len)
   elif T is array:
     type E = ElemType(T)
     when E is BasicType and sizeof(T) <= sizeof(result.data):
@@ -596,8 +596,8 @@ func hashTreeRootAux[T](x: T): Digest =
       chunkedHashTreeRoot(totalChunks, x)
   elif T is List:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    let contentsHash = chunkedHashTreeRoot(totalChunks, asSeq x)
-    mixInLength(contentsHash, x.len)
+    chunkedHashTreeRoot(totalChunks, asSeq x)
+      .mixInLength(x.len)
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
@@ -710,7 +710,8 @@ func hashTreeRootCached*(x: HashList): Digest =
     if not isCached(x.hashes[0]):
       # TODO oops. so much for maintaining non-mutability.
       let px = unsafeAddr x
-      px[].hashes[0] = mixInLength(hashTreeRootCached(x, 1), x.data.len)
+      px[].hashes[0] = hashTreeRootCached(x, 1)
+        .mixInLength(x.data.len)
 
     x.hashes[0]
 
