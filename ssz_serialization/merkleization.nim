@@ -520,8 +520,7 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
   if lastCorrectedByte == byte(1):
     if totalBytes == 1:
       # This is an empty bit list.
-      # It should be hashed as a tree containing all zeros:
-      return zeroHashes[merkleizer.topIndex]
+      return getFinalHash(merkleizer)
 
     totalBytes -= 1
     lastCorrectedByte = bytes(x)[^2]
