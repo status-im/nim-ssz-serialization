@@ -445,8 +445,8 @@ func mixInLength*(root: Digest, length: int): Digest =
 
 func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [Defect].}
 
-template merkleizeFields(totalElements: static Limit, body: untyped): Digest =
-  var merkleizer {.inject.} = createMerkleizer(totalElements)
+template merkleizeFields(totalChunks: static Limit, body: untyped): Digest =
+  var merkleizer {.inject.} = createMerkleizer(totalChunks)
 
   template addField(field) =
     let hash = hash_tree_root(field)
@@ -596,9 +596,9 @@ func hashTreeRootAux[T](x: T): Digest =
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
     trs "MERKLEIZING FIELDS"
-    const totalFields = when T is array: len(x)
+    const totalChunks = when T is array: len(x)
                         else: totalSerializedFields(T)
-    merkleizeFields(Limit totalFields):
+    merkleizeFields(Limit totalChunks):
       x.enumerateSubFields(f):
         addField f
   else:
