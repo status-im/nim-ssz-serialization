@@ -622,7 +622,7 @@ func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest =
 
   when x.T is BasicType:
     when cpuEndian == bigEndian:
-      unsupported type x # No bigendian support here!
+      unsupported typeof(x) # No bigendian support here!
 
     let
       bytes = cast[ptr UncheckedArray[byte]](unsafeAddr x.data[0])
@@ -717,7 +717,7 @@ func hashTreeRootCached*(x: HashList): Digest =
     x.hashes[0]
 
 func hash_tree_root*(x: auto): Digest =
-  trs "STARTING HASH TREE ROOT FOR TYPE ", name(type(x))
+  trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x))
   mixin toSszType
 
   result =
@@ -728,4 +728,4 @@ func hash_tree_root*(x: auto): Digest =
     else:
       hashTreeRootAux toSszType(x)
 
-  trs "HASH TREE ROOT FOR ", name(type x), " = ", "0x", $result
+  trs "HASH TREE ROOT FOR ", name(typeof(x)), " = ", "0x", $result
