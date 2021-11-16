@@ -576,6 +576,10 @@ func hashTreeRootAux[T](x: T): Digest =
       copyMem(addr result.data[0], unsafeAddr x, sizeof x)
   elif T is BitArray:
     hashTreeRootAux(x.bytes)
+  elif T is BitList:
+    const totalChunks = maxChunksCount(T, x.maxLen)
+    let contentsHash = bitListHashTreeRoot(totalChunks, BitSeq x)
+    mixInLength(contentsHash, x.len)
   elif T is array:
     type E = ElemType(T)
     when E is BasicType and sizeof(T) <= sizeof(result.data):
@@ -590,6 +594,10 @@ func hashTreeRootAux[T](x: T): Digest =
       trs "FIXED TYPE; USE CHUNK STREAM"
       const totalChunks = maxChunksCount(T, x.len)
       chunkedHashTreeRoot(totalChunks, x)
+  elif T is List:
+    const totalChunks = maxChunksCount(T, x.maxLen)
+    let contentsHash = chunkedHashTreeRoot(totalChunks, asSeq x)
+    mixInLength(contentsHash, x.len)
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
@@ -605,16 +613,6 @@ func hashTreeRootAux[T](x: T): Digest =
         addField f
   else:
     unsupported T
-
-func hashTreeRootList(x: List|BitList): Digest =
-  when x is BitList:
-    const totalChunks = maxChunksCount(typeof(x), x.maxLen)
-    let contentsHash = bitListHashTreeRoot(totalChunks, BitSeq x)
-    mixInLength(contentsHash, x.len)
-  else:
-    const totalChunks = maxChunksCount(typeof(x), x.maxLen)
-    let contentsHash = chunkedHashTreeRoot(totalChunks, asSeq x)
-    mixInLength(contentsHash, x.len)
 
 func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
@@ -723,8 +721,6 @@ func hash_tree_root*(x: auto): Digest =
   result =
     when x is HashArray|HashList:
       hashTreeRootCached(x)
-    elif x is List|BitList:
-      hashTreeRootList(x)
     else:
       hashTreeRootAux(toSszType(x))
 
