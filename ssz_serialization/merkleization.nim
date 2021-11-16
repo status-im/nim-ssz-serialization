@@ -473,8 +473,7 @@ func chunkedHashTreeRoot[T](
 
     when sizeof(T) == 1 or cpuEndian == littleEndian:
       var
-        remainingBytes = when sizeof(T) == 1: arr.len
-                                        else: arr.len * sizeof(T)
+        remainingBytes = arr.len * sizeof(T)
         pos = cast[ptr byte](unsafeAddr arr[0])
 
       while remainingBytes >= bytesPerChunk:
