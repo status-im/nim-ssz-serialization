@@ -556,7 +556,7 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
   getFinalHash(merkleizer)
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
-  when T is BitList|BitArray:
+  when T is BitArray|BitList:
     (maxLen + bitsPerChunk - 1) div bitsPerChunk
   elif T is array|List:
     maxChunkIdx(ElemType(T), maxLen)
@@ -616,7 +616,7 @@ func hashTreeRootList(x: List|BitList): Digest =
     let contentsHash = chunkedHashTreeRoot(merkleizer, asSeq x)
     mixInLength(contentsHash, x.len)
 
-func mergedDataHash(x: HashList|HashArray, chunkIdx: int64): Digest =
+func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
   trs "DATA HASH ", chunkIdx, " ", x.data.len
 
@@ -651,7 +651,7 @@ func mergedDataHash(x: HashList|HashArray, chunkIdx: int64): Digest =
         hash_tree_root(x.data[chunkIdx]),
         hash_tree_root(x.data[chunkIdx + 1]))
 
-template mergedHash(x: HashList|HashArray, vIdxParam: int64): Digest =
+template mergedHash(x: HashArray|HashList, vIdxParam: int64): Digest =
   # The merged hash of the data at `vIdx` and `vIdx + 1`
   let vIdx = vIdxParam
   if vIdx >= x.maxChunks:
