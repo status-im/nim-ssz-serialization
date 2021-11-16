@@ -662,6 +662,17 @@ template mergedHash(x: HashArray|HashList, vIdxParam: int64): Digest =
       hashTreeRootCached(x, vIdx),
       hashTreeRootCached(x, vIdx + 1))
 
+func hashTreeRootCached*(x: HashArray, vIdx: int64): Digest =
+  doAssert vIdx >= 1, "Only valid for flat merkle tree indices"
+
+  if not isCached(x.hashes[vIdx]):
+    # TODO oops. so much for maintaining non-mutability.
+    let px = unsafeAddr x
+
+    px[].hashes[vIdx] = mergedHash(x, vIdx * 2)
+
+  return x.hashes[vIdx]
+
 func hashTreeRootCached*(x: HashList, vIdx: int64): Digest =
   doAssert vIdx >= 1, "Only valid for flat merkle tree indices"
 
@@ -688,17 +699,6 @@ func hashTreeRootCached*(x: HashList, vIdx: int64): Digest =
       trs "CACHED ", layerIdx
 
     x.hashes[layerIdx]
-
-func hashTreeRootCached*(x: HashArray, vIdx: int64): Digest =
-  doAssert vIdx >= 1, "Only valid for flat merkle tree indices"
-
-  if not isCached(x.hashes[vIdx]):
-    # TODO oops. so much for maintaining non-mutability.
-    let px = unsafeAddr x
-
-    px[].hashes[vIdx] = mergedHash(x, vIdx * 2)
-
-  return x.hashes[vIdx]
 
 func hashTreeRootCached*(x: HashArray): Digest =
   hashTreeRootCached(x, 1) # Array does not use idx 0
