@@ -716,7 +716,7 @@ func hashTreeRootCached*(x: HashList): Digest =
     x.hashes[0]
 
 func hash_tree_root*(x: auto): Digest =
-  trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x))
+  trs "STARTING HASH TREE ROOT FOR TYPE ", typeof(x).name
   mixin toSszType
 
   result =
@@ -725,4 +725,4 @@ func hash_tree_root*(x: auto): Digest =
     else:
       hashTreeRootAux(toSszType(x))
 
-  trs "HASH TREE ROOT FOR ", name(typeof(x)), " = ", "0x", $result
+  trs "HASH TREE ROOT FOR ", typeof(x).name, " = ", "0x", $result
