@@ -463,47 +463,51 @@ template writeBytesLE(chunk: var array[bytesPerChunk, byte], atParam: int,
   let at = atParam
   chunk[at ..< at + sizeof(val)] = toBytesLE(val)
 
-func chunkedHashTreeRootForBasicTypes[T](merkleizer: var SszMerkleizerImpl,
-                                         arr: openArray[T]): Digest =
-  static:
-    doAssert T is BasicType
-    doAssert bytesPerChunk mod sizeof(T) == 0
-
+func chunkedHashTreeRoot[T](
+    merkleizer: var SszMerkleizerImpl, arr: openArray[T]): Digest =
   if arr.len == 0:
     return getFinalHash(merkleizer)
 
-  when sizeof(T) == 1 or cpuEndian == littleEndian:
-    var
-      remainingBytes = when sizeof(T) == 1: arr.len
-                                      else: arr.len * sizeof(T)
-      pos = cast[ptr byte](unsafeAddr arr[0])
+  when T is BasicType:
+    static: doAssert bytesPerChunk mod sizeof(T) == 0
 
-    while remainingBytes >= bytesPerChunk:
-      addChunk(merkleizer, makeOpenArray(pos, bytesPerChunk))
-      pos = offset(pos, bytesPerChunk)
-      remainingBytes -= bytesPerChunk
+    when sizeof(T) == 1 or cpuEndian == littleEndian:
+      var
+        remainingBytes = when sizeof(T) == 1: arr.len
+                                        else: arr.len * sizeof(T)
+        pos = cast[ptr byte](unsafeAddr arr[0])
 
-    if remainingBytes > 0:
-      addChunk(merkleizer, makeOpenArray(pos, remainingBytes))
+      while remainingBytes >= bytesPerChunk:
+        addChunk(merkleizer, makeOpenArray(pos, bytesPerChunk))
+        pos = offset(pos, bytesPerChunk)
+        remainingBytes -= bytesPerChunk
+
+      if remainingBytes > 0:
+        addChunk(merkleizer, makeOpenArray(pos, remainingBytes))
+
+    else:
+      const valuesPerChunk = bytesPerChunk div sizeof(T)
+
+      var writtenValues = 0
+
+      var chunk: array[bytesPerChunk, byte]
+      while writtenValues < arr.len - valuesPerChunk:
+        for i in 0 ..< valuesPerChunk:
+          chunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
+        addChunk(merkleizer, chunk)
+        inc writtenValues, valuesPerChunk
+
+      let remainingValues = arr.len - writtenValues
+      if remainingValues > 0:
+        var lastChunk: array[bytesPerChunk, byte]
+        for i in 0 ..< remainingValues:
+          lastChunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
+        addChunk(merkleizer, lastChunk)
 
   else:
-    const valuesPerChunk = bytesPerChunk div sizeof(T)
-
-    var writtenValues = 0
-
-    var chunk: array[bytesPerChunk, byte]
-    while writtenValues < arr.len - valuesPerChunk:
-      for i in 0 ..< valuesPerChunk:
-        chunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
-      addChunk(merkleizer, chunk)
-      inc writtenValues, valuesPerChunk
-
-    let remainingValues = arr.len - writtenValues
-    if remainingValues > 0:
-      var lastChunk: array[bytesPerChunk, byte]
-      for i in 0 ..< remainingValues:
-        lastChunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
-      addChunk(merkleizer, lastChunk)
+    for elem in arr:
+      let elemHash = hash_tree_root(elem)
+      addChunk(merkleizer, elemHash.data)
 
   getFinalHash(merkleizer)
 
@@ -569,10 +573,10 @@ func hashTreeRootAux[T](x: T): Digest =
       result.data[0..<sizeof(x)] = toBytesLE(x)
     else:
       copyMem(addr result.data[0], unsafeAddr x, sizeof x)
-  elif (when T is array: ElemType(T) is BasicType else: false):
+  elif T is array:
     type E = ElemType(T)
-    when sizeof(T) <= sizeof(result.data):
-      when E is byte|bool or cpuEndian == littleEndian:
+    when E is BasicType and sizeof(T) <= sizeof(result.data):
+      when sizeof(E) == 1 or cpuEndian == littleEndian:
         copyMem(addr result.data[0], unsafeAddr x, sizeof x)
       else:
         var pos = 0
@@ -582,20 +586,19 @@ func hashTreeRootAux[T](x: T): Digest =
     else:
       trs "FIXED TYPE; USE CHUNK STREAM"
       var merkleizer = createMerkleizer(maxChunksCount(T, Limit x.len))
-      chunkedHashTreeRootForBasicTypes(merkleizer, x)
+      chunkedHashTreeRoot(merkleizer, x)
   elif T is BitArray:
     hashTreeRootAux(x.bytes)
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
       addField hashTreeRoot(toSszType(x.value))
-  elif T is array|object|tuple:
+  elif T is object|tuple:
     # when T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
     trs "MERKLEIZING FIELDS"
-    const totalChunks = when T is array: len(x)
-                        else: totalSerializedFields(T)
+    const totalChunks = totalSerializedFields(T)
     merkleizeFields(Limit totalChunks):
       x.enumerateSubFields(f):
         addField f
@@ -612,14 +615,7 @@ func hashTreeRootList(x: List|BitList): Digest =
     let contentsHash = bitListHashTreeRoot(merkleizer, BitSeq x)
     mixInLength(contentsHash, x.len)
   else:
-    type E = ElemType(T)
-    let contentsHash = when E is BasicType:
-      chunkedHashTreeRootForBasicTypes(merkleizer, asSeq x)
-    else:
-      for elem in x:
-        let elemHash = hash_tree_root(elem)
-        addChunk(merkleizer, elemHash.data)
-      getFinalHash(merkleizer)
+    let contentsHash = chunkedHashTreeRoot(merkleizer, asSeq x)
     mixInLength(contentsHash, x.len)
 
 func mergedDataHash(x: HashList|HashArray, chunkIdx: int64): Digest =
