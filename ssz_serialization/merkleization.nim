@@ -518,8 +518,7 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
     if totalBytes == 1:
       # This is an empty bit list.
       # It should be hashed as a tree containing all zeros:
-      return mergeBranches(zeroHashes[merkleizer.topIndex],
-                           zeroHashes[0]) # this is the mixed length
+      return zeroHashes[merkleizer.topIndex]
 
     totalBytes -= 1
     lastCorrectedByte = bytes(x)[^2]
@@ -552,8 +551,7 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
   lastChunk[bytesInLastChunk - 1] = lastCorrectedByte
 
   addChunk(merkleizer, lastChunk.toOpenArray(0, bytesInLastChunk - 1))
-  let contentsHash = getFinalHash(merkleizer)
-  mixInLength contentsHash, x.len
+  getFinalHash(merkleizer)
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
   when T is BitList|BitArray:
@@ -611,7 +609,8 @@ func hashTreeRootList(x: List|BitList): Digest =
   var merkleizer = createMerkleizer(limit)
 
   when x is BitList:
-    bitListHashTreeRoot(merkleizer, BitSeq x)
+    let contentsHash = bitListHashTreeRoot(merkleizer, BitSeq x)
+    mixInLength(contentsHash, x.len)
   else:
     type E = ElemType(T)
     let contentsHash = when E is BasicType:
