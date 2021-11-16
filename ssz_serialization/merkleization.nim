@@ -479,12 +479,12 @@ func chunkedHashTreeRootForBasicTypes[T](merkleizer: var SszMerkleizerImpl,
       pos = cast[ptr byte](unsafeAddr arr[0])
 
     while remainingBytes >= bytesPerChunk:
-      merkleizer.addChunk(makeOpenArray(pos, bytesPerChunk))
+      addChunk(merkleizer, makeOpenArray(pos, bytesPerChunk))
       pos = offset(pos, bytesPerChunk)
       remainingBytes -= bytesPerChunk
 
     if remainingBytes > 0:
-      merkleizer.addChunk(makeOpenArray(pos, remainingBytes))
+      addChunk(merkleizer, makeOpenArray(pos, remainingBytes))
 
   else:
     const valuesPerChunk = bytesPerChunk div sizeof(T)
@@ -495,7 +495,7 @@ func chunkedHashTreeRootForBasicTypes[T](merkleizer: var SszMerkleizerImpl,
     while writtenValues < arr.len - valuesPerChunk:
       for i in 0 ..< valuesPerChunk:
         chunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
-      merkleizer.addChunk chunk
+      addChunk(merkleizer, chunk)
       inc writtenValues, valuesPerChunk
 
     let remainingValues = arr.len - writtenValues
@@ -503,7 +503,7 @@ func chunkedHashTreeRootForBasicTypes[T](merkleizer: var SszMerkleizerImpl,
       var lastChunk: array[bytesPerChunk, byte]
       for i in 0 ..< remainingValues:
         lastChunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
-      merkleizer.addChunk lastChunk
+      addChunk(merkleizer, lastChunk)
 
   getFinalHash(merkleizer)
 
@@ -540,7 +540,7 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
       chunkStartPos = i * bytesPerChunk
       chunkEndPos = chunkStartPos + bytesPerChunk - 1
 
-    merkleizer.addChunk bytes(x).toOpenArray(chunkStartPos, chunkEndPos)
+    addChunk(merkleizer, bytes(x).toOpenArray(chunkStartPos, chunkEndPos))
 
   var
     lastChunk: array[bytesPerChunk, byte]
@@ -551,8 +551,8 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
 
   lastChunk[bytesInLastChunk - 1] = lastCorrectedByte
 
-  merkleizer.addChunk lastChunk.toOpenArray(0, bytesInLastChunk - 1)
-  let contentsHash = merkleizer.getFinalHash
+  addChunk(merkleizer, lastChunk.toOpenArray(0, bytesInLastChunk - 1))
+  let contentsHash = getFinalHash(merkleizer)
   mixInLength contentsHash, x.len
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
@@ -611,7 +611,7 @@ func hashTreeRootList(x: List|BitList): Digest =
   var merkleizer = createMerkleizer(limit)
 
   when x is BitList:
-    merkleizer.bitListHashTreeRoot(BitSeq x)
+    bitListHashTreeRoot(merkleizer, BitSeq x)
   else:
     type E = ElemType(T)
     let contentsHash = when E is BasicType:
@@ -619,8 +619,8 @@ func hashTreeRootList(x: List|BitList): Digest =
     else:
       for elem in x:
         let elemHash = hash_tree_root(elem)
-        merkleizer.addChunk(elemHash.data)
-      merkleizer.getFinalHash()
+        addChunk(merkleizer, elemHash.data)
+      getFinalHash(merkleizer)
     mixInLength(contentsHash, x.len)
 
 func mergedDataHash(x: HashList|HashArray, chunkIdx: int64): Digest =
