@@ -696,7 +696,7 @@ func hashTreeRootCached*(x: HashList, vIdx: int64): Digest =
 
     x.hashes[layerIdx]
 
-func hashTreeRootCached*(x: HashArray, vIdx: int): Digest =
+func hashTreeRootCached*(x: HashArray, vIdx: int64): Digest =
   doAssert vIdx >= 1, "Only valid for flat merkle tree indices"
 
   if not isCached(x.hashes[vIdx]):
