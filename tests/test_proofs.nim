@@ -52,9 +52,13 @@ suite "Merkle proofs":
         ]
 
   test "verify_merkle_multiproof":
+    var allLeaves: array[8, Digest]
+    for i in 0 ..< allLeaves.len:
+      allLeaves[i] = digest([i.byte])
+
     var nodes: array[16, Digest]
-    for i in countdown(15, 8):
-      nodes[i] = digest([i.byte])
+    for i in 0 ..< allLeaves.len:
+      nodes[i + 8] = allLeaves[i]
     for i in countdown(7, 1):
       nodes[i] = computeDigest:
         h.update nodes[2 * i + 0].data
@@ -69,6 +73,7 @@ suite "Merkle proofs":
         root = nodes[1]
       checkpoint "Verifying " & $indices & "---" & $helper_indices
       check:
+        proof == build_proof(allLeaves, indices).get
         verify_merkle_multiproof(leaves, proof, indices, root)
 
     verify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])

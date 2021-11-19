@@ -11,4 +11,5 @@ import
   ./test_ssz_roundtrip,
   ./test_ssz_serialization,
   ./test_ssz_union,
-  ./test_merkleization
+  ./test_merkleization,
+  ./test_merkleization_types
