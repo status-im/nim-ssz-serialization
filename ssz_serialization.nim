@@ -70,7 +70,7 @@ proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [Defe
         trs "WRITING FIXED SIZE ARRAY ELEMENT"
         s.writeFixedSized toSszType(elem)
   elif x is tuple|object:
-    enumInstanceSerializedFields(x, fieldName, field):
+    enumInstanceSerializedFields(x, fieldName {.used.}, field):
       trs "WRITING FIXED SIZE FIELD: ", fieldName
       s.writeFixedSized toSszType(field)
   else:
