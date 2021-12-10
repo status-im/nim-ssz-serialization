@@ -85,6 +85,7 @@ template loopOverWords(lhs, rhs: BitSeq,
   const hasRhs = astToStr(lhs) != astToStr(rhs)
 
   let bytesCount = len Bytes(lhs)
+  doAssert bytesCount > 0, "Ensure that `init` was called on the `BitSeq`"
   when hasRhs: doAssert len(Bytes(rhs)) == bytesCount
 
   var fullWordsCount = bytesCount div sizeof(WordType)
