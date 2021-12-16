@@ -29,6 +29,7 @@ else:
   const USE_BLST_SHA256 = false
 
 export
+  sha2.update, hash.fromHex,
   codec, bitseqs, types
 
 when hasSerializationTracing:
@@ -42,10 +43,6 @@ func binaryTreeHeight*(totalElements: Limit): int =
   bitWidth nextPow2(uint64 totalElements)
 
 type
-  # TODO Figure out what would be the right type for this.
-  #      It probably fits in uint16 for all practical purposes.
-  GeneralizedIndex* = uint32
-
   SszMerkleizerImpl = object
     combinedChunks: ptr UncheckedArray[Digest]
     totalChunks: uint64
@@ -96,6 +93,26 @@ template computeDigest*(body: untyped): Digest =
         init(h)
         body
         finish(h)
+
+func digest*(a: openArray[byte]): Digest {.noInit.} =
+  when nimvm:
+    block:
+      var h: sha256
+      h.init()
+      h.update(a)
+      h.finish()
+  else:
+    when USE_BLST_SHA256:
+      # BLST has a fast assembly optimized SHA256
+      result.data.bls_sha256_digest(a)
+    else:
+      block:
+        # We use the init-update-finish interface to avoid
+        # the expensive burning/clearing memory (20~30% perf)
+        var h {.noInit.}: DigestCtx
+        h.init()
+        h.update(a)
+        h.finish()
 
 func digest(a, b: openArray[byte]): Digest =
   result = computeDigest:
