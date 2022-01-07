@@ -206,6 +206,10 @@ iterator items*(x: BitList): bool =
   for i in 0 ..< x.len:
     yield x[i]
 
+iterator pairs*(x: BitList): (int, bool) =
+  for i in 0 ..< x.len:
+    yield (i, x[i])
+
 template isCached*(v: Digest): bool =
   ## An entry is "in the cache" if the first 8 bytes are zero - conveniently,
   ## Nim initializes values this way, and while there may be false positives,
