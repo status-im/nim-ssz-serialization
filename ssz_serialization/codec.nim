@@ -19,9 +19,15 @@ import
 export
   types
 
-func raiseMalformedSszError*(T: type, msg: string) {.raisesssz, noinline, noreturn.} =
-  const typeName = name(T)
+func reallyRaiseMalformedSszError(typeName, msg: string) {.
+    raisesssz, noinline, noreturn.} =
+  # `noinline` helps keep the C code tight on the happy path
+  # passing `typeName` in avoids generating generic copies of this function
   raise (ref MalformedSszError)(msg: "SSZ " & typeName & ": " & msg)
+
+template raiseMalformedSszError*(T: type, msg: string) =
+  const typeName = name(T)
+  reallyRaiseMalformedSszError(typeName, msg)
 
 template raiseIncorrectSize*(T: type) =
   raiseMalformedSszError(T, "incorrect size")
