@@ -19,10 +19,18 @@ import
 export
   types
 
-template raiseIncorrectSize*(T: type) =
+func reallyRaiseMalformedSszError(typeName, msg: string) {.
+    raisesssz, noinline, noreturn.} =
+  # `noinline` helps keep the C code tight on the happy path
+  # passing `typeName` in avoids generating generic copies of this function
+  raise (ref MalformedSszError)(msg: "SSZ " & typeName & ": " & msg)
+
+template raiseMalformedSszError*(T: type, msg: string) =
   const typeName = name(T)
-  raise newException(MalformedSszError,
-                     "SSZ " & typeName & " input of incorrect size")
+  reallyRaiseMalformedSszError(typeName, msg)
+
+template raiseIncorrectSize*(T: type) =
+  raiseMalformedSszError(T, "incorrect size")
 
 template setOutputSize[R, T](a: var array[R, T], length: int) =
   if length != a.len:
@@ -30,7 +38,7 @@ template setOutputSize[R, T](a: var array[R, T], length: int) =
 
 proc setOutputSize(list: var List, length: int) {.raisesssz.} =
   if not list.setLen length:
-    raise newException(MalformedSszError, "SSZ list maximum size exceeded")
+    raiseMalformedSszError(typeof(list), "length exceeds list limit")
 
 # fromSszBytes copies the wire representation to a Nim variable,
 # assuming there's enough data in the buffer
@@ -45,7 +53,7 @@ func fromSszBytes*(T: type UintN, data: openArray[byte]): T {.raisesssz.} =
 func fromSszBytes*(T: type bool, data: openArray[byte]): T {.raisesssz.} =
   # Strict: only allow 0 or 1
   if data.len != 1 or byte(data[0]) > byte(1):
-    raise newException(MalformedSszError, "invalid boolean value")
+    raiseMalformedSszError(bool, "invalid boolean value")
   data[0] == 1
 
 func fromSszBytes*(T: type Digest, data: openArray[byte]): T {.raisesssz.} =
@@ -90,7 +98,7 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
       res.add quote do:
         block:
           if `input`.len == 0:
-            raise newException(MalformedSszError, "Invalid empty SSZ Union")
+            raiseMalformedSszError(`type recordDef`, "empty union not allowed")
 
           var selector: `selectorFieldType`
           # TODO: `checkedEnumAssign` does not check for holes in an enum.
@@ -99,14 +107,14 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
           # will also be parsed and result in an object like:
           # `(selector: 2 (invalid data!))`
           if not checkedEnumAssign(selector, `input`[0]):
-            raise newException(MalformedSszError, "SSZ Union selector is out of bounds")
+            raiseMalformedSszError(`type recordDef`, "union selector is out of bounds")
 
           var caseObj = `T`(`selectorFieldName`: selector)
 
           enumInstanceSerializedFields(caseObj, fieldName, field):
             when fieldName != `SelectorFieldNameLit`:
               if `input`.len <= 1:
-                raise newException(MalformedSszError, "Invalid empty SSZ Union value for this selector")
+                raiseMalformedSszError(`type recordDef`, "invalid empty for selector")
 
               readSszValue(`input`.toOpenArray(1, `input`.len - 1), field)
 
@@ -129,12 +137,13 @@ proc readSszValue*[T](input: openArray[byte],
   template readOffset(n: int): int {.used.} =
     let offset = readOffsetUnchecked(n)
     if offset > input.len.uint32:
-      raise newException(MalformedSszError, "SSZ list element offset points past the end of the input")
+      raiseMalformedSszError(
+        T, "list element offset points past the end of the input")
     int(offset)
 
   when val is BitList:
     if input.len == 0:
-      raise newException(MalformedSszError, "Invalid empty SSZ BitList value")
+      raiseMalformedSszError(T, "invalid empty value")
 
     # Since our BitLists have an in-memory representation that precisely
     # matches their SSZ encoding, we can deserialize them as regular Lists:
@@ -154,7 +163,7 @@ proc readSszValue*[T](input: openArray[byte],
     let resultBytesCount = len bytes(val)
 
     if bytes(val)[resultBytesCount - 1] == 0:
-      raise newException(MalformedSszError, "SSZ BitList is not properly terminated")
+      raiseMalformedSszError(T, "missing termination")
 
     if resultBytesCount == maxExpectedSize:
       checkForForbiddenBits(T, input, val.maxLen + 1)
@@ -191,7 +200,7 @@ proc readSszValue*[T](input: openArray[byte],
         val.setOutputSize 0
         return
       elif input.len < offsetSize:
-        raise newException(MalformedSszError, "SSZ input of insufficient size")
+        raiseMalformedSszError(T, "input of insufficient size")
 
       var offset = readOffset 0
       let resultLen = offset div offsetSize
@@ -200,13 +209,13 @@ proc readSszValue*[T](input: openArray[byte],
         # If there are too many elements, other constraints detect problems
         # (not monotonically increasing, past end of input, or last element
         # not matching up with its nextOffset properly)
-        raise newException(MalformedSszError, "SSZ list incorrectly encoded of zero length")
+        raiseMalformedSszError(T, "incorrect encoding of zero length")
 
       val.setOutputSize resultLen
       for i in 1 ..< resultLen:
         let nextOffset = readOffset(i * offsetSize)
         if nextOffset < offset:
-          raise newException(MalformedSszError, "SSZ list element offsets are decreasing")
+          raiseMalformedSszError(T, "list element offsets are decreasing")
         else:
           readSszValue(input.toOpenArray(offset, nextOffset - 1), val[i - 1])
         offset = nextOffset
@@ -216,7 +225,7 @@ proc readSszValue*[T](input: openArray[byte],
   elif val is SingleMemberUnion:
     readSszValue(input.toOpenArray(0, 0), val.selector)
     if val.selector != 0'u8:
-      raise newException(MalformedSszError, "SingleMemberUnion selector must be 0")
+      raiseMalformedSszError(T, "SingleMemberUnion selector must be 0")
     readSszValue(input.toOpenArray(1, input.len - 1), val.value)
 
   elif val is UintN|bool:
@@ -238,7 +247,7 @@ proc readSszValue*[T](input: openArray[byte],
       const minimallyExpectedSize = uint32 fixedPortionSize(T)
 
       if inputLen < minimallyExpectedSize:
-        raise newException(MalformedSszError, "SSZ input of insufficient size")
+        raiseMalformedSszError(T, "input of insufficient size")
 
       enumInstanceSerializedFields(val, fieldName, field):
         const boundingOffsets = getFieldBoundingOffsets(T, fieldName)
@@ -264,14 +273,18 @@ proc readSszValue*[T](input: openArray[byte],
 
           when boundingOffsets.isFirstOffset:
             if startOffset != minimallyExpectedSize:
-              raise newException(MalformedSszError, "SSZ object dynamic portion starts at invalid offset")
+              raiseMalformedSszError(
+                T, "object dynamic portion starts at invalid offset")
 
           if startOffset > endOffset:
-            raise newException(MalformedSszError, "SSZ field offsets are not monotonically increasing")
+            raiseMalformedSszError(
+              T, "field offsets are not monotonically increasing")
           elif endOffset > inputLen:
-            raise newException(MalformedSszError, "SSZ field offset points past the end of the input")
+            raiseMalformedSszError(
+              T, "field offset points past the end of the input")
           elif startOffset < minimallyExpectedSize:
-            raise newException(MalformedSszError, "SSZ field offset points outside bounding offsets")
+            raiseMalformedSszError(
+              T, "field offset points outside bounding offsets")
 
         # TODO The extra type escaping here is a work-around for a Nim issue:
         when type(field) is type(SszType):
