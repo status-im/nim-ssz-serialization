@@ -20,7 +20,7 @@ export
   types
 
 func reallyRaiseMalformedSszError(typeName, msg: string) {.
-    raisesssz, noinline, noreturn.} =
+    raises: [Defect, MalformedSszError], noinline, noreturn.} =
   # `noinline` helps keep the C code tight on the happy path
   # passing `typeName` in avoids generating generic copies of this function
   raise (ref MalformedSszError)(msg: "SSZ " & typeName & ": " & msg)
