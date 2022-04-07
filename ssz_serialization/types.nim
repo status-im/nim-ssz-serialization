@@ -268,7 +268,7 @@ proc clearCaches*(a: var HashList, dataIdx: int64) =
   while idx > 0:
     let
       idxInLayer = idx - (1'i64 shl layer)
-      layerIdx = idxInlayer + a.indices[layer]
+      layerIdx = idxInLayer + a.indices[layer]
     if layerIdx < a.indices[layer + 1]:
       # Only clear cache when we're actually storing it - ie it hasn't been
       # skipped by the "combined zero hash" optimization

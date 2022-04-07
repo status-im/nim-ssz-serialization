@@ -82,20 +82,20 @@ template computeDigest*(body: untyped): Digest =
   else:
     when USE_BLST_SHA256:
       block:
-        var h  {.inject, noInit.}: DigestCtx
+        var h  {.inject, noinit.}: DigestCtx
         init(h)
         body
-        var res {.noInit.}: Digest
+        var res {.noinit.}: Digest
         finalize(res.data, h)
         res
     else:
       block:
-        var h  {.inject, noInit.}: DigestCtx
+        var h  {.inject, noinit.}: DigestCtx
         init(h)
         body
         finish(h)
 
-func digest*(a: openArray[byte]): Digest {.noInit.} =
+func digest*(a: openArray[byte]): Digest {.noinit.} =
   when nimvm:
     block:
       var h: sha256
@@ -110,7 +110,7 @@ func digest*(a: openArray[byte]): Digest {.noInit.} =
       block:
         # We use the init-update-finish interface to avoid
         # the expensive burning/clearing memory (20~30% perf)
-        var h {.noInit.}: DigestCtx
+        var h {.noinit.}: DigestCtx
         h.init()
         h.update(a)
         h.finish()
@@ -407,7 +407,7 @@ template createMerkleizer*(totalElements: static Limit): SszMerkleizerImpl =
   trs "CREATING A MERKLEIZER FOR ", totalElements
 
   const treeHeight = binaryTreeHeight totalElements
-  var combinedChunks {.noInit.}: array[treeHeight, Digest]
+  var combinedChunks {.noinit.}: array[treeHeight, Digest]
 
   let topIndex = treeHeight - 1
 
@@ -622,7 +622,7 @@ func hashTreeRootAux[T](x: T): Digest =
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
-      addField hashTreeRoot(toSszType(x.value))
+      addField hash_tree_root(toSszType(x.value))
   elif T is object|tuple:
     # when T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
@@ -698,7 +698,7 @@ func hashTreeRootCached*(x: HashList, vIdx: int64): Digest =
   let
     layer = layer(vIdx)
     idxInLayer = vIdx - (1'i64 shl layer)
-    layerIdx = idxInlayer + x.indices[layer]
+    layerIdx = idxInLayer + x.indices[layer]
 
   trs "GETTING ", vIdx, " ", layerIdx, " ", layer, " ", x.indices.len
 
