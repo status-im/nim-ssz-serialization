@@ -95,7 +95,7 @@ template computeDigest*(body: untyped): Digest =
         body
         finish(h)
 
-func digest*(a: openArray[byte]): Digest {.noInit.} =
+func digest*(a: openArray[byte]): Digest {.noinit.} =
   when nimvm:
     block:
       var h: sha256
@@ -110,7 +110,7 @@ func digest*(a: openArray[byte]): Digest {.noInit.} =
       block:
         # We use the init-update-finish interface to avoid
         # the expensive burning/clearing memory (20~30% perf)
-        var h {.noInit.}: DigestCtx
+        var h {.noinit.}: DigestCtx
         h.init()
         h.update(a)
         h.finish()
