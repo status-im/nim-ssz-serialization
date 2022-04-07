@@ -86,6 +86,6 @@ suite "Merkleization":
         merk.addChunk(elem)
         i.inc()
 
-      let calculatedRoot = merk.getFinalhash()
+      let calculatedRoot = merk.getFinalHash()
 
       check calculatedRoot.data.toSeq() == testCase.expectedRoot

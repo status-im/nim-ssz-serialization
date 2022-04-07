@@ -11,4 +11,4 @@ import
   serialization/testing/generic_suite,
   ../ssz_serialization
 
-executeRoundTripTests SSZ
+executeRoundtripTests SSZ

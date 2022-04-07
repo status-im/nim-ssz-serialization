@@ -20,7 +20,7 @@ proc test(args, path: string) =
   if not dirExists "build":
     mkDir "build"
   exec "nim " & getEnv("TEST_LANG", "c") & " " & getEnv("NIMFLAGS") & " " & args &
-    " -r --hints:off --skipParentCfg " & path
+    " -r --hints:off --warnings:on --styleCheck:usages --styleCheck:error " & path
 
 task test, "Run all tests":
   test "--threads:off -d:PREFER_BLST_SHA256=false", "tests/test_all"
