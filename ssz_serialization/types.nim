@@ -14,6 +14,8 @@ import
   json_serialization,
   "."/[bitseqs]
 
+from nimcrypto/utils import fromHex  # needed to disambiguate properly
+
 export stint, bitseqs, json_serialization
 
 const
@@ -557,10 +559,16 @@ method formatMsg*(
     "SSZ size mismatch"
 
 template readValue*(reader: var JsonReader, value: var List) =
-  value = type(value)(readValue(reader, seq[type value[0]]))
+  when type(value[0]) is byte:
+    value = type(value)(utils.fromHex(reader.readValue(string)))
+  else:
+    value = type(value)(readValue(reader, seq[type value[0]]))
 
 template writeValue*(writer: var JsonWriter, value: List) =
-  writeValue(writer, asSeq value)
+  when type(value[0]) is byte:
+    writeValue(writer, "0x" & byteutils.toHex(distinctBase(value)))
+  else:
+    writeValue(writer, asSeq value)
 
 proc writeValue*(writer: var JsonWriter, value: HashList)
                 {.raises: [IOError, SerializationError, Defect].} =
