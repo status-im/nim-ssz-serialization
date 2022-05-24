@@ -166,14 +166,14 @@ template mitems*(x: var List): untyped = mitems(distinctBase x)
 template mpairs*(x: var List): untyped = mpairs(distinctBase x)
 template contains* (x: List, val: auto): untyped = contains(distinctBase x, val)
 
-proc add*(x: var List, val: auto): bool =
+func add*(x: var List, val: auto): bool =
   if x.len < x.maxLen:
     add(distinctBase x, val)
     true
   else:
     false
 
-proc setLen*(x: var List, newLen: int): bool =
+func setLen*(x: var List, newLen: int): bool =
   if newLen <= x.maxLen:
     setLen(distinctBase x, newLen)
     true
@@ -236,7 +236,7 @@ template maxDepth*(a: HashList|HashArray): int =
 template chunkIdx(a: HashList|HashArray, dataIdx: int64): int64 =
   chunkIdx(a.T, dataIdx)
 
-proc clearCaches*(a: var HashArray, dataIdx: auto) =
+func clearCaches*(a: var HashArray, dataIdx: auto) =
   ## Clear all cache entries after data at dataIdx has been modified
   var idx = 1 shl (a.maxDepth - 1) + (chunkIdx(a, dataIdx) shr 1)
   while idx != 0:
@@ -258,7 +258,7 @@ func cacheNodes*(depth, leaves: int): int =
     res += nodesAtLayer(i, depth, leaves)
   res
 
-proc clearCaches*(a: var HashList, dataIdx: int64) =
+func clearCaches*(a: var HashList, dataIdx: int64) =
   ## Clear each level of the merkle tree up to the root affected by a data
   ## change at `dataIdx`.
   if a.hashes.len == 0:
@@ -281,12 +281,12 @@ proc clearCaches*(a: var HashList, dataIdx: int64) =
 
   clearCache(a.hashes[0])
 
-proc clearCache*(a: var HashList) =
+func clearCache*(a: var HashList) =
   # Clear the full merkle tree, in anticipation of a complete rewrite of the
   # contents
   for c in a.hashes.mitems(): clearCache(c)
 
-proc growHashes*(a: var HashList) =
+func growHashes*(a: var HashList) =
   ## Ensure that the hash cache is big enough for the data in the list - must
   ## be called whenever `data` grows.
   let
@@ -313,20 +313,20 @@ proc growHashes*(a: var HashList) =
   swap(a.hashes, newHashes)
   a.indices = newIndices
 
-proc resetCache*(a: var HashList) =
+func resetCache*(a: var HashList) =
   ## Perform a full reset of the hash cache, for example after data has been
   ## rewritten "manually" without going through the exported operators
   a.hashes.setLen(0)
   a.indices = default(type a.indices)
   a.growHashes()
 
-proc resetCache*(a: var HashArray) =
+func resetCache*(a: var HashArray) =
   for h in a.hashes.mitems():
     clearCache(h)
 
 template len*(a: type HashArray): auto = int(a.maxLen)
 
-proc add*(x: var HashList, val: auto): bool =
+func add*(x: var HashList, val: auto): bool =
   if add(x.data, val):
     x.growHashes()
     clearCaches(x, x.data.len() - 1)
@@ -334,7 +334,7 @@ proc add*(x: var HashList, val: auto): bool =
   else:
     false
 
-proc addDefault*(x: var HashList): ptr x.T =
+func addDefault*(x: var HashList): ptr x.T =
   if x.data.len >= x.maxLen:
     return nil
 
@@ -353,21 +353,21 @@ template low*(x: HashList|HashArray): auto = low(x.data)
 template high*(x: HashList|HashArray): auto = high(x.data)
 template `[]`*(x: HashList|HashArray, idx: auto): auto = x.data[idx]
 
-proc `[]`*(a: var HashArray, b: auto): var a.T =
-  # Access item and clear cache - use asSeq when only reading!
+func mitem*(a: var HashArray, b: auto): var a.T =
+  # Access mutable item clearing its cache
   clearCaches(a, b.Limit)
   a.data[b]
 
-proc `[]=`*(a: var HashArray, b: auto, c: auto) =
+func `[]=`*(a: var HashArray, b: auto, c: auto) =
   clearCaches(a, b.Limit)
   a.data[b] = c
 
-proc `[]`*(x: var HashList, idx: auto): var x.T =
-  # Access item and clear cache - use asSeq when only reading!
+func mitem*(x: var HashList, idx: auto): var x.T =
+  # Access mutable item clearing its cache
   clearCaches(x, idx.int64)
   x.data[idx]
 
-proc `[]=`*(x: var HashList, idx: auto, val: auto) =
+func `[]=`*(x: var HashList, idx: auto, val: auto) =
   clearCaches(x, idx.int64)
   x.data[idx] = val
 
@@ -460,7 +460,7 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
 
 # TODO This should have been an iterator, but the VM can't compile the
 # code due to "too many registers required".
-proc fieldInfos*(RecordType: type): seq[tuple[name: string,
+func fieldInfos*(RecordType: type): seq[tuple[name: string,
                                               offset: int,
                                               fixedSize: int,
                                               branchKey: string]] =

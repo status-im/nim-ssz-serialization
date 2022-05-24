@@ -149,6 +149,12 @@ suite "SSZ navigator":
       leaves3.add c
       hash_tree_root(leaves3) == hash_tree_root(leaves3.data)
 
+    # cache invalidation on modification
+    leaves3.mitem(0) = b
+    check:
+      leaves3.data[0] == b
+      hash_tree_root(leaves3) == hash_tree_root(leaves3.data)
+
   test "basictype":
     var leaves = HashList[uint64, 1'i64 shl 3]()
     while leaves.len < leaves.maxLen:
