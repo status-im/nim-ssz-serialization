@@ -199,6 +199,7 @@ suite "hash":
       o = Obj()
       ho = HashObj()
 
+    template mitem(v: array, idx: auto): auto = v[idx]
     template both(body) =
       block:
         template it: auto {.inject.} = o
@@ -215,7 +216,7 @@ suite "hash":
         o.li == ho.li.data
         htro == htrho
 
-    both: it.arr[0].data[0] = byte 1
+    both: it.arr.mitem(0).data[0] = byte 1
 
     both: check: it.li.add Digest()
 
