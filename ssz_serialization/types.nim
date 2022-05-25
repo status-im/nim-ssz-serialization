@@ -352,6 +352,18 @@ template len*(x: HashList|HashArray): auto = len(x.data)
 template low*(x: HashList|HashArray): auto = low(x.data)
 template high*(x: HashList|HashArray): auto = high(x.data)
 template `[]`*(x: HashList|HashArray, idx: auto): auto = x.data[idx]
+template `[]`*(x: var HashList, idx: auto): auto =
+  {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
+  discard
+template `[]`*(x: var HashArray, idx: auto): auto =
+  {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
+  discard
+
+template item*(x: HashList|HashArray, idx: auto): auto =
+  # We must use a template, or the magic `unsafeAddr x[idx]` won't work, but
+  # we don't want to accidentally return a `var` instance that gets mutated
+  # so we avoid overloading the `[]` name
+  x.data[idx]
 
 func mitem*(a: var HashArray, b: auto): var a.T =
   # Access mutable item clearing its cache
