@@ -149,6 +149,12 @@ suite "SSZ navigator":
       leaves3.add c
       hash_tree_root(leaves3) == hash_tree_root(leaves3.data)
 
+    # cache invalidation on modification
+    leaves3.mitem(0) = b
+    check:
+      leaves3.data[0] == b
+      hash_tree_root(leaves3) == hash_tree_root(leaves3.data)
+
   test "basictype":
     var leaves = HashList[uint64, 1'i64 shl 3]()
     while leaves.len < leaves.maxLen:
@@ -193,6 +199,7 @@ suite "hash":
       o = Obj()
       ho = HashObj()
 
+    template mitem(v: array, idx: auto): auto = v[idx]
     template both(body) =
       block:
         template it: auto {.inject.} = o
@@ -209,7 +216,7 @@ suite "hash":
         o.li == ho.li.data
         htro == htrho
 
-    both: it.arr[0].data[0] = byte 1
+    both: it.arr.mitem(0).data[0] = byte 1
 
     both: check: it.li.add Digest()
 
