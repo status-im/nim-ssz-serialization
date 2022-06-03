@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2021 Status Research & Development GmbH
+# Copyright (c) 2021-2022 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -33,7 +33,7 @@ type TestData[limit: static int64] = object
   expectedRoot: seq[byte]
 
 # Cases from:
-# https://github.com/ethereum/eth2.0-specs/blob/dev/tests/core/pyspec/eth2spec/utils/test_merkle_minimal.py
+# https://github.com/ethereum/consensus-specs/blob/dev/tests/core/pyspec/eth2spec/utils/test_merkle_minimal.py
 # Only the happy cases as our merkleizer will accept more chunks than the limit.
 let cases = (
   TestData[0](count: 0, expectedRoot: z(0)),
