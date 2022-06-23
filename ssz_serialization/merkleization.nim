@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2021 Status Research & Development GmbH
+# Copyright (c) 2018-2022 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -12,7 +12,8 @@
 {.push raises: [Defect].}
 
 import
-  stew/[bitops2, endians2, ptrops],
+  std/[algorithm, sequtils],
+  stew/[bitops2, endians2, ptrops, results],
   stew/ranges/ptr_arith, nimcrypto/[hash, sha2],
   serialization/testing/tracing,
   "."/[bitseqs, codec, types]
@@ -29,6 +30,7 @@ else:
   const USE_BLST_SHA256 = false
 
 export
+  results,
   sha2.update, hash.fromHex,
   codec, bitseqs, types
 
@@ -82,20 +84,20 @@ template computeDigest*(body: untyped): Digest =
   else:
     when USE_BLST_SHA256:
       block:
-        var h  {.inject, noInit.}: DigestCtx
+        var h  {.inject, noinit.}: DigestCtx
         init(h)
         body
-        var res {.noInit.}: Digest
+        var res {.noinit.}: Digest
         finalize(res.data, h)
         res
     else:
       block:
-        var h  {.inject, noInit.}: DigestCtx
+        var h  {.inject, noinit.}: DigestCtx
         init(h)
         body
         finish(h)
 
-func digest*(a: openArray[byte]): Digest {.noInit.} =
+func digest*(a: openArray[byte]): Digest {.noinit.} =
   when nimvm:
     block:
       var h: sha256
@@ -110,7 +112,7 @@ func digest*(a: openArray[byte]): Digest {.noInit.} =
       block:
         # We use the init-update-finish interface to avoid
         # the expensive burning/clearing memory (20~30% perf)
-        var h {.noInit.}: DigestCtx
+        var h {.noinit.}: DigestCtx
         h.init()
         h.update(a)
         h.finish()
@@ -403,13 +405,14 @@ template totalChunks*(merkleizer: SszMerkleizer): uint64 =
 template getFinalHash*(merkleizer: SszMerkleizer): Digest =
   merkleizer.impl.getFinalHash
 
-template createMerkleizer*(totalElements: static Limit): SszMerkleizerImpl =
-  trs "CREATING A MERKLEIZER FOR ", totalElements
+template createMerkleizer*(
+    totalElements: static Limit, topLayer = 0): SszMerkleizerImpl =
+  trs "CREATING A MERKLEIZER FOR ", totalElements, " (topLayer: ", topLayer, ")"
 
   const treeHeight = binaryTreeHeight totalElements
-  var combinedChunks {.noInit.}: array[treeHeight, Digest]
+  var combinedChunks {.noinit.}: array[treeHeight, Digest]
 
-  let topIndex = treeHeight - 1
+  let topIndex = treeHeight - 1 - topLayer
 
   SszMerkleizerImpl(
     combinedChunks: cast[ptr UncheckedArray[Digest]](addr combinedChunks),
@@ -462,14 +465,22 @@ func mixInLength*(root: Digest, length: int): Digest =
 
 func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [Defect].}
 
+func hash_tree_root_multi(
+    x: auto,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    loopOrder: seq[int],
+    slice: Slice[int],
+    atLayer = 0): Result[void, string] {.gcsafe, raises: [Defect].}
+
+template addField(field) =
+  let hash = hash_tree_root(field)
+  trs "MERKLEIZING FIELD ", astToStr(field), " = ", hash
+  addChunk(merkleizer, hash.data)
+  trs "CHUNK ADDED"
+
 template merkleizeFields(totalChunks: static Limit, body: untyped): Digest =
   var merkleizer {.inject.} = createMerkleizer(totalChunks)
-
-  template addField(field) =
-    let hash = hash_tree_root(field)
-    trs "MERKLEIZING FIELD ", astToStr(field), " = ", hash
-    addChunk(merkleizer, hash.data)
-    trs "CHUNK ADDED"
 
   body
 
@@ -481,17 +492,15 @@ template writeBytesLE(chunk: var array[bytesPerChunk, byte], atParam: int,
   chunk[at ..< at + sizeof(val)] = toBytesLE(val)
 
 func chunkedHashTreeRoot[T: BasicType](
-    merkleizer: var SszMerkleizerImpl, arr: openArray[T]): Digest =
+    merkleizer: var SszMerkleizerImpl, arr: openArray[T],
+    firstIdx, numFromFirst: Limit): Digest =
   static:
     doAssert bytesPerChunk mod sizeof(T) == 0
 
-  if arr.len == 0:
-    return getFinalHash(merkleizer)
-
   when sizeof(T) == 1 or cpuEndian == littleEndian:
     var
-      remainingBytes = arr.len * sizeof(T)
-      pos = cast[ptr byte](unsafeAddr arr[0])
+      remainingBytes = numFromFirst * sizeof(T)
+      pos = cast[ptr byte](unsafeAddr arr[firstIdx])
 
     while remainingBytes >= bytesPerChunk:
       addChunk(merkleizer, makeOpenArray(pos, bytesPerChunk))
@@ -499,37 +508,66 @@ func chunkedHashTreeRoot[T: BasicType](
       remainingBytes -= bytesPerChunk
 
     if remainingBytes > 0:
-      addChunk(merkleizer, makeOpenArray(pos, remainingBytes))
-
+      addChunk(merkleizer, makeOpenArray(pos, remainingBytes.int))
   else:
     const valuesPerChunk = bytesPerChunk div sizeof(T)
 
     var writtenValues = 0
 
     var chunk: array[bytesPerChunk, byte]
-    while writtenValues < arr.len - valuesPerChunk:
+    while writtenValues < numFromFirst - valuesPerChunk:
       for i in 0 ..< valuesPerChunk:
-        chunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
+        chunk.writeBytesLE(i * sizeof(T), arr[firstIdx + writtenValues + i])
       addChunk(merkleizer, chunk)
       inc writtenValues, valuesPerChunk
 
-    let remainingValues = arr.len - writtenValues
+    let remainingValues = numFromFirst - writtenValues
     if remainingValues > 0:
       var lastChunk: array[bytesPerChunk, byte]
       for i in 0 ..< remainingValues:
-        lastChunk.writeBytesLE(i * sizeof(T), arr[writtenValues + i])
+        lastChunk.writeBytesLE(i * sizeof(T), arr[firstIdx + writtenValues + i])
       addChunk(merkleizer, lastChunk)
 
   getFinalHash(merkleizer)
 
 template chunkedHashTreeRoot[T: not BasicType](
-    merkleizer: var SszMerkleizerImpl, arr: openArray[T]): Digest =
-  for elem in arr:
-    let elemHash = hash_tree_root(elem)
+    merkleizer: var SszMerkleizerImpl, arr: openArray[T],
+    firstIdx, numFromFirst: Limit): Digest =
+  for i in 0 ..< numFromFirst:
+    let elemHash = hash_tree_root(arr[firstIdx + i])
     addChunk(merkleizer, elemHash.data)
   getFinalHash(merkleizer)
 
-func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
+template chunkedHashTreeRoot[T](
+    totalChunks: static Limit, arr: openArray[T],
+    chunks: Slice[Limit], topLayer: int): Digest =
+  const valuesPerChunk =
+    when T is BasicType:
+      bytesPerChunk div sizeof(T)
+    else:
+      1
+  let firstIdx = chunks.a * valuesPerChunk
+  if arr.len <= firstIdx:
+    const treeHeight = binaryTreeHeight totalChunks
+    zeroHashes[treeHeight - 1 - topLayer]
+  else:
+    var merkleizer = createMerkleizer(totalChunks, topLayer)
+    let numFromFirst =
+      min((chunks.b - chunks.a + 1) * valuesPerChunk, arr.len - firstIdx)
+    chunkedHashTreeRoot(merkleizer, arr, firstIdx, numFromFirst)
+
+template chunkedHashTreeRoot[T](
+    totalChunks: static Limit, arr: openArray[T]): Digest =
+  if arr.len <= 0:
+    const treeHeight = binaryTreeHeight totalChunks
+    zeroHashes[treeHeight - 1]
+  else:
+    var merkleizer = createMerkleizer(totalChunks)
+    chunkedHashTreeRoot(merkleizer, arr, 0, arr.len)
+
+func bitListHashTreeRoot(
+    merkleizer: var SszMerkleizerImpl, x: BitSeq,
+    chunks: Slice[Limit]): Digest =
   # TODO: Switch to a simpler BitList representation and
   #       replace this with `chunkedHashTreeRoot`
   var
@@ -540,8 +578,7 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
     if totalBytes == 1:
       # This is an empty bit list.
       # It should be hashed as a tree containing all zeros:
-      return mergeBranches(zeroHashes[merkleizer.topIndex],
-                           zeroHashes[0]) # this is the mixed length
+      return zeroHashes[merkleizer.topIndex]
 
     totalBytes -= 1
     lastCorrectedByte = bytes(x)[^2]
@@ -557,25 +594,36 @@ func bitListHashTreeRoot(merkleizer: var SszMerkleizerImpl, x: BitSeq): Digest =
     fullChunks -= 1
     bytesInLastChunk = 32
 
-  for i in 0 ..< fullChunks:
+  for i in chunks.a .. min(chunks.b, fullChunks - 1):
     let
-      chunkStartPos = i * bytesPerChunk
+      chunkStartPos = i.int * bytesPerChunk
       chunkEndPos = chunkStartPos + bytesPerChunk - 1
 
     addChunk(merkleizer, bytes(x).toOpenArray(chunkStartPos, chunkEndPos))
 
-  var
-    lastChunk: array[bytesPerChunk, byte]
-    chunkStartPos = fullChunks * bytesPerChunk
+  if fullChunks in chunks:
+    var
+      lastChunk: array[bytesPerChunk, byte]
+      chunkStartPos = fullChunks * bytesPerChunk
 
-  for i in 0 .. bytesInLastChunk - 2:
-    lastChunk[i] = bytes(x)[chunkStartPos + i]
+    for i in 0 .. bytesInLastChunk - 2:
+      lastChunk[i] = bytes(x)[chunkStartPos + i]
 
-  lastChunk[bytesInLastChunk - 1] = lastCorrectedByte
+    lastChunk[bytesInLastChunk - 1] = lastCorrectedByte
 
-  addChunk(merkleizer, lastChunk.toOpenArray(0, bytesInLastChunk - 1))
-  let contentsHash = getFinalHash(merkleizer)
-  mixInLength contentsHash, x.len
+    addChunk(merkleizer, lastChunk.toOpenArray(0, bytesInLastChunk - 1))
+
+  getFinalHash(merkleizer)
+
+template bitListHashTreeRoot(
+    totalChunks: static Limit, x: BitSeq,
+    chunks: Slice[Limit], topLayer: int): Digest =
+  var merkleizer = createMerkleizer(totalChunks, topLayer)
+  bitListHashTreeRoot(merkleizer, x, chunks)
+
+template bitListHashTreeRoot(
+    totalChunks: static Limit, x: BitSeq): Digest =
+  bitListHashTreeRoot(totalChunks, x, 0.Limit ..< totalChunks, topLayer = 0)
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
   when T is BitArray|BitList:
@@ -584,6 +632,47 @@ func maxChunksCount(T: type, maxLen: Limit): Limit =
     maxChunkIdx(ElemType(T), maxLen)
   else:
     unsupported T # This should never happen
+
+template chunkForIndex(chunkIndex: GeneralizedIndex): Limit =
+  block:
+    (chunkIndex - firstChunkIndex).Limit
+
+template chunksForIndex(index: GeneralizedIndex): Slice[Limit] =
+  block:
+    let
+      numLayersAboveChunks = chunkLayer - indexLayer
+      chunkIndexLow = index shl numLayersAboveChunks
+      chunkIndexHigh = chunkIndexLow or
+        ((1.GeneralizedIndex shl numLayersAboveChunks) - 1.GeneralizedIndex)
+
+    chunkForIndex(chunkIndexLow) .. chunkForIndex(chunkIndexHigh)
+
+template chunkContainingIndex(indexParam: GeneralizedIndex): Limit =
+  block:
+    let
+      index = indexParam
+      indexLayer = log2trunc(index)
+      numLayersBelowChunks = indexLayer - chunkLayer
+      chunkIndex = index shr numLayersBelowChunks
+
+    chunkForIndex(chunkIndex).Limit
+
+template indexAt(i: int): GeneralizedIndex =
+  block:
+    let v = indices[loopOrder[i]]
+    if atLayer != 0:
+      let
+        n = leadingZeros(v) + 1 + atLayer
+        x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
+      rotateRight(x, n)
+    else:
+      v
+
+template rootAt(i: int): Digest =
+  roots[loopOrder[i]]
+
+const unsupportedIndex =
+  err(Result[void, string], "Generalized index not supported.")
 
 func hashTreeRootAux[T](x: T): Digest =
   when T is bool|char:
@@ -597,8 +686,8 @@ func hashTreeRootAux[T](x: T): Digest =
     hashTreeRootAux(x.bytes)
   elif T is BitList:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    var merkleizer = createMerkleizer(totalChunks)
-    bitListHashTreeRoot(merkleizer, BitSeq x)
+    let contentsHash = bitListHashTreeRoot(totalChunks, BitSeq x)
+    mixInLength(contentsHash, x.len)
   elif T is array:
     type E = ElemType(T)
     when E is BasicType and sizeof(T) <= sizeof(result.data):
@@ -612,17 +701,15 @@ func hashTreeRootAux[T](x: T): Digest =
     else:
       trs "FIXED TYPE; USE CHUNK STREAM"
       const totalChunks = maxChunksCount(T, x.len)
-      var merkleizer = createMerkleizer(totalChunks)
-      chunkedHashTreeRoot(merkleizer, x)
+      chunkedHashTreeRoot(totalChunks, x)
   elif T is List:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    var merkleizer = createMerkleizer(totalChunks)
-    let contentsHash = chunkedHashTreeRoot(merkleizer, asSeq x)
+    let contentsHash = chunkedHashTreeRoot(totalChunks, asSeq x)
     mixInLength(contentsHash, x.len)
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
-      addField hashTreeRoot(toSszType(x.value))
+      addField hash_tree_root(toSszType(x.value))
   elif T is object|tuple:
     # when T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
@@ -634,6 +721,248 @@ func hashTreeRootAux[T](x: T): Digest =
         addField f
   else:
     unsupported T
+
+func hashTreeRootAux[T](
+    x: T,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    loopOrder: seq[int],
+    slice: Slice[int],
+    atLayer: int): Result[void, string] =
+  when T is BasicType:
+    for i in slice:
+      if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
+      rootAt(i) = hashTreeRootAux(x)
+  elif T is BitArray:
+    ? hashTreeRootAux(x.bytes, indices, roots, loopOrder, slice, atLayer)
+  elif T is BitList:
+    const
+      totalChunks = maxChunksCount(T, x.maxLen)
+      firstChunkIndex = nextPow2(totalChunks.uint64)
+      chunkLayer = log2trunc(firstChunkIndex)
+    var i = slice.a
+    while i <= slice.b:
+      let
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+      if index == 1.GeneralizedIndex:
+        let contentsHash = bitListHashTreeRoot(totalChunks, BitSeq x)
+        rootAt(i) = mixInLength(contentsHash, x.len)
+        inc i
+      elif index == 3.GeneralizedIndex:
+        rootAt(i) = hashTreeRootAux(x.len.uint64)
+        inc i
+      elif index == 2.GeneralizedIndex:
+        rootAt(i) = bitListHashTreeRoot(totalChunks, BitSeq x)
+        inc i
+      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+        let
+          atLayer = atLayer + 1
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+        if indexLayer <= chunkLayer:
+          let chunks = chunksForIndex(index)
+          rootAt(i) = bitListHashTreeRoot(totalChunks, BitSeq x,
+                                          chunks, indexLayer)
+          inc i
+        else: return unsupportedIndex
+      else: return unsupportedIndex
+  elif T is array:
+    type E = ElemType(T)
+    when E is BasicType and sizeof(T) <= sizeof(roots[0].data):
+      for i in slice:
+        if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
+        rootAt(i) = hashTreeRootAux(x)
+    else:
+      trs "FIXED TYPE; USE CHUNK STREAM"
+      const
+        totalChunks = maxChunksCount(T, x.len)
+        firstChunkIndex = nextPow2(totalChunks.uint64)
+        chunkLayer = log2trunc(firstChunkIndex)
+      var i = slice.a
+      while i <= slice.b:
+        let
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+        if index == 1.GeneralizedIndex:
+          rootAt(i) = chunkedHashTreeRoot(totalChunks, x)
+          inc i
+        elif indexLayer <= chunkLayer:
+          let chunks = chunksForIndex(index)
+          rootAt(i) = chunkedHashTreeRoot(totalChunks, x,
+                                          chunks, indexLayer)
+          inc i
+        else:
+          when ElemType(typeof(x)) is BasicType: return unsupportedIndex
+          else:
+            let chunk = chunkContainingIndex(index)
+            if chunk >= x.len: return unsupportedIndex
+            var j = i + 1
+            while j <= slice.b and
+                chunkContainingIndex(indexAt(j)) == chunk:
+              inc j
+            ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+                                   atLayer + chunkLayer)
+            i = j
+  elif T is List:
+    const
+      totalChunks = maxChunksCount(T, x.maxLen)
+      firstChunkIndex = nextPow2(totalChunks.uint64)
+      chunkLayer = log2trunc(firstChunkIndex)
+    var i = slice.a
+    while i <= slice.b:
+      let
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+      if index == 1.GeneralizedIndex:
+        let contentsHash = chunkedHashTreeRoot(totalChunks, asSeq x)
+        rootAt(i) = mixInLength(contentsHash, x.len)
+        inc i
+      elif index == 3.GeneralizedIndex:
+        rootAt(i) = hashTreeRootAux(x.len.uint64)
+        inc i
+      elif index == 2.GeneralizedIndex:
+        rootAt(i) = chunkedHashTreeRoot(totalChunks, asSeq x)
+        inc i
+      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+        let
+          atLayer = atLayer + 1
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+        if indexLayer <= chunkLayer:
+          let chunks = chunksForIndex(index)
+          rootAt(i) = chunkedHashTreeRoot(totalChunks, asSeq x,
+                                          chunks, indexLayer)
+          inc i
+        else:
+          when ElemType(typeof(x)) is BasicType: return unsupportedIndex
+          else:
+            let chunk = chunkContainingIndex(index)
+            if chunk >= x.len: return unsupportedIndex
+            var j = i + 1
+            while j <= slice.b and
+                chunkContainingIndex(indexAt(j)) == chunk:
+              inc j
+            ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+                                   atLayer + chunkLayer)
+            i = j
+      else: return unsupportedIndex
+  elif T is SingleMemberUnion:
+    doAssert x.selector == 0'u8
+    const
+      totalChunks = Limit 1
+      firstChunkIndex = nextPow2(totalChunks.uint64)
+      chunkLayer = log2trunc(firstChunkIndex)
+    var i = slice.a
+    while i <= slice.b:
+      let
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+      if index == 1.GeneralizedIndex:
+        var merkleizer = createMerkleizer(Limit 2)
+        addField hash_tree_root(x.value)
+        rootAt(i) = getFinalHash(merkleizer)
+        inc i
+      elif index == 3.GeneralizedIndex:
+        rootAt(i) = Digest()
+        inc i
+      elif index == 2.GeneralizedIndex:
+        rootAt(i) = hash_tree_root(x.value)
+        inc i
+      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+        let
+          atLayer = atLayer + 1
+          index = indexAt(i)
+          chunk = chunkContainingIndex(index)
+        var j = i + 1
+        while j <= slice.b and
+            chunkContainingIndex(indexAt(j)) == chunk:
+          inc j
+        ? hash_tree_root_multi(x.value, indices, roots, loopOrder, i ..< j,
+                               atLayer + chunkLayer)
+        i = j
+      else: return unsupportedIndex
+  elif T is object|tuple:
+    # when T.isCaseObject():
+    #   # TODO: Need to implement this for case object (SSZ Union)
+    #   unsupported T
+    trs "MERKLEIZING FIELDS"
+    const
+      totalChunks = totalSerializedFields(T)
+      firstChunkIndex = nextPow2(totalChunks.uint64)
+      chunkLayer = log2trunc(firstChunkIndex)
+    var
+      combinedChunks {.noInit.}: array[chunkLayer + 1, Digest]
+      i = slice.a
+      fieldIndex = 0.Limit
+      isActive = false
+      index {.noinit.}: GeneralizedIndex
+      indexLayer {.noinit.}: int
+      chunks {.noinit.}: Slice[Limit]
+      merkleizer {.noinit.}: SszMerkleizerImpl
+      chunk {.noinit.}: Limit
+      nextField {.noinit.}: Limit
+    x.enumerateSubFields(f):
+      if i <= slice.b:
+        if not isActive:
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+          nextField =
+            if indexLayer == chunkLayer:
+              chunkForIndex(index)
+            elif indexLayer < chunkLayer:
+              chunks = chunksForIndex(index)
+              merkleizer = SszMerkleizerImpl(
+                combinedChunks:
+                  cast[ptr UncheckedArray[Digest]](addr combinedChunks),
+                topIndex: chunkLayer - indexLayer)
+              chunks.a
+            else:
+              chunk = chunkContainingIndex(index)
+              chunk
+          isActive = true
+        if fieldIndex >= nextField:
+          if indexLayer == chunkLayer:
+            rootAt(i) = hash_tree_root(f)
+            inc i
+            isActive = false
+          elif indexLayer < chunkLayer:
+            addField f
+            if fieldIndex >= chunks.b:
+              rootAt(i) = getFinalHash(merkleizer)
+              inc i
+              isActive = false
+          else:
+            var j = i + 1
+            while j <= slice.b and
+                chunkContainingIndex(indexAt(j)) == chunk:
+              inc j
+            ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
+                                   atLayer + chunkLayer)
+            i = j
+            isActive = false
+      inc fieldIndex
+    doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
+    while i <= slice.b:
+      index = indexAt(i)
+      indexLayer = log2trunc(index)
+      if indexLayer == chunkLayer:
+        rootAt(i) = static(Digest())
+        inc i
+        isActive = false
+      elif indexLayer < chunkLayer:
+        if not isActive:
+          merkleizer = SszMerkleizerImpl(
+            combinedChunks:
+              cast[ptr UncheckedArray[Digest]](addr combinedChunks),
+            topIndex: chunkLayer - indexLayer)
+        rootAt(i) = getFinalHash(merkleizer)
+        inc i
+        isActive = false
+      else: return unsupportedIndex
+  else:
+    unsupported T
+  ok()
 
 func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
@@ -698,7 +1027,7 @@ func hashTreeRootCached*(x: HashList, vIdx: int64): Digest =
   let
     layer = layer(vIdx)
     idxInLayer = vIdx - (1'i64 shl layer)
-    layerIdx = idxInlayer + x.indices[layer]
+    layerIdx = idxInLayer + x.indices[layer]
 
   trs "GETTING ", vIdx, " ", layerIdx, " ", layer, " ", x.indices.len
 
@@ -735,6 +1064,101 @@ func hashTreeRootCached*(x: HashList): Digest =
 
     x.hashes[0]
 
+func hashTreeRootCached*(
+    x: HashArray,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    loopOrder: seq[int],
+    slice: Slice[int],
+    atLayer: int): Result[void, string] =
+  const
+    totalChunks = x.maxChunks
+    firstChunkIndex = nextPow2(totalChunks.uint64)
+    chunkLayer = log2trunc(firstChunkIndex)
+  var i = slice.a
+  while i <= slice.b:
+    let
+      index = indexAt(i)
+      indexLayer = log2trunc(index)
+    if index == 1.GeneralizedIndex:
+      rootAt(i) = hashTreeRootCached(x)
+      inc i
+    elif indexLayer == chunkLayer:
+      let chunks = chunksForIndex(index)
+      rootAt(i) = chunkedHashTreeRoot(totalChunks, x.data,
+                                      chunks, indexLayer)
+      inc i
+    elif indexLayer < chunkLayer:
+      rootAt(i) = hashTreeRootCached(x, index.int64)
+      inc i
+    else:
+      when ElemType(typeof(x)) is BasicType:
+        return unsupportedIndex
+      else:
+        let chunk = chunkContainingIndex(index)
+        if chunk >= x.len: return unsupportedIndex
+        var j = i + 1
+        while j <= slice.b and
+            chunkContainingIndex(indexAt(j)) == chunk:
+          inc j
+        ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+                               atLayer + chunkLayer)
+        i = j
+  ok()
+
+func hashTreeRootCached*(
+    x: HashList,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    loopOrder: seq[int],
+    slice: Slice[int],
+    atLayer: int): Result[void, string] =
+  const
+    totalChunks = x.maxChunks
+    firstChunkIndex = nextPow2(totalChunks.uint64)
+    chunkLayer = log2trunc(firstChunkIndex)
+  var i = slice.a
+  while i <= slice.b:
+    let
+      index = indexAt(i)
+      indexLayer = log2trunc(index)
+    if index == 1.GeneralizedIndex:
+      rootAt(i) = hashTreeRootCached(x)
+      inc i
+    elif index == 3.GeneralizedIndex:
+      rootAt(i) = hashTreeRootAux(x.len.uint64)
+      inc i
+    elif index == 2.GeneralizedIndex:
+      rootAt(i) = hashTreeRootCached(x, 1)
+      inc i
+    elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+      let
+        atLayer = atLayer + 1
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+      if indexLayer == chunkLayer:
+        let chunks = chunksForIndex(index)
+        rootAt(i) = chunkedHashTreeRoot(totalChunks, asSeq x.data,
+                                        chunks, indexLayer)
+        inc i
+      elif indexLayer < chunkLayer:
+        rootAt(i) = hashTreeRootCached(x, index.int64)
+        inc i
+      else:
+        when ElemType(typeof(x)) is BasicType: return unsupportedIndex
+        else:
+          let chunk = chunkContainingIndex(index)
+          if chunk >= x.len: return unsupportedIndex
+          var j = i + 1
+          while j <= slice.b and
+              chunkContainingIndex(indexAt(j)) == chunk:
+            inc j
+          ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+                                 atLayer + chunkLayer)
+          i = j
+    else: return unsupportedIndex
+  ok()
+
 func hash_tree_root*(x: auto): Digest =
   trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x))
   mixin toSszType
@@ -746,3 +1170,218 @@ func hash_tree_root*(x: auto): Digest =
       hashTreeRootAux(toSszType(x))
 
   trs "HASH TREE ROOT FOR ", name(typeof(x)), " = ", "0x", $result
+
+# Note: If this function is also called `hash_tree_root`, the Nim compiler may
+# produce incorrect code when calling it, e.g., when called by this overload:
+#   func hash_tree_root*(
+#       x: auto,
+#       indices: static openArray[GeneralizedIndex],
+#       roots: var openArray[Digest]): Result[void, string]
+#
+# Instead of passing the static `indices` to this function, the Nim compiler
+# generates a copy of `indices` with incorrect types (pointers instead of NU64).
+# This copy is then passed to this function which then interprets it as NU64[].
+# On 32-bit platforms such as i386 the pointer width does not match NU64 width,
+# leading to incorrect followup computations and out-of-bounds memory access.
+#
+# Creating a minimal reproducible example showcasing this bug proved difficult.
+#
+# Affected: Nim Compiler Version 1.2.14 [Linux: i386]
+# https://github.com/nim-lang/Nim/issues/19157
+func hash_tree_root_multi(
+    x: auto,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    loopOrder: seq[int],
+    slice: Slice[int],
+    atLayer = 0): Result[void, string] =
+  trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x)),
+    slice.mapIt(indexAt(it))
+  mixin toSszType
+
+  when x is HashArray|HashList:
+    ? hashTreeRootCached(x, indices, roots, loopOrder, slice, atLayer)
+  else:
+    ? hashTreeRootAux(toSszType(x), indices, roots, loopOrder, slice, atLayer)
+
+  trs "HASH TREE ROOT FOR ", name(typeof(x)),
+    slice.mapIt(indexAt(it)), " = ", slice.mapIt("0x" & $rootAt(it))
+  ok()
+
+template normalize(v: GeneralizedIndex): GeneralizedIndex =
+  # GeneralizedIndex is 1-based.
+  # Looking at their bit patterns, from MSB to LSB, they:
+  # - Start with a 1 bit.
+  # - Continue with a 0 bit when going left or 1 bit when going right,
+  #   from the tree root down to the leaf.
+  # i.e., 0b1_110 is the node after picking right branch twice, then left.
+  #
+  # For depth-first ordering, shorter bit-strings are parents of nodes
+  # that include them as their prefix.
+  # i.e., 0b1_110 is parent of 0b1_1100 (left) and 0b1_1101 (right)
+  # An extra 1 bit is added to distinguish parents from their left child.
+  ((v shl 1) or 1) shl leadingZeros(v)
+
+# Comparison utility for sorting indices in depth-first order (in-order).
+# This order is needed because `enumInstanceSerializedFields` does not allow
+# random access to specific fields. With depth-first order only a single pass
+# is required to fill in all the roots. `enumAllSerializedFields` cannot be
+# used for pre-computation at compile time, because the generalized indices
+# depend on the specific case values defined by the specific object instance.
+proc cmpDepthFirst(x, y: GeneralizedIndex): int =
+  cmp(x.normalize, y.normalize)
+
+func merkleizationLoopOrderNimvm(
+    indices: openArray[GeneralizedIndex]): seq[int] {.compileTime.} =
+  result = toSeq(indices.low .. indices.high)
+  let idx = toSeq(indices)
+  result.sort do (x, y: int) -> int:
+    cmpDepthFirst(idx[x], idx[y])
+
+func merkleizationLoopOrderRegular(
+    indices: openArray[GeneralizedIndex]): seq[int] =
+  result = toSeq(indices.low .. indices.high)
+  let idx = cast[ptr UncheckedArray[GeneralizedIndex]](unsafeAddr indices[0])
+  result.sort do (x, y: int) -> int:
+    cmpDepthFirst(idx[x], idx[y])
+
+func merkleizationLoopOrder(
+    indices: openArray[GeneralizedIndex]): seq[int] =
+  when nimvm:
+    merkleizationLoopOrderNimvm(indices)
+  else:
+    merkleizationLoopOrderRegular(indices)
+
+func validateIndices(
+    indices: openArray[GeneralizedIndex],
+    loopOrder: seq[int]): Result[void, string] =
+  var
+    prev = indices[loopOrder[0]]
+    prevLayer = log2trunc(prev)
+  if prev < 1.GeneralizedIndex: return err("Invalid generalized index.")
+  for i in 1 .. loopOrder.high:
+    let
+      curr = indices[loopOrder[i]]
+      currLayer = log2trunc(curr)
+      indicesOverlap =
+        if currLayer < prevLayer:
+          (prev shr (prevLayer - currLayer)) == curr
+        elif currLayer > prevLayer:
+          (curr shr (currLayer - prevLayer)) == prev
+        else:
+          curr == prev
+    if indicesOverlap:
+      return err("Given indices cover some leafs multiple times.")
+    prev = curr
+    prevLayer = currLayer
+  ok()
+
+func hash_tree_root*(
+    x: auto,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest]): Result[void, string] =
+  doAssert indices.len == roots.len
+  if indices.len == 0:
+    ok()
+  elif indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+    roots[0] = hash_tree_root(x)
+    ok()
+  else:
+    let loopOrder = merkleizationLoopOrder(indices)
+    ? validateIndices(indices, loopOrder)
+    let slice = 0 ..< loopOrder.len
+    hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+
+func hash_tree_root*(
+    x: auto,
+    indices: static openArray[GeneralizedIndex],
+    roots: var openArray[Digest]): Result[void, string] =
+  doAssert indices.len == roots.len
+  when indices.len == 0:
+    ok()
+  else:
+    when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+      roots[0] = hash_tree_root(x)
+      ok()
+    else:
+      const
+        loopOrder = merkleizationLoopOrder(indices)
+        v = validateIndices(indices, loopOrder)
+      when v.isErr:
+        err(v.error)
+      else:
+        const slice = 0 ..< loopOrder.len
+        hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+
+func hash_tree_root*(
+    x: auto,
+    indices: openArray[GeneralizedIndex]
+): Result[seq[Digest], string] =
+  if indices.len == 0:
+    ok(newSeq[Digest](0))
+  elif indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+    ok(@[hash_tree_root(x)])
+  else:
+    let loopOrder = merkleizationLoopOrder(indices)
+    ? validateIndices(indices, loopOrder)
+    let slice = 0 ..< loopOrder.len
+    var roots = newSeq[Digest](indices.len)
+    ? hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+    ok(roots)
+
+func hash_tree_root*(
+    x: auto,
+    indices: static openArray[GeneralizedIndex]
+): auto =
+  type ResultType = Result[array[indices.len, Digest], string]
+  when indices.len == 0:
+    ResultType.ok([])
+  else:
+    when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+      ResultType.ok([hash_tree_root(x)])
+    else:
+      var roots {.noinit.}: array[indices.len, Digest]
+      const
+        loopOrder = merkleizationLoopOrder(indices)
+        v = validateIndices(indices, loopOrder)
+      when v.isErr:
+        ResultType.err(v.error)
+      else:
+        const slice = 0 ..< loopOrder.len
+        let w = hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+        if w.isErr:
+          ResultType.err(w.error)
+        else:
+          ResultType.ok(roots)
+
+func hash_tree_root*(
+    x: auto,
+    index: GeneralizedIndex
+): Result[Digest, string] =
+  if index < 1.GeneralizedIndex:
+    err("Invalid generalized index.")
+  elif index == 1.GeneralizedIndex:
+    ok(hash_tree_root(x))
+  else:
+    const
+      loopOrder = @[0]
+      slice = 0 ..< loopOrder.len
+    var roots {.noinit.}: array[1, Digest]
+    ? hash_tree_root_multi(x, [index], roots, loopOrder, slice)
+    ok(roots[0])
+
+func hash_tree_root*(
+    x: auto,
+    index: static GeneralizedIndex
+): Result[Digest, string] =
+  when index < 1.GeneralizedIndex:
+    err("Invalid generalized index.")
+  elif index == 1.GeneralizedIndex:
+    ok(hash_tree_root(x))
+  else:
+    const
+      loopOrder = @[0]
+      slice = 0 ..< loopOrder.len
+    var roots {.noinit.}: array[1, Digest]
+    ? hash_tree_root_multi(x, [index], roots, loopOrder, slice)
+    ok(roots[0])

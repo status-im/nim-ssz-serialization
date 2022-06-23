@@ -39,7 +39,7 @@ template generalized_index_parent*(
     index: GeneralizedIndex): GeneralizedIndex =
   index shr 1
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.5/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
 iterator get_branch_indices*(
     tree_index: GeneralizedIndex): GeneralizedIndex =
   ## Get the generalized indices of the sister chunks along the path
@@ -49,7 +49,7 @@ iterator get_branch_indices*(
     yield generalized_index_sibling(index)
     index = generalized_index_parent(index)
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.5/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
 iterator get_path_indices*(
     tree_index: GeneralizedIndex): GeneralizedIndex =
   ## Get the generalized indices of the chunks along the path
@@ -61,7 +61,7 @@ iterator get_path_indices*(
 
 # https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
 func get_helper_indices*(
-    indices: openArray[GeneralizedIndex]): seq[GeneralizedIndex] =
+    indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
   ## Get the generalized indices of all "extra" chunks in the tree needed
   ## to prove the chunks with the given generalized indices. Note that the
   ## decreasing order is chosen deliberately to ensure equivalence to the order
@@ -80,9 +80,9 @@ func get_helper_indices*(
   res.sort(SortOrder.Descending)
   res
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.5/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
 func check_multiproof_acceptable*(
-    indices: openArray[GeneralizedIndex]): Result[void, string] =
+    indices: varargs[GeneralizedIndex]): Result[void, string] =
   # Check that proof verification won't allocate excessive amounts of memory.
   const max_multiproof_complexity = nextPowerOfTwo(256)
   if indices.len > max_multiproof_complexity:
@@ -90,7 +90,7 @@ func check_multiproof_acceptable*(
 
   if indices.len == 0:
     return err("No indices specified")
-  if indices.anyIt(it == 0.GeneralizedIndex):
+  if indices.anyIt(it <= 0.GeneralizedIndex):
     return err("Invalid index specified")
   ok()
 
@@ -217,8 +217,7 @@ func calculate_multi_merkle_root*(
   if leaves.len != indices.len:
     return err("Length mismatch for leaves and indices")
   ? check_multiproof_acceptable(indices)
-  calculate_multi_merkle_root_impl(
-    leaves, proof, indices, helper_indices)
+  calculate_multi_merkle_root_impl(leaves, proof, indices, helper_indices)
 
 func calculate_multi_merkle_root*(
     leaves: openArray[Digest],
@@ -227,8 +226,18 @@ func calculate_multi_merkle_root*(
   if leaves.len != indices.len:
     return err("Length mismatch for leaves and indices")
   ? check_multiproof_acceptable(indices)
-  calculate_multi_merkle_root_impl(
-    leaves, proof, indices, get_helper_indices(indices))
+  let helper_indices = get_helper_indices(indices)
+  calculate_multi_merkle_root_impl(leaves, proof, indices, helper_indices)
+
+func calculate_multi_merkle_root*(
+    leaves: openArray[Digest],
+    proof: openArray[Digest],
+    indices: static openArray[GeneralizedIndex]): Result[Digest, string] =
+  if leaves.len != indices.len:
+    return err("Length mismatch for leaves and indices")
+  static: ? check_multiproof_acceptable(indices)
+  const helper_indices = get_helper_indices(indices)
+  calculate_multi_merkle_root_impl(leaves, proof, indices, helper_indices)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
 func verify_merkle_multiproof*(
@@ -250,6 +259,106 @@ func verify_merkle_multiproof*(
   if calc.isErr: return false
   calc.get == root
 
+func verify_merkle_multiproof*(
+    leaves: openArray[Digest],
+    proof: openArray[Digest],
+    indices: static openArray[GeneralizedIndex],
+    root: Digest): bool =
+  const helper_indices = get_helper_indices(indices)
+  let calc = calculate_multi_merkle_root(leaves, proof, indices, helper_indices)
+  if calc.isErr: return false
+  calc.get == root
+
+# https://github.com/ethereum/consensus-specs/blob/v1.1.6/tests/core/pyspec/eth2spec/test/helpers/merkle.py#L4-L21
+func build_proof*(
+    anchor: auto,
+    indices: openArray[GeneralizedIndex],
+    helper_indices: openArray[GeneralizedIndex],
+    proof: var openArray[Digest]): Result[void, string] =
+  doAssert proof.len == helper_indices.len
+  ? check_multiproof_acceptable(indices)
+  hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    indices: openArray[GeneralizedIndex],
+    proof: var openArray[Digest]): Result[void, string] =
+  ? check_multiproof_acceptable(indices)
+  let helper_indices = get_helper_indices(indices)
+  doAssert proof.len == helper_indices.len
+  hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    indices: static openArray[GeneralizedIndex],
+    proof: var openArray[Digest]): Result[void, string] =
+  const v = check_multiproof_acceptable(indices)
+  when v.isErr:
+    result.err(v.error)
+  else:
+    const helper_indices = get_helper_indices(indices)
+    doAssert proof.len == helper_indices.len
+    hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    index: GeneralizedIndex,
+    proof: var openArray[Digest]): Result[void, string] =
+  ? check_multiproof_acceptable(index)
+  let helper_indices = get_helper_indices(index)
+  doAssert proof.len == helper_indices.len
+  hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    index: static GeneralizedIndex,
+    proof: var openArray[Digest]): Result[void, string] =
+  const v = check_multiproof_acceptable(index)
+  when v.isErr:
+    result.err(v.error)
+  else:
+    const helper_indices = get_helper_indices(index)
+    doAssert proof.len == helper_indices.len
+    hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    indices: openArray[GeneralizedIndex]
+): Result[seq[Digest], string] =
+  ? check_multiproof_acceptable(indices)
+  let helper_indices = get_helper_indices(indices)
+  hash_tree_root(anchor, helper_indices)
+
+func build_proof*(
+    anchor: auto,
+    indices: static openArray[GeneralizedIndex]
+): auto =
+  const v = check_multiproof_acceptable(indices)
+  when v.isErr:
+    Result[array[0, Digest], string].err(v.error)
+  else:
+    const helper_indices = get_helper_indices(indices)
+    hash_tree_root(anchor, helper_indices)
+
+func build_proof*(
+    anchor: auto,
+    index: GeneralizedIndex
+): Result[seq[Digest], string] =
+  ? check_multiproof_acceptable(index)
+  let helper_indices = get_helper_indices(index)
+  hash_tree_root(anchor, helper_indices)
+
+func build_proof*(
+    anchor: auto,
+    index: static GeneralizedIndex
+): auto =
+  const v = check_multiproof_acceptable(index)
+  when v.isErr:
+    Result[array[0, Digest], string].err(v.error)
+  else:
+    const helper_indices = get_helper_indices(index)
+    hash_tree_root(anchor, helper_indices)
+
 # https://github.com/ethereum/consensus-specs/blob/v1.1.6/specs/phase0/beacon-chain.md#is_valid_merkle_branch
 func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
                              depth: int, index: uint64,
@@ -269,56 +378,3 @@ func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
       buf[32..63] = branch[i].data
     value = digest(buf)
   value == root
-
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/tests/core/pyspec/eth2spec/test/helpers/merkle.py#L4-L21
-func build_proof_impl(anchor: object, leaf_index: uint64,
-                      proof: var openArray[Digest]) =
-  let
-    bottom_length = nextPow2(typeof(anchor).totalSerializedFields.uint64)
-    tree_depth = log2trunc(bottom_length)
-    parent_index =
-      if leaf_index < bottom_length shl 1:
-        0'u64
-      else:
-        var i = leaf_index
-        while i >= bottom_length shl 1:
-          i = i shr 1
-        i
-
-  var
-    prefix_len = 0
-    proof_len = log2trunc(leaf_index)
-    cache = newSeq[Digest](bottom_length shl 1)
-  block:
-    var i = bottom_length
-    anchor.enumInstanceSerializedFields(fieldNameVar, fieldVar):
-      if i == parent_index:
-        when fieldVar is object:
-          prefix_len = log2trunc(leaf_index) - tree_depth
-          proof_len -= prefix_len
-          let
-            bottom_bits = leaf_index and not (uint64.high shl prefix_len)
-            prefix_leaf_index = (1'u64 shl prefix_len) + bottom_bits
-          build_proof_impl(fieldVar, prefix_leaf_index, proof)
-        else: raiseAssert "Invalid leaf_index"
-      cache[i] = hash_tree_root(fieldVar)
-      i += 1
-    for i in countdown(bottom_length - 1, 1):
-      cache[i] = computeDigest:
-        h.update cache[i shl 1].data
-        h.update cache[i shl 1 + 1].data
-
-  var i = if parent_index != 0: parent_index
-          else: leaf_index
-  doAssert i > 0 and i < bottom_length shl 1
-  for proof_index in prefix_len ..< prefix_len + proof_len:
-    let b = (i and 1) != 0
-    i = i shr 1
-    proof[proof_index] = if b: cache[i shl 1]
-                         else: cache[i shl 1 + 1]
-
-func build_proof*(anchor: object, leaf_index: uint64,
-                  proof: var openArray[Digest]) =
-  doAssert leaf_index > 0
-  doAssert proof.len == log2trunc(leaf_index)
-  build_proof_impl(anchor, leaf_index, proof)

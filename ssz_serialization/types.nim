@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2021 Status Research & Development GmbH
+# Copyright (c) 2018-2022 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -14,6 +14,8 @@ import
   json_serialization,
   "."/[bitseqs]
 
+from nimcrypto/utils import fromHex  # needed to disambiguate properly
+
 export stint, bitseqs, json_serialization
 
 const
@@ -21,6 +23,10 @@ const
   bytesPerChunk* = 32
 
 type
+  # TODO Figure out what would be the right type for this.
+  #      It probably fits in uint16 for all practical purposes.
+  GeneralizedIndex* = uint32
+
   UintN* = SomeUnsignedInt|UInt128|UInt256
   BasicType* = bool|UintN
 
@@ -164,14 +170,14 @@ template mitems*(x: var List): untyped = mitems(distinctBase x)
 template mpairs*(x: var List): untyped = mpairs(distinctBase x)
 template contains* (x: List, val: auto): untyped = contains(distinctBase x, val)
 
-proc add*(x: var List, val: auto): bool =
+func add*(x: var List, val: auto): bool =
   if x.len < x.maxLen:
     add(distinctBase x, val)
     true
   else:
     false
 
-proc setLen*(x: var List, newLen: int): bool =
+func setLen*(x: var List, newLen: int): bool =
   if newLen <= x.maxLen:
     setLen(distinctBase x, newLen)
     true
@@ -206,6 +212,10 @@ iterator items*(x: BitList): bool =
   for i in 0 ..< x.len:
     yield x[i]
 
+iterator pairs*(x: BitList): (int, bool) =
+  for i in 0 ..< x.len:
+    yield (i, x[i])
+
 template isCached*(v: Digest): bool =
   ## An entry is "in the cache" if the first 8 bytes are zero - conveniently,
   ## Nim initializes values this way, and while there may be false positives,
@@ -230,7 +240,7 @@ template maxDepth*(a: HashList|HashArray): int =
 template chunkIdx(a: HashList|HashArray, dataIdx: int64): int64 =
   chunkIdx(a.T, dataIdx)
 
-proc clearCaches*(a: var HashArray, dataIdx: auto) =
+func clearCaches*(a: var HashArray, dataIdx: auto) =
   ## Clear all cache entries after data at dataIdx has been modified
   var idx = 1 shl (a.maxDepth - 1) + (chunkIdx(a, dataIdx) shr 1)
   while idx != 0:
@@ -252,7 +262,7 @@ func cacheNodes*(depth, leaves: int): int =
     res += nodesAtLayer(i, depth, leaves)
   res
 
-proc clearCaches*(a: var HashList, dataIdx: int64) =
+func clearCaches*(a: var HashList, dataIdx: int64) =
   ## Clear each level of the merkle tree up to the root affected by a data
   ## change at `dataIdx`.
   if a.hashes.len == 0:
@@ -264,7 +274,7 @@ proc clearCaches*(a: var HashList, dataIdx: int64) =
   while idx > 0:
     let
       idxInLayer = idx - (1'i64 shl layer)
-      layerIdx = idxInlayer + a.indices[layer]
+      layerIdx = idxInLayer + a.indices[layer]
     if layerIdx < a.indices[layer + 1]:
       # Only clear cache when we're actually storing it - ie it hasn't been
       # skipped by the "combined zero hash" optimization
@@ -275,12 +285,12 @@ proc clearCaches*(a: var HashList, dataIdx: int64) =
 
   clearCache(a.hashes[0])
 
-proc clearCache*(a: var HashList) =
+func clearCache*(a: var HashList) =
   # Clear the full merkle tree, in anticipation of a complete rewrite of the
   # contents
   for c in a.hashes.mitems(): clearCache(c)
 
-proc growHashes*(a: var HashList) =
+func growHashes*(a: var HashList) =
   ## Ensure that the hash cache is big enough for the data in the list - must
   ## be called whenever `data` grows.
   let
@@ -307,20 +317,20 @@ proc growHashes*(a: var HashList) =
   swap(a.hashes, newHashes)
   a.indices = newIndices
 
-proc resetCache*(a: var HashList) =
+func resetCache*(a: var HashList) =
   ## Perform a full reset of the hash cache, for example after data has been
   ## rewritten "manually" without going through the exported operators
   a.hashes.setLen(0)
   a.indices = default(type a.indices)
   a.growHashes()
 
-proc resetCache*(a: var HashArray) =
+func resetCache*(a: var HashArray) =
   for h in a.hashes.mitems():
     clearCache(h)
 
 template len*(a: type HashArray): auto = int(a.maxLen)
 
-proc add*(x: var HashList, val: auto): bool =
+func add*(x: var HashList, val: auto): bool =
   if add(x.data, val):
     x.growHashes()
     clearCaches(x, x.data.len() - 1)
@@ -328,7 +338,7 @@ proc add*(x: var HashList, val: auto): bool =
   else:
     false
 
-proc addDefault*(x: var HashList): ptr x.T =
+func addDefault*(x: var HashList): ptr x.T =
   if x.data.len >= x.maxLen:
     return nil
 
@@ -346,22 +356,34 @@ template len*(x: HashList|HashArray): auto = len(x.data)
 template low*(x: HashList|HashArray): auto = low(x.data)
 template high*(x: HashList|HashArray): auto = high(x.data)
 template `[]`*(x: HashList|HashArray, idx: auto): auto = x.data[idx]
+template `[]`*(x: var HashList, idx: auto): auto =
+  {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
+  discard
+template `[]`*(x: var HashArray, idx: auto): auto =
+  {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
+  discard
 
-proc `[]`*(a: var HashArray, b: auto): var a.T =
-  # Access item and clear cache - use asSeq when only reading!
+template item*(x: HashList|HashArray, idx: auto): auto =
+  # We must use a template, or the magic `unsafeAddr x[idx]` won't work, but
+  # we don't want to accidentally return a `var` instance that gets mutated
+  # so we avoid overloading the `[]` name
+  x.data[idx]
+
+func mitem*(a: var HashArray, b: auto): var a.T =
+  # Access mutable item clearing its cache
   clearCaches(a, b.Limit)
   a.data[b]
 
-proc `[]=`*(a: var HashArray, b: auto, c: auto) =
+func `[]=`*(a: var HashArray, b: auto, c: auto) =
   clearCaches(a, b.Limit)
   a.data[b] = c
 
-proc `[]`*(x: var HashList, idx: auto): var x.T =
-  # Access item and clear cache - use asSeq when only reading!
+func mitem*(x: var HashList, idx: auto): var x.T =
+  # Access mutable item clearing its cache
   clearCaches(x, idx.int64)
   x.data[idx]
 
-proc `[]=`*(x: var HashList, idx: auto, val: auto) =
+func `[]=`*(x: var HashList, idx: auto, val: auto) =
   clearCaches(x, idx.int64)
   x.data[idx] = val
 
@@ -454,7 +476,7 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
 
 # TODO This should have been an iterator, but the VM can't compile the
 # code due to "too many registers required".
-proc fieldInfos*(RecordType: type): seq[tuple[name: string,
+func fieldInfos*(RecordType: type): seq[tuple[name: string,
                                               offset: int,
                                               fixedSize: int,
                                               branchKey: string]] =
@@ -553,10 +575,16 @@ method formatMsg*(
     "SSZ size mismatch"
 
 template readValue*(reader: var JsonReader, value: var List) =
-  value = type(value)(readValue(reader, seq[type value[0]]))
+  when type(value[0]) is byte:
+    value = type(value)(utils.fromHex(reader.readValue(string)))
+  else:
+    value = type(value)(readValue(reader, seq[type value[0]]))
 
 template writeValue*(writer: var JsonWriter, value: List) =
-  writeValue(writer, asSeq value)
+  when type(value[0]) is byte:
+    writeValue(writer, to0xHex(distinctBase(value)))
+  else:
+    writeValue(writer, asSeq value)
 
 proc writeValue*(writer: var JsonWriter, value: HashList)
                 {.raises: [IOError, SerializationError, Defect].} =
