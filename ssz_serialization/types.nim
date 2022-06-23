@@ -23,6 +23,10 @@ const
   bytesPerChunk* = 32
 
 type
+  # TODO Figure out what would be the right type for this.
+  #      It probably fits in uint16 for all practical purposes.
+  GeneralizedIndex* = uint32
+
   UintN* = SomeUnsignedInt|UInt128|UInt256
   BasicType* = bool|UintN
 
