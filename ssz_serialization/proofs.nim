@@ -14,8 +14,6 @@ import
 
 export merkleization
 
-type GeneralizedIndex* = uint64
-
 # https://github.com/ethereum/consensus-specs/blob/v1.1.6/specs/altair/sync-protocol.md#get_subtree_index
 func get_subtree_index*(idx: GeneralizedIndex): uint64 =
   doAssert idx > 0
