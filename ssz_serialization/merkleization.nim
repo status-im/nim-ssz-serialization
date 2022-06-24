@@ -881,6 +881,7 @@ func hashTreeRootAux[T](
         let
           atLayer = atLayer + 1
           index = indexAt(i)
+          indexLayer = log2trunc(index)
           chunk = chunkContainingIndex(index)
         var j = i + 1
         while j <= slice.b:
