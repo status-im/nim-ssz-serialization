@@ -647,15 +647,13 @@ template chunksForIndex(index: GeneralizedIndex): Slice[Limit] =
 
     chunkForIndex(chunkIndexLow) .. chunkForIndex(chunkIndexHigh)
 
-template chunkContainingIndex(indexParam: GeneralizedIndex): Limit =
+template chunkContainingIndex(index: GeneralizedIndex): Limit =
   block:
     let
-      index = indexParam
-      indexLayer = log2trunc(index)
       numLayersBelowChunks = indexLayer - chunkLayer
       chunkIndex = index shr numLayersBelowChunks
 
-    chunkForIndex(chunkIndex).Limit
+    chunkForIndex(chunkIndex)
 
 template indexAt(i: int): GeneralizedIndex =
   block:
@@ -798,8 +796,13 @@ func hashTreeRootAux[T](
             let chunk = chunkContainingIndex(index)
             if chunk >= x.len: return unsupportedIndex
             var j = i + 1
-            while j <= slice.b and
-                chunkContainingIndex(indexAt(j)) == chunk:
+            while j <= slice.b:
+              let
+                index = indexAt(j)
+                indexLayer = log2trunc(index)
+              if indexLayer <= chunkLayer or
+                  chunkContainingIndex(index) != chunk:
+                break
               inc j
             ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                    atLayer + chunkLayer)
@@ -840,8 +843,13 @@ func hashTreeRootAux[T](
             let chunk = chunkContainingIndex(index)
             if chunk >= x.len: return unsupportedIndex
             var j = i + 1
-            while j <= slice.b and
-                chunkContainingIndex(indexAt(j)) == chunk:
+            while j <= slice.b:
+              let
+                index = indexAt(j)
+                indexLayer = log2trunc(index)
+              if indexLayer <= chunkLayer or
+                  chunkContainingIndex(index) != chunk:
+                break
               inc j
             ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                    atLayer + chunkLayer)
@@ -873,10 +881,16 @@ func hashTreeRootAux[T](
         let
           atLayer = atLayer + 1
           index = indexAt(i)
+          indexLayer = log2trunc(index)
           chunk = chunkContainingIndex(index)
         var j = i + 1
-        while j <= slice.b and
-            chunkContainingIndex(indexAt(j)) == chunk:
+        while j <= slice.b:
+          let
+            index = indexAt(j)
+            indexLayer = log2trunc(index)
+          if indexLayer <= chunkLayer or
+              chunkContainingIndex(index) != chunk:
+            break
           inc j
         ? hash_tree_root_multi(x.value, indices, roots, loopOrder, i ..< j,
                                atLayer + chunkLayer)
@@ -934,8 +948,13 @@ func hashTreeRootAux[T](
               isActive = false
           else:
             var j = i + 1
-            while j <= slice.b and
-                chunkContainingIndex(indexAt(j)) == chunk:
+            while j <= slice.b:
+              let
+                index = indexAt(j)
+                indexLayer = log2trunc(index)
+              if indexLayer <= chunkLayer or
+                  chunkContainingIndex(index) != chunk:
+                break
               inc j
             ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
                                    atLayer + chunkLayer)
@@ -1098,8 +1117,13 @@ func hashTreeRootCached*(
         let chunk = chunkContainingIndex(index)
         if chunk >= x.len: return unsupportedIndex
         var j = i + 1
-        while j <= slice.b and
-            chunkContainingIndex(indexAt(j)) == chunk:
+        while j <= slice.b:
+          let
+            index = indexAt(j)
+            indexLayer = log2trunc(index)
+          if indexLayer <= chunkLayer or
+              chunkContainingIndex(index) != chunk:
+            break
           inc j
         ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                atLayer + chunkLayer)
@@ -1150,8 +1174,13 @@ func hashTreeRootCached*(
           let chunk = chunkContainingIndex(index)
           if chunk >= x.len: return unsupportedIndex
           var j = i + 1
-          while j <= slice.b and
-              chunkContainingIndex(indexAt(j)) == chunk:
+          while j <= slice.b:
+            let
+              index = indexAt(j)
+              indexLayer = log2trunc(index)
+            if indexLayer <= chunkLayer or
+                chunkContainingIndex(index) != chunk:
+              break
             inc j
           ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                  atLayer + chunkLayer)
