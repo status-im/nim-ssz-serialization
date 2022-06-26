@@ -906,7 +906,7 @@ func hashTreeRootAux[T](
       firstChunkIndex = nextPow2(totalChunks.uint64)
       chunkLayer = log2trunc(firstChunkIndex)
     var
-      combinedChunks {.noInit.}: array[chunkLayer + 1, Digest]
+      combinedChunks {.noinit.}: array[chunkLayer + 1, Digest]
       i = slice.a
       fieldIndex = 0.Limit
       isActive = false
