@@ -259,7 +259,10 @@ func countOverlap*(a, b: BitSeq): int =
     res += countOnes(wa and wb)
   res
 
-func isSubsetOf*(a, b: BitSeq): bool =
+func isSubsetOf*(a, b: BitSeq | BitArray): bool =
+  # TODO: This can be implemented word-by-word.
+  #       The code bloat can be eliminated by introducing
+  #       a helper func accepting an openArray.
   let alen = a.len
   doAssert b.len == alen
   for i in 0 ..< alen:
