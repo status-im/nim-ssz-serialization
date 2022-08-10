@@ -30,12 +30,14 @@ type
     bytes*: array[(bits + 7) div 8, byte]
 
 func bitsLen*(bytes: openArray[byte]): int =
-  let
-    bytesCount = bytes.len
-    lastByte = bytes[bytesCount - 1]
-    markerPos = log2trunc(lastByte)
-
-  bytesCount * 8 - (8 - markerPos)
+  let bytesCount = bytes.len
+  if bytesCount > 0:
+    let
+      lastByte = bytes[bytesCount - 1]
+      markerPos = log2trunc(lastByte)
+    bytesCount * 8 - (8 - markerPos)
+  else:
+    0
 
 template len*(s: BitSeq): int =
   bitsLen(Bytes s)
