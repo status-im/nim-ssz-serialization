@@ -167,3 +167,11 @@ suite "Bit fields":
     carryOutTests(97)
     carryOutTests(12494)
 
+  test "Empty array/sequence test":
+    var a = BitArray[0]()
+    var b = BitSeq.init(0)
+    var c: BitSeq
+    check:
+      len(a) == 0
+      len(b) == 0
+      len(c) == 0
