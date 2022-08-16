@@ -121,6 +121,42 @@ template computeDigest*(body: untyped): Digest =
         body
         finish(h)
 
+when (defined(clang) or defined(gcc)) and
+    (defined(arm64) or defined(amd64)):
+  const hasHashTree = true
+
+  {.compile: "../vendor/hashtree/src/hashtree.c".}
+
+  when defined(arm64):
+    {.compile: "../vendor/hashtree/src/sha256_armv8_neon_x1.S".}
+    {.compile: "../vendor/hashtree/src/sha256_armv8_neon_x4.S".}
+
+  elif defined(amd64):
+    {.compile: "../vendor/hashtree/src/sha256_avx_x1.S".}
+    {.compile: "../vendor/hashtree/src/sha256_avx_x4.S".}
+    {.compile: "../vendor/hashtree/src/sha256_avx_x8.S".}
+    {.compile: "../vendor/hashtree/src/sha256_avx_x16.S".}
+    {.compile: "../vendor/hashtree/src/sha256_shani.S".}
+    {.compile: "../vendor/hashtree/src/sha256_sse_x1.S".}
+
+  type HashFcn = proc(output: pointer, input: pointer, count: uint64) {.cdecl, noSideEffect, gcsafe, raises: [].}
+
+  func digest*(a: openArray[byte]): Digest {.noinit.}
+
+  func digest64(output: pointer, input: pointer, count: uint64) {.cdecl, gcsafe, raises: [].} =
+    cast[ptr Digest](output)[] =
+      digest(cast[ptr UncheckedArray[byte]](input).toOpenArray(0, 63))
+    discard
+
+  proc hashtree_init*(override: HashFcn): cint {.importc, gcsafe, raises: [].}
+  func hashtree_hash*(output: pointer, input: pointer, count: uint64) {.importc, gcsafe, raises: [].}
+
+  if hashtree_init(nil) == 0:
+    discard hashtree_init(digest64)
+
+else:
+  const hasHashTree = false
+
 func digest(a: openArray[byte], res: var Digest) =
   trs "DIGESTING ARRAYS 1 ", toHex(a)
   when nimvm:
@@ -130,6 +166,11 @@ func digest(a: openArray[byte], res: var Digest) =
       h.update(a)
       h.finish()
   else:
+    when hasHashTree:
+      if a.len() == 64:
+        hashtree_hash(baseAddr res.data, baseAddr a, 1)
+        return
+
     when USE_BLST_SHA256:
       # BLST has a fast assembly optimized SHA256
       res.data.bls_sha256_digest(a)
