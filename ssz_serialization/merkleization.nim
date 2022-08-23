@@ -16,7 +16,7 @@ else:
 
 import
   std/[algorithm, sequtils],
-  stew/[bitops2, endians2, ptrops, results],
+  stew/[assign2, bitops2, endians2, ptrops, results],
   stew/ranges/ptr_arith, nimcrypto/[hash, sha2],
   serialization/testing/tracing,
   "."/[bitseqs, codec, types]
@@ -176,11 +176,10 @@ func addChunk*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
         merkleizer.combinedChunks[i] = hash
         break
   else:
-    let paddingBytes = bytesPerChunk - data.len
+    assign(merkleizer.combinedChunks[0].data.toOpenArray(0, data.high), data)
 
-    merkleizer.combinedChunks[0].data[0..<data.len] = data
-    merkleizer.combinedChunks[0].data[data.len..<bytesPerChunk] =
-      zero64.toOpenArray(0, paddingBytes - 1)
+    for i in data.len..<bytesPerChunk:
+      merkleizer.combinedChunks[0].data[i] = 0
 
     trs "WROTE BASE CHUNK ",
       toHex(merkleizer.combinedChunks[0].data), " ", data.len
