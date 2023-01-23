@@ -89,6 +89,7 @@ template checkForForbiddenBits(ResulType: type,
 
 macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
   var res = newStmtList()
+  let TInst = RecordType.getTypeInst[1]
   let T = RecordType.getType[1]
   var recordDef = getImpl(T)
 
@@ -113,7 +114,7 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
           if not checkedEnumAssign(selector, `input`[0]):
             raiseMalformedSszError(`type recordDef`, "union selector is out of bounds")
 
-          var caseObj = `T`(`selectorFieldName`: selector)
+          var caseObj = `TInst`(`selectorFieldName`: selector)
 
           enumInstanceSerializedFields(caseObj, fieldName, field):
             when fieldName != `SelectorFieldNameLit`:

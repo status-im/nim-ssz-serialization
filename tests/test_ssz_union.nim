@@ -137,3 +137,77 @@ suite "SSZ Union invalid inputs":
     let encoded = [byte 5, 2, 3]
     expect MalformedSszError:
       discard SSZ.decode(encoded, TestCaseObject)
+
+type
+  UKind {.pure.} = enum
+    None
+    Some
+
+  TUnion[T] = object
+    case kind*: UKind
+    of UKind.None:
+      discard
+    of UKind.Some:
+      val: T
+
+  XYKind {.pure.} = enum
+    None
+    SomeX
+    SomeY
+
+  XYUnion[X, Y] = object
+    case kind*: XYKind
+    of XYKind.None:
+      discard
+    of XYKind.SomeX:
+      x: X
+    of XYKind.SomeY:
+      y: Y
+
+  Bytes32 = array[32, byte]
+  List32 = List[byte, 32]
+
+suite "Generic union test suite":
+  test "T Union":
+    let a = TUnion[Bytes32](kind: UKind.None)
+    let b = TUnion[Bytes32](kind: UKind.Some, val: default(Bytes32))
+
+    let abytes = SSZ.encode(a)
+    let bbytes = SSZ.encode(b)
+
+    let aa = SSZ.decode(abytes, typeof a)
+    let bb = SSZ.decode(bbytes, typeof b)
+
+    check aa.kind == UKind.None
+    check bb.kind == UKind.Some
+    
+    let aabytes = SSZ.encode(aa)
+    let bbbytes = SSZ.encode(bb)
+
+    check aabytes == abytes
+    check bbbytes == bbytes
+
+  test "XY Union":
+    let a = XYUnion[Bytes32, List32](kind: XYKind.None)
+    let b = XYUnion[Bytes32, List32](kind: XYKind.SomeX, x: default(Bytes32))
+    let c = XYUnion[Bytes32, List32](kind: XYKind.SomeY, y: List32(@[3.byte]))
+
+    let aBytes = SSZ.encode(a)
+    let bBytes = SSZ.encode(b)
+    let cBytes = SSZ.encode(c)
+
+    let aa = SSZ.decode(aBytes, typeof a)
+    let bb = SSZ.decode(bBytes, typeof b)
+    let cc = SSZ.decode(cBytes, typeof c)
+
+    check aa.kind == XYKind.None
+    check bb.kind == XYKind.SomeX
+    check cc.kind == XYKind.SomeY
+    
+    let aaBytes = SSZ.encode(aa)
+    let bbBytes = SSZ.encode(bb)
+    let ccBytes = SSZ.encode(cc)
+
+    check aaBytes == aBytes
+    check bbBytes == bBytes
+    check ccBytes == cBytes
