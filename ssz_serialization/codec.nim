@@ -87,6 +87,69 @@ template checkForForbiddenBits(ResulType: type,
     if (input[^1] and forbiddenBitsMask) != 0:
       raiseIncorrectSize ResulType
 
+# Compile time `isUnion` checks if the case object
+# has as first field the discriminator, and that all case branches only
+# have 1 field, and that no additional fields exist outside of the case
+# branches. Also following rules should apply:
+# - enum size range < 127 (or perhaps just max sizeof 1 byte).
+# - Must have at least 1 type option.
+# - Must have at least 2 type options if the first is None.
+# - Empty case branch (No fields) only for first discriminator value (0).
+macro isUnion*(x: type): untyped =
+  let T = x.getType[1]
+  let recList = T.getTypeImpl[2]
+
+  # no additional fields exist outside of the case
+  # branches
+  if recList.len != 1:
+    macros.error("no additional fields can exists outside of the case branches",
+      recList)
+
+  # case object has as first field the discriminator
+  let recCase = recList[0]
+  if recCase.kind != nnkRecCase:
+    macros.error("first field should be union discriminator", recCase)
+
+  # no need to check for this condition:
+  # Must have at least 1 type option.
+  # minus discriminator
+
+  # Must have at least 2 type options if the first is None.
+  let enumVal = recCase[1][0].intVal
+  if enumVal == 0:
+    # minus discriminator
+    if recCase.len - 1 < 2:
+      macros.error("union must have at least 2 type options if the first is None",
+        recCase)
+
+  # begin with 1: skip the discriminator
+  for i in 1..<recCase.len:
+    let branch = recCase[i]
+    let recList = if branch.kind == nnkOfBranch:
+                    branch[1]
+                  else:
+                    branch[0] # else branch
+
+    let enumVal = if branch.kind == nnkOfBranch:
+                    branch[0].intVal
+                  else:
+                    # assume else branch
+                    # have the highest val
+                    recCase.len-1
+
+    # all case branches only have 1 field
+    if recList.len > 1:
+      macros.error("union branches can only have 1 field", recList)
+
+    if enumVal >= 127:
+      macros.error("enum size exceeds 127, got " & $enumVal, branch)
+
+    # Empty case branch (No fields) only for first discriminator value (0).
+    if recList.len == 0 and enumVal != 0:
+      macros.error("only None discriminator can have empty case branch", recList)
+
+  result = newEmptyNode()
+
 macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
   var res = newStmtList()
   let TInst = RecordType.getTypeInst[1]
@@ -244,8 +307,7 @@ proc readSszValue*[T](input: openArray[byte],
 
   elif val is object|tuple:
     when isCaseObject(T):
-      # TODO: Same compile time checks on the case object (isUnion) as mentioned
-      # in `writeVarSizeType()` TODO item should be applied here.
+      isUnion(type(val))
       val = initSszUnion(type(val), input)
     else:
       let inputLen = uint32 input.len

@@ -167,14 +167,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError]
     writeSeq(w, bytes value)
   elif value is object|tuple|array:
     when isCaseObject(type(value)):
-      # TODO: Add an compile time `isUnion` call that checks if the case object
-      # has as first field the discriminator, and that all case branches only
-      # have 1 field, and that no additional fields exist outside of the case
-      # branches. Also following rules should apply:
-      # - enum size range < 127 (or perhaps just max sizeof 1 byte).
-      # - Must have at least 1 type option.
-      # - Must have at least 2 type options if the first is None.
-      # - Empty case branch (No fields) only for first discriminator value (0).
+      isUnion(type(value))
 
       trs "WRITING SSZ Union"
 
@@ -214,14 +207,14 @@ proc writeValue*(w: var SszWriter, x: auto) {.gcsafe, raises: [Defect, IOError].
   else:
     w.writeVarSizeType toSszType(x)
 
-func sszSize*(value: auto): int {.gcsafe, raises: [Defect].}
+func sszSize*(value: auto): int {.gcsafe, raises:[].}
 
-func sszSizeForVarSizeList[T](value: openArray[T]): int =
+func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
   result = len(value) * offsetSize
   for elem in value:
     result += sszSize(toSszType elem)
 
-func sszSize*(value: auto): int {.gcsafe, raises: [Defect].} =
+func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   mixin toSszType
   type T = type toSszType(value)
 
@@ -247,6 +240,7 @@ func sszSize*(value: auto): int {.gcsafe, raises: [Defect].} =
 
   elif T is object|tuple:
     when T.isCaseObject():
+      isUnion(T)
       # TODO: Need to add sszSize for case object (SSZ Union)
       unsupported T
     result = anonConst fixedPortionSize(T)
