@@ -241,13 +241,13 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   elif T is object|tuple:
     when T.isCaseObject():
       isUnion(T)
-      # TODO: Need to add sszSize for case object (SSZ Union)
-      unsupported T
-    result = anonConst fixedPortionSize(T)
-    enumInstanceSerializedFields(value, _{.used.}, field):
-      type FieldType = type toSszType(field)
-      when not isFixedSize(FieldType):
-        result += sszSize(toSszType field)
+      unionSize(value)
+    else:
+      result = anonConst fixedPortionSize(T)
+      enumInstanceSerializedFields(value, _{.used.}, field):
+        type FieldType = type toSszType(field)
+        when not isFixedSize(FieldType):
+          result += sszSize(toSszType field)
 
   else:
     unsupported T

@@ -150,6 +150,49 @@ macro isUnion*(x: type): untyped =
 
   result = newEmptyNode()
 
+macro unionSizeImpl(id: typed, x: type): untyped =
+  let
+    T = x.getType[1]
+    recList = T.getTypeImpl[2]
+    recCase = recList[0]
+    kind = recCase[0][0]
+    TKind = recCase[0][1]
+
+  var hasNull = false
+
+  result = quote do:
+    case `id`.`kind`
+    of `TKind`(0): 1
+
+  # begin with 1: skip the discriminator
+  for i in 1..<recCase.len:
+    let branch = recCase[i]
+    if branch.kind == nnkOfBranch:
+      let recList = branch[1]
+      let enumVal = branch[0].intVal
+      if enumVal == 0:
+        hasNull = true
+      else:
+        let field = recList[0][0]
+        result.add nnkOfBranch.newTree(
+          (quote do: `TKind`(`enumVal`)),
+          quote do: 1 + sszSize(`id`.`field`)
+        )
+    else:
+      # else branch
+      let recList = branch[0]
+      let field = recList[0][0]
+      result.add nnkElse.newTree(
+        quote do: 1 + sszSize(`id`.`field`)
+      )
+
+  if not hasNull:
+    macros.error("no null branch detected", recCase)
+
+func unionSize*(val: auto): int {.gcsafe, raises:[].} =
+  type T = type val
+  unionSizeImpl(val, T)
+
 macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
   var res = newStmtList()
   let TInst = RecordType.getTypeInst[1]
