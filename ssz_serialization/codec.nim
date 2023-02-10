@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2022 Status Research & Development GmbH
+# Copyright (c) 2018-2023 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -16,8 +16,8 @@ else:
 # and from the SSZ library must have a `fromSssBytes` and `toSszType` overload.
 
 import
-  std/typetraits,
-  stew/[endians2, objects], stew/shims/macros,
+  std/[options, typetraits],
+  stew/[endians2, objects, results], stew/shims/macros,
   ./types
 
 export
@@ -332,6 +332,21 @@ proc readSszValue*[T](input: openArray[byte],
         offset = nextOffset
 
       readSszValue(input.toOpenArray(offset, input.len - 1), val[resultLen - 1])
+
+  elif val is OptionalType:
+    type E = ElemType(T)
+    if input.len == 0:
+      when val is Option:
+        val = options.none(E)
+      else:
+        val = Opt.none(E)
+    else:
+      var v: E
+      readSszValue(input, v)
+      when val is Option:
+        val = options.some(v)
+      else:
+        val = Opt.some(v)
 
   elif val is SingleMemberUnion:
     readSszValue(input.toOpenArray(0, 0), val.selector)
