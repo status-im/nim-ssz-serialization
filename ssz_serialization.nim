@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2022 Status Research & Development GmbH
+# Copyright (c) 2018-2023 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -16,8 +16,8 @@ else:
 # https://github.com/ethereum/consensus-specs/blob/v1.0.1/ssz/simple-serialize.md#serialization
 
 import
-  std/typetraits,
-  stew/[endians2, leb128, objects],
+  std/[options, typetraits],
+  stew/[endians2, leb128, objects, results],
   serialization, serialization/testing/tracing,
   ./ssz_serialization/[codec, bitseqs, types]
 
@@ -165,6 +165,9 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError]
     # ATTENTION! We can reuse `writeSeq` only as long as our BitList type is implemented
     # to internally match the binary representation of SSZ BitLists in memory.
     writeSeq(w, bytes value)
+  elif value is OptionalType:
+    if value.isSome:
+      w.writeValue value.get
   elif value is object|tuple|array:
     when isCaseObject(type(value)):
       isUnion(type(value))

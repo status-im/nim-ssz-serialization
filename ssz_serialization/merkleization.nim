@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2022 Status Research & Development GmbH
+# Copyright (c) 2018-2023 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -15,7 +15,7 @@ else:
   {.push raises: [].}
 
 import
-  std/[algorithm, sequtils],
+  std/[algorithm, options, sequtils],
   stew/[assign2, bitops2, endians2, ptrops, results],
   stew/ranges/ptr_arith, nimcrypto/[hash, sha2],
   serialization/testing/tracing,
@@ -706,6 +706,11 @@ func hashTreeRootAux[T](x: T): Digest =
     const totalChunks = maxChunksCount(T, x.maxLen)
     let contentsHash = chunkedHashTreeRoot(totalChunks, asSeq x)
     mixInLength(contentsHash, x.len)
+  elif T is OptionalType:
+    if x.isSome:
+      mixInLength(hash_tree_root(toSszType(x.get)), length = 1)
+    else:
+      zeroHashes[1]
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8
     merkleizeFields(Limit 2):
@@ -856,6 +861,54 @@ func hashTreeRootAux[T](
             ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                    atLayer + chunkLayer)
             i = j
+      else: return unsupportedIndex
+  elif T is OptionalType:
+    const
+      totalChunks = Limit 1
+      firstChunkIndex = nextPow2(totalChunks.uint64)
+      chunkLayer = log2trunc(firstChunkIndex)
+    var i = slice.a
+    while i <= slice.b:
+      let
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+      if index == 1.GeneralizedIndex:
+        if x.isSome:
+          rootAt(i) = mixInLength(hash_tree_root(toSszType(x.get)), length = 1)
+        else:
+          rootAt(i) = zeroHashes[1]
+        inc i
+      elif index == 3.GeneralizedIndex:
+        if x.isSome:
+          rootAt(i) = hashTreeRootAux(1.uint64)
+        else:
+          rootAt(i) = zeroHashes[0]
+        inc i
+      elif index == 2.GeneralizedIndex:
+        if x.isSome:
+          rootAt(i) = hash_tree_root(x.get)
+        else:
+          rootAt(i) = zeroHashes[0]
+        inc i
+      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+        if x.isNone: return unsupportedIndex
+        let
+          atLayer = atLayer + 1
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+          chunk = chunkContainingIndex(index)
+        var j = i + 1
+        while j <= slice.b:
+          let
+            index = indexAt(j)
+            indexLayer = log2trunc(index)
+          if indexLayer <= chunkLayer or
+              chunkContainingIndex(index) != chunk:
+            break
+          inc j
+        ? hash_tree_root_multi(x.get, indices, roots, loopOrder, i ..< j,
+                               atLayer + chunkLayer)
+        i = j
       else: return unsupportedIndex
   elif T is SingleMemberUnion:
     doAssert x.selector == 0'u8

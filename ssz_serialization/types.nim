@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2022 Status Research & Development GmbH
+# Copyright (c) 2018-2023 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -11,8 +11,9 @@ else:
   {.push raises: [].}
 
 import
-  std/[tables, typetraits, strformat],
-  stew/shims/macros, stew/[byteutils, bitops2, objects], stint, nimcrypto/hash,
+  std/[options, tables, typetraits, strformat],
+  stew/shims/macros, stew/[byteutils, bitops2, objects, results], stint,
+  nimcrypto/hash,
   serialization/[object_serialization, errors],
   json_serialization,
   "."/[bitseqs]
@@ -30,6 +31,7 @@ type
 
   UintN* = SomeUnsignedInt|UInt128|UInt256
   BasicType* = bool|UintN
+  OptionalType* = Option|Opt
 
   Limit* = int64
 
@@ -423,6 +425,9 @@ macro unsupported*(T: typed): untyped =
   else:
     error "SSZ serialization of the type " & humaneTypeName(T) & " is not supported, overload toSszType and fromSszBytes"
 
+template ElemType*(T0: type OptionalType): untyped =
+  T0.T
+
 template ElemType*(T0: type HashArray): untyped =
   T0.T
 
@@ -447,6 +452,8 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
     return true
   elif T is array|HashArray:
     return isFixedSize(ElemType(T))
+  elif T is OptionalType:
+    return false
   elif T is object|tuple:
     when isCaseObject(T):
       return false
