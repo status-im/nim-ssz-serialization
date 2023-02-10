@@ -35,15 +35,13 @@ proc doTest[T](name: string, value: Option[T] | Opt[T]) =
           value.hash_tree_root(2.GeneralizedIndex).get == zeroHashes[0]
           value.hash_tree_root(3.GeneralizedIndex).get == zeroHashes[0]
       else:
+        let v = value.unsafeGet
         check:
-          SSZ.encode(value) == SSZ.encode(value.get)
-          value.hash_tree_root() == List[T, 1](@[value.get]).hash_tree_root()
-          value.hash_tree_root(1.GeneralizedIndex).get ==
-            value.hash_tree_root()
-          value.hash_tree_root(2.GeneralizedIndex).get ==
-            value.get.hash_tree_root()
-          value.hash_tree_root(3.GeneralizedIndex).get ==
-            hash_tree_root(1.uint64)
+          SSZ.encode(value) == SSZ.encode(v)
+          value.hash_tree_root() == List[T, 1](@[v]).hash_tree_root()
+          value.hash_tree_root(1.GeneralizedIndex).get == value.hash_tree_root()
+          value.hash_tree_root(2.GeneralizedIndex).get == v.hash_tree_root()
+          value.hash_tree_root(3.GeneralizedIndex).get == hash_tree_root(1'u64)
       check SSZ.decode(SSZ.encode(value), typeof(value)) == value
 
 proc testCase[T](name: string, value: Opt[T]) =
