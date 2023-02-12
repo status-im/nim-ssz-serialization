@@ -241,6 +241,12 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   elif T is SingleMemberUnion:
     sszSize(toSszType value.value) + 1
 
+  elif T is OptionalType:
+    if value.isSome:
+      sszSize(value.unsafeGet)
+    else:
+      0
+
   elif T is object|tuple:
     when T.isCaseObject():
       isUnion(T)

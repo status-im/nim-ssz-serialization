@@ -30,6 +30,7 @@ proc doTest[T](name: string, value: Option[T] | Opt[T]) =
       if value.isNone:
         check:
           SSZ.encode(value) == []
+          sszSize(value) == 0
           value.hash_tree_root() == List[T, 1](@[]).hash_tree_root()
           value.hash_tree_root(1.GeneralizedIndex).get == zeroHashes[1]
           value.hash_tree_root(2.GeneralizedIndex).get == zeroHashes[0]
@@ -38,6 +39,7 @@ proc doTest[T](name: string, value: Option[T] | Opt[T]) =
         let v = value.unsafeGet
         check:
           SSZ.encode(value) == SSZ.encode(v)
+          sszSize(value) == SSZ.encode(value).len
           value.hash_tree_root() == List[T, 1](@[v]).hash_tree_root()
           value.hash_tree_root(1.GeneralizedIndex).get == value.hash_tree_root()
           value.hash_tree_root(2.GeneralizedIndex).get == v.hash_tree_root()
@@ -111,6 +113,15 @@ suite "SSZ Optional":
     Opt.none(array[5, uint64])
   testCase "Vector - Some (2)",
     Opt.some([uint64(64), 64, 64, 64, 64])
+
+  testCase "List - None (1)",
+    Opt.none(List[uint64, 1])
+  testCase "List - Some (1)",
+    Opt.some(List[uint64, 1](@[uint64(64)]))
+  testCase "List - Some (2)",
+    Opt.some(List[Foo, 1](@[Foo(a: 64, b: Opt.some(uint32(32)))]))
+  testCase "List - Some (3)",
+    Opt.some(List[Foo, 1](@[Foo(a: 64, b: Opt.some(uint32(32)), c: options.some(uint16(16)))]))
 
   testCase "Bitvector - None (1)",
     Opt.none(BitArray[1])
