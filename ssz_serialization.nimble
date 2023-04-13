@@ -28,3 +28,6 @@ proc test(args, path: string) =
 task test, "Run all tests":
   test "--threads:off -d:PREFER_BLST_SHA256=false", "tests/test_all"
   test "--threads:on -d:PREFER_BLST_SHA256=false", "tests/test_all"
+  if (NimMajor, NimMinor) > (1, 6):
+    test "--mm:refc --threads:off -d:PREFER_BLST_SHA256=false", "tests/test_all"
+    test "--mm:refc --threads:on -d:PREFER_BLST_SHA256=false", "tests/test_all"
