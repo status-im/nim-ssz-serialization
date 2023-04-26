@@ -135,15 +135,15 @@ suite "SSZ Optional":
   testCase "Bitlist - None (1)",
     Opt.none(BitList[0])
   testCase "Bitlist - Some (1)",
-    Opt.some(Bitlist[0](@[byte(0x01)]))
+    Opt.some(BitList[0](@[byte(0x01)]))
   testCase "Bitlist - None (2)",
-    Opt.none(Bitlist[1])
+    Opt.none(BitList[1])
   testCase "Bitlist - Some (2)",
-    Opt.some(Bitlist[1](@[byte(0x03)]))
+    Opt.some(BitList[1](@[byte(0x03)]))
   testCase "Bitlist - None (3)",
-    Opt.none(Bitlist[9])
+    Opt.none(BitList[9])
   testCase "Bitlist - Some (3)",
-    Opt.some(Bitlist[9](@[byte(0x03)]))
+    Opt.some(BitList[9](@[byte(0x03)]))
 
   type
     Kind {.pure.} = enum

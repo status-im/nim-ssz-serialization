@@ -162,10 +162,20 @@ jobs:
           nim --version
           nimble --version
           nimble install -y --depsOnly
-          env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
-          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
-          if [[ "${{ matrix.branch }}" == "devel" ]]; then
-            echo -e "\nTesting with '--gc:orc':\n"
-            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
-            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
+          env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
+          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
+          if [[ "${{ matrix.branch }}" != "version-1-6" ]]; then
+            echo -e "\nTesting with Nim devel default (currently '--mm:orc'):\n"
+            if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:orc" nimble test; then
+              if [[ "${{ matrix.branch }}" == "devel" && "${PLATFORM}" != "x86" ]]; then
+                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+                false
+              fi
+            fi
+            if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:orc" nimble test; then
+              if [[ "${{ matrix.branch }}" == "devel" && "${PLATFORM}" != "x86" ]]; then
+                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+                false
+              fi
+            fi
           fi
