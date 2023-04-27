@@ -17,10 +17,10 @@ import
 proc doTest[T](name: string, value: Option[T] | Opt[T]) =
   test name:
     const isUnsupported =
-      when T is object:
-        when T is OptionalType:
-          false
-        elif T.isCaseObject():
+      when T is OptionalType:
+        false
+      elif T is object:
+        when T.isCaseObject():
           true
         else:
           false
