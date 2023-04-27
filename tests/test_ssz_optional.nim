@@ -18,7 +18,9 @@ proc doTest[T](name: string, value: Option[T] | Opt[T]) =
   test name:
     const isUnsupported =
       when T is object:
-        when T.isCaseObject():
+        when T is OptionalType:
+          false
+        elif T.isCaseObject():
           true
         else:
           false
@@ -36,10 +38,14 @@ proc doTest[T](name: string, value: Option[T] | Opt[T]) =
           value.hash_tree_root(2.GeneralizedIndex).get == zeroHashes[0]
           value.hash_tree_root(3.GeneralizedIndex).get == zeroHashes[0]
       else:
-        let v = value.unsafeGet
+        let
+          v = value.unsafeGet
+          encoded = SSZ.encode(value)
         check:
-          SSZ.encode(value) == SSZ.encode(v)
-          sszSize(value) == SSZ.encode(value).len
+          encoded.len >= 1
+          encoded[0] == 0x01
+          encoded[1 ..< encoded.len] == SSZ.encode(v)
+          sszSize(value) == encoded.len
           value.hash_tree_root() == List[T, 1](@[v]).hash_tree_root()
           value.hash_tree_root(1.GeneralizedIndex).get == value.hash_tree_root()
           value.hash_tree_root(2.GeneralizedIndex).get == v.hash_tree_root()
@@ -91,6 +97,19 @@ suite "SSZ Optional":
   testCase "boolean - Some",
     Opt.some(bool(true))
 
+  testCase "Optional - None (1)",
+    Opt.none(Opt[uint64])
+  testCase "Optional - None (2)",
+    Opt.none(Option[uint64])
+  testCase "Optional - Some(None) (1)",
+    Opt.some(Opt.none(uint64))
+  testCase "Optional - Some(None) (2)",
+    Opt.some(options.none(uint64))
+  testCase "Optional - Some(Some) (1)",
+    Opt.some(Opt.some(uint64(64)))
+  testCase "Optional - Some(Some) (2)",
+    Opt.some(options.some(uint64(64)))
+
   type Foo = object
     a: uint64
     b: Opt[uint32]
@@ -117,11 +136,29 @@ suite "SSZ Optional":
   testCase "List - None (1)",
     Opt.none(List[uint64, 1])
   testCase "List - Some (1)",
-    Opt.some(List[uint64, 1](@[uint64(64)]))
+    Opt.some(List[uint64, 1](@[]))
   testCase "List - Some (2)",
-    Opt.some(List[Foo, 1](@[Foo(a: 64, b: Opt.some(uint32(32)))]))
+    Opt.some(List[uint64, 1](@[uint64(64)]))
   testCase "List - Some (3)",
-    Opt.some(List[Foo, 1](@[Foo(a: 64, b: Opt.some(uint32(32)), c: options.some(uint16(16)))]))
+    Opt.some(List[uint64, 5](@[uint64(64), 64]))
+  testCase "List - None (2)",
+    Opt.none(List[Opt[uint64], 9])
+  testCase "List - None (3)",
+    Opt.none(List[Option[uint64], 9])
+  testCase "List - Some (4)",
+    Opt.some(List[Opt[uint64], 9](@[
+      Opt.none(uint64), Opt.some(uint64(64))]))
+  testCase "List - Some (5)",
+    Opt.some(List[Option[uint64], 9](@[
+      options.none(uint64), options.some(uint64(64))]))
+  testCase "List - Some (6)",
+    Opt.some(List[Foo, 1](@[Foo(a: 64, b: Opt.some(uint32(32)))]))
+  testCase "List - Some (7)",
+    Opt.some(List[Opt[Foo], 1](@[Opt[Foo].some(
+      Foo(a: 64, b: Opt.some(uint32(32)), c: options.some(uint16(16))))]))
+  testCase "List - Some (8)",
+    Opt.some(List[Option[Foo], 1](@[options.some(
+      Foo(a: 64, b: Opt.some(uint32(32)), c: options.some(uint16(16))))]))
 
   testCase "Bitvector - None (1)",
     Opt.none(BitArray[1])

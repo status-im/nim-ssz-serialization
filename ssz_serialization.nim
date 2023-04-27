@@ -167,6 +167,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError]
     writeSeq(w, bytes value)
   elif value is OptionalType:
     if value.isSome:
+      w.writeValue 1'u8
       w.writeValue value.get
   elif value is object|tuple|array:
     when isCaseObject(type(value)):
@@ -243,7 +244,7 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
 
   elif T is OptionalType:
     if value.isSome:
-      sszSize(value.unsafeGet)
+      1 + sszSize(value.unsafeGet)
     else:
       0
 
