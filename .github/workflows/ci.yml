@@ -166,7 +166,7 @@ jobs:
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
           if [[ "${{ matrix.branch }}" == "devel" ]]; then
             echo -e "\nTesting with '--gc:orc':\n"
-            if [[ "${{ matrix.target.cpu == 'i386' }}" ]]; then
+            if [[ "${{ matrix.target.cpu }}" == "i386" ]]; then
               env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
               env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
             else
