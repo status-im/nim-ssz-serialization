@@ -164,17 +164,24 @@ jobs:
           nimble install -y --depsOnly
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
-          if [[ "${{ matrix.branch }}" != "version-1-6" ]]; then
+          # Previously, at least attempted to run ORC on devel and newer, but
+          # macOS x86-64 ORC on devel will otherwise time out:
+          # 2023-04-26T16:21:47.6557560Z [Suite] SSZ Optional
+          # 2023-04-26T16:21:47.6558430Z [OK] uint8 - None - Opt
+          # 2023-04-26T16:21:47.6558740Z [OK] uint8 - None - Option
+          # 2023-04-26T22:06:56.0683740Z ##[error]The operation was canceled.
+          # https://github.com/status-im/nim-ssz-serialization/actions/runs/4807288565/jobs/8563823711?pr=45
+          if [[ "${{ matrix.branch }}" != "version-1-6" && "${{ matrix.target.os }}" != "macos" ]]; then
             echo -e "\nTesting with Nim devel default (currently '--mm:orc'):\n"
-            if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:orc" nimble test; then
+            if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test; then
               if [[ "${{ matrix.branch }}" == "devel" && "${PLATFORM}" != "x86" ]]; then
-                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+                echo "Nim devel with --mm:orc works again! Please remove this check in ci.yml"
                 false
               fi
             fi
-            if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:orc" nimble test; then
+            if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test; then
               if [[ "${{ matrix.branch }}" == "devel" && "${PLATFORM}" != "x86" ]]; then
-                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+                echo "Nim devel with --mm:orc works again! Please remove this check in ci.yml"
                 false
               fi
             fi
