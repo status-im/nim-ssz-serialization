@@ -166,8 +166,8 @@ jobs:
             env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
             env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
           else
-            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
-            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
+            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
+            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
             echo -e "\nTesting with Nim devel default (currently '--mm:orc'):\n"
             if [[ "${{ matrix.target.cpu }}" == "i386" ]]; then
               env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
