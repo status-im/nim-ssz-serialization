@@ -22,7 +22,7 @@ jobs:
             cpu: amd64
           #- os: windows
             #cpu: i386
-        branch: [version-1-2, version-1-4, version-1-6, version-2-0, devel]
+        branch: [version-1-6, version-2-0, devel]
         include:
           - target:
               os: linux
@@ -165,33 +165,40 @@ jobs:
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
           if [[ "${{ matrix.branch }}" == "devel" ]]; then
-            echo -e "\nTesting with '--gc:orc':\n"
+            echo -e "\nTesting with Nim devel default (currently '--mm:orc'):\n"
             if [[ "${{ matrix.target.cpu }}" == "i386" ]]; then
-              env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
-              env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
+              env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
+              env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
             elif [[ "${{ matrix.target.os }}" == "macos" ]]; then
+              # Previously, at least attempted to run ORC on devel and newer, but
+              # macOS x86-64 ORC on devel will otherwise time out:
+              # 2023-04-26T16:21:47.6557560Z [Suite] SSZ Optional
+              # 2023-04-26T16:21:47.6558430Z [OK] uint8 - None - Opt
+              # 2023-04-26T16:21:47.6558740Z [OK] uint8 - None - Option
+              # 2023-04-26T22:06:56.0683740Z ##[error]The operation was canceled.
+              # https://github.com/status-im/nim-ssz-serialization/actions/runs/4807288565/jobs/8563823711?pr=45
               brew install coreutils
-              if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" gtimeout 30m nimble test; then
-                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+              if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" gtimeout 60m nimble test; then
+                echo "Nim devel with --mm:orc works again! Please remove this check in ci.yml"
                 false
               elif (( $? != 124 )); then
-                echo "Nim devel with --gc:orc no longer times out! Please remove this check in ci.yml"
+                echo "Nim devel with --mm:orc no longer times out! Please remove this check in ci.yml"
                 false
               fi
-              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:orc" gtimeout 30m nimble test; then
-                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" gtimeout 60m nimble test; then
+                echo "Nim devel with --mm:orc works again! Please remove this check in ci.yml"
                 false
               elif (( $? != 124 )); then
-                echo "Nim devel with --gc:orc no longer times out! Please remove this check in ci.yml"
+                echo "Nim devel with --mm:orc no longer times out! Please remove this check in ci.yml"
                 false
               fi
             else
-              if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test; then
-                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+              if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test; then
+                echo "Nim devel with --mm:orc works again! Please remove this check in ci.yml"
                 false
               fi
-              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test; then
-                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test; then
+                echo "Nim devel with --mm:orc works again! Please remove this check in ci.yml"
                 false
               fi
             fi

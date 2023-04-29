@@ -7,7 +7,7 @@ description   = "Simple Serialize (SSZ) serialization and merkleization"
 license       = "Apache License 2.0"
 skipDirs      = @["tests"]
 
-requires "nim >= 1.2.0",
+requires "nim >= 1.6.0",
          "serialization",
          "json_serialization",
          "stew",
@@ -21,7 +21,7 @@ proc test(args, path: string) =
     mkDir "build"
   exec "nim " & getEnv("TEST_LANG", "c") & " " & getEnv("NIMFLAGS") & " " & args &
     " -r --skipParentCfg" &
-    " --styleCheck:usages --styleCheck:hint" &
+    " --styleCheck:usages --styleCheck:error" &
     " --hint[XDeclaredButNotUsed]:off --hint[Processing]:off " &
     path
 
