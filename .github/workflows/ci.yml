@@ -162,9 +162,12 @@ jobs:
           nim --version
           nimble --version
           nimble install -y --depsOnly
-          env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
-          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
-          if [[ "${{ matrix.branch }}" == "devel" ]]; then
+          if [[ "${{ matrix.branch }}" == "version-1-6" ]]; then
+            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
+            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
+          else
+            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
+            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:refc" nimble test
             echo -e "\nTesting with Nim devel default (currently '--mm:orc'):\n"
             if [[ "${{ matrix.target.cpu }}" == "i386" ]]; then
               env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
