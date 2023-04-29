@@ -169,6 +169,22 @@ jobs:
             if [[ "${{ matrix.target.cpu }}" == "i386" ]]; then
               env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
               env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test
+            elif [[ "${{ matrix.target.os }}" == "macos" ]]; then
+              brew install coreutils
+              if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" gtimeout 30m nimble test; then
+                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+                false
+              elif (( $? != 124 )); then
+                echo "Nim devel with --gc:orc no longer times out! Please remove this check in ci.yml"
+                false
+              fi
+              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --gc:orc" gtimeout 30m nimble test; then
+                echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
+                false
+              elif (( $? != 124 )); then
+                echo "Nim devel with --gc:orc no longer times out! Please remove this check in ci.yml"
+                false
+              fi
             else
               if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --gc:orc" nimble test; then
                 echo "Nim devel with --gc:orc works again! Please remove this check in ci.yml"
