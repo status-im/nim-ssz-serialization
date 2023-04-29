@@ -165,6 +165,17 @@ jobs:
           if [[ "${{ matrix.branch }}" == "version-1-6" ]]; then
             env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
             env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
+          elif [[ "${{ matrix.branch }}" != "devel" ]]; then
+            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
+            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
+            if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test; then
+              echo "Nim ${{ matrix.branch }} with --mm:orc (C) works again! Please remove this check in ci.yml"
+              false
+            fi
+            if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test; then
+              echo "Nim ${{ matrix.branch }} with --mm:orc (CPP) works again! Please remove this check in ci.yml"
+              false
+            fi
           else
             env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
             env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
