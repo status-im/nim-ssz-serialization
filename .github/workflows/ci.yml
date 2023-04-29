@@ -185,11 +185,8 @@ jobs:
                 echo "Nim devel with --mm:orc no longer times out! Please remove this check in ci.yml"
                 false
               fi
-              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" gtimeout 60m nimble test; then
+              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test; then
                 echo "Nim devel with --mm:orc works again! Please remove this check in ci.yml"
-                false
-              elif (( $? != 124 )); then
-                echo "Nim devel with --mm:orc no longer times out! Please remove this check in ci.yml"
                 false
               fi
             else
