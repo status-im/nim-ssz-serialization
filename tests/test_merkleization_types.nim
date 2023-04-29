@@ -38,8 +38,8 @@ type
     c: uint16
     d: uint32
     e: uint64
-    f: Uint128
-    g: Uint256
+    f: UInt128
+    g: UInt256
     h: BitArray[40]
     i: BitArray[333]
     j: BitList[40]
