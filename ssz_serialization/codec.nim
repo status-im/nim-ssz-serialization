@@ -341,8 +341,13 @@ proc readSszValue*[T](input: openArray[byte],
       else:
         val = Opt.none(E)
     else:
+      var isSome: uint8
+      readSszValue(input.toOpenArray(0, 0), isSome)
+      if isSome != 1:
+        raiseMalformedSszError(
+          T, "Unexpected isSome " & $isSome & " (expected: 1)")
       var v: E
-      readSszValue(input, v)
+      readSszValue(input.toOpenArray(1, input.len - 1), v)
       when val is Option:
         val = options.some(v)
       else:
