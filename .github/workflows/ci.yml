@@ -22,7 +22,7 @@ jobs:
             cpu: amd64
           #- os: windows
             #cpu: i386
-        branch: [version-1-6, version-2-0, devel]
+        branch: [version-1-6, version-2-0]
         include:
           - target:
               os: linux
@@ -66,13 +66,6 @@ jobs:
           EOF
           chmod 755 external/bin/gcc external/bin/g++
           echo '${{ github.workspace }}/external/bin' >> $GITHUB_PATH
-
-      - name: 'Install dependencies (macOS)'
-        if: runner.os == 'macOS' && matrix.branch == 'devel'
-        run: |
-          brew install openssl@1.1
-          ln -s $(brew --prefix)/opt/openssl/lib/libcrypto.1.1.dylib /usr/local/lib
-          ln -s $(brew --prefix)/opt/openssl/lib/libssl.1.1.dylib /usr/local/lib/
 
       - name: MSYS2 (Windows i386)
         if: runner.os == 'Windows' && matrix.target.cpu == 'i386'
@@ -165,7 +158,7 @@ jobs:
           if [[ "${{ matrix.branch }}" == "version-1-6" ]]; then
             env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
             env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
-          elif [[ "${{ matrix.branch }}" != "devel" ]]; then
+          else
             env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
             env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
             if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test; then
@@ -175,42 +168,5 @@ jobs:
             if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test; then
               echo "Nim ${{ matrix.branch }} with --mm:orc (CPP) works again! Please remove this check in ci.yml"
               false
-            fi
-          else
-            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
-            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
-            echo -e "\nTesting with Nim ${{ matrix.branch }} `--mm` default (currently '--mm:orc'):\n"
-            if [[ "${{ matrix.target.cpu }}" == "i386" ]]; then
-              env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
-              env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
-            elif [[ "${{ matrix.target.os }}" == "macos" ]]; then
-              # Previously, at least attempted to run ORC on devel and newer, but
-              # macOS x86-64 ORC on devel will otherwise time out:
-              # 2023-04-26T16:21:47.6557560Z [Suite] SSZ Optional
-              # 2023-04-26T16:21:47.6558430Z [OK] uint8 - None - Opt
-              # 2023-04-26T16:21:47.6558740Z [OK] uint8 - None - Option
-              # 2023-04-26T22:06:56.0683740Z ##[error]The operation was canceled.
-              # https://github.com/status-im/nim-ssz-serialization/actions/runs/4807288565/jobs/8563823711?pr=45
-              brew install coreutils
-              if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" gtimeout 60m nimble test; then
-                echo "Nim ${{ matrix.branch }} with --mm:orc (C) works again! Please remove this check in ci.yml"
-                false
-              elif (( $? != 124 )); then
-                echo "Nim ${{ matrix.branch }} with --mm:orc (C) no longer times out! Please remove this check in ci.yml"
-                false
-              fi
-              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test; then
-                echo "Nim ${{ matrix.branch }} with --mm:orc (CPP) works again! Please remove this check in ci.yml"
-                false
-              fi
-            else
-              if env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test; then
-                echo "Nim ${{ matrix.branch }} with --mm:orc (C) works again! Please remove this check in ci.yml"
-                false
-              fi
-              if env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test; then
-                echo "Nim ${{ matrix.branch }} with --mm:orc (CPP) works again! Please remove this check in ci.yml"
-                false
-              fi
             fi
           fi
