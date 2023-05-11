@@ -17,7 +17,7 @@ else:
 import
   std/[algorithm, sequtils],
   stew/[assign2, bitops2, endians2, ptrops, results],
-  stew/ranges/ptr_arith, nimcrypto/[hash, sha2],
+  nimcrypto/[hash, sha2],
   serialization/testing/tracing,
   "."/[bitseqs, codec, types]
 

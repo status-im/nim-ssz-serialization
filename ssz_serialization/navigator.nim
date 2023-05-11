@@ -13,7 +13,7 @@ else:
 {.pragma: raisesssz, raises: [Defect, MalformedSszError, SszSizeMismatchError].}
 
 import
-  stew/[ptrops, objects], stew/ranges/ptr_arith,
+  stew/[ptrops, objects],
   ./codec, ./types
 
 export codec, types
