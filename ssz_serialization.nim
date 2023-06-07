@@ -28,7 +28,6 @@ type
     stream: OutputStream
 
   SizePrefixed*[T] = distinct T
-  SszMaxSizeExceeded* = object of SerializationError
 
   VarSizedWriterCtx = object
     fixedParts: WriteCursor
