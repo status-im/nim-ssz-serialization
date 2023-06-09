@@ -6,7 +6,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [Defect, MalformedSszError, SszSizeMismatchError].}
+{.pragma: raisesssz, raises: [MalformedSszError, SszSizeMismatchError].}
 
 ## SSZ serialization for core SSZ types, as specified in:
 # https://github.com/ethereum/consensus-specs/blob/v1.0.1/ssz/simple-serialize.md#serialization
@@ -48,7 +48,7 @@ proc init*(T: type SszReader,
            stream: InputStream): T =
   T(stream: stream)
 
-proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [Defect, IOError].} =
+proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [IOError].} =
   mixin toSszType
 
   when x is byte:
@@ -85,7 +85,7 @@ template supports*(_: type SSZ, T: type): bool =
 func init*(T: type SszWriter, stream: OutputStream): T =
   result.stream = stream
 
-proc writeVarSizeType(w: var SszWriter, value: auto) {.gcsafe, raises: [Defect, IOError].}
+proc writeVarSizeType(w: var SszWriter, value: auto) {.gcsafe, raises: [IOError].}
 
 proc beginRecord*(w: var SszWriter, TT: type): auto  =
   type T = TT
@@ -124,7 +124,7 @@ template endRecord*(w: var SszWriter, ctx: var auto) =
     finalize ctx.fixedParts
 
 proc writeSeq[T](w: var SszWriter, value: seq[T])
-                {.raises: [Defect, IOError].} =
+                {.raises: [IOError].} =
   # Please note that `writeSeq` exists in order to reduce the code bloat
   # produced from generic instantiations of the unique `List[N, T]` types.
   when isFixedSize(T):
@@ -144,7 +144,7 @@ proc writeSeq[T](w: var SszWriter, value: seq[T])
     finalize cursor
     trs "DONE"
 
-proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError].} =
+proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
   trs "STARTING VAR SIZE TYPE"
 
   when value is HashArray|HashList:
@@ -197,7 +197,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [Defect, IOError]
   else:
     unsupported type(value)
 
-proc writeValue*(w: var SszWriter, x: auto) {.gcsafe, raises: [Defect, IOError].} =
+proc writeValue*(w: var SszWriter, x: auto) {.gcsafe, raises: [IOError].} =
   mixin toSszType
   type T = type toSszType(x)
 
@@ -257,7 +257,7 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   else:
     unsupported T
 
-proc writeValue*[T](w: var SszWriter, x: SizePrefixed[T]) {.raises: [Defect, IOError].} =
+proc writeValue*[T](w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} =
   var cursor = w.stream.delayVarSizeWrite(Leb128.maxLen(uint64))
   let initPos = w.stream.pos
   w.writeValue T(x)
@@ -265,7 +265,7 @@ proc writeValue*[T](w: var SszWriter, x: SizePrefixed[T]) {.raises: [Defect, IOE
   cursor.finalWrite length.toOpenArray()
 
 proc readValue*(r: var SszReader, val: var auto) {.
-    raises: [Defect, MalformedSszError, SszSizeMismatchError, IOError].} =
+    raises: [ MalformedSszError, SszSizeMismatchError, IOError].} =
   mixin readSszBytes
   type T = type val
   when isFixedSize(T):
@@ -280,7 +280,7 @@ proc readValue*(r: var SszReader, val: var auto) {.
     readSszBytes(r.stream.read(r.stream.len.get), val)
 
 proc readSszBytes*[T](data: openArray[byte], val: var T) {.
-    raises: [Defect, MalformedSszError, SszSizeMismatchError].} =
+    raises: [MalformedSszError, SszSizeMismatchError].} =
   # Overload `readSszBytes` to perform custom operations on T after
   # deserialization
   mixin readSszValue

@@ -6,7 +6,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [Defect, IOError, MalformedSszError, SszSizeMismatchError].}
+{.pragma: raisesssz, raises: [IOError, MalformedSszError, SszSizeMismatchError].}
 
 import
   std/[strutils, parseutils],
@@ -109,7 +109,7 @@ func `[]`*(n: DynamicSszNavigator, idx: int): DynamicSszNavigator {.raisesssz.} 
   DynamicSszNavigator(m: n.typ.navigator(n.m, idx), typ: n.typ.elemType)
 
 func navigate*(n: DynamicSszNavigator, path: string): DynamicSszNavigator {.
-               raises: [Defect, KeyError, IOError, MalformedSszError, SszSizeMismatchError, ValueError] .} =
+               raises: [KeyError, IOError, MalformedSszError, SszSizeMismatchError, ValueError] .} =
   case n.typ.kind
   of Record:
     let fieldInfo = n.typ.fields.findField(path)
@@ -136,11 +136,11 @@ template navigatePathImpl(nav, iterabalePathFragments: untyped) =
       return
 
 func navigatePath*(n: DynamicSszNavigator, path: string): DynamicSszNavigator {.
-                   raises: [Defect, IOError, ValueError, MalformedSszError, SszSizeMismatchError] .} =
+                   raises: [IOError, ValueError, MalformedSszError, SszSizeMismatchError] .} =
   navigatePathImpl n, split(path, '/')
 
 func navigatePath*(n: DynamicSszNavigator, path: openArray[string]): DynamicSszNavigator {.
-                   raises: [Defect, IOError, ValueError, MalformedSszError, SszSizeMismatchError] .} =
+                   raises: [IOError, ValueError, MalformedSszError, SszSizeMismatchError] .} =
   navigatePathImpl n, path
 
 func init*(T: type DynamicSszNavigator,

@@ -573,7 +573,7 @@ template enumerateSubFields*(holder, fieldVar, body: untyped) =
 
 method formatMsg*(
   err: ref SszSizeMismatchError,
-  filename: string): string {.gcsafe, raises: [Defect].} =
+  filename: string): string {.gcsafe, raises: [].} =
   try:
     &"SSZ size mismatch, element {err.elementSize}, actual {err.actualSszSize}, type {err.deserializedType}, file {filename}"
   except CatchableError:
@@ -592,11 +592,11 @@ template writeValue*(writer: var JsonWriter, value: List) =
     writeValue(writer, asSeq value)
 
 proc writeValue*(writer: var JsonWriter, value: HashList)
-                {.raises: [IOError, SerializationError, Defect].} =
+                {.raises: [IOError, SerializationError].} =
   writeValue(writer, value.data)
 
 proc readValue*(reader: var JsonReader, value: var HashList)
-               {.raises: [IOError, SerializationError, Defect].} =
+               {.raises: [IOError, SerializationError].} =
   value.resetCache()
   readValue(reader, value.data)
 

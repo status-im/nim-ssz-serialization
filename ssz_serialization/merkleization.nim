@@ -462,7 +462,7 @@ func mixInLength*(root: Digest, length: int): Digest =
   dataLen[0..<8] = uint64(length).toBytesLE()
   mergeBranches(root, dataLen)
 
-func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [Defect].}
+func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [].}
 
 func hash_tree_root_multi(
     x: auto,
@@ -470,7 +470,7 @@ func hash_tree_root_multi(
     roots: var openArray[Digest],
     loopOrder: seq[int],
     slice: Slice[int],
-    atLayer = 0): Result[void, string] {.gcsafe, raises: [Defect].}
+    atLayer = 0): Result[void, string] {.gcsafe, raises: [].}
 
 template addField(field) =
   let hash = hash_tree_root(field)
