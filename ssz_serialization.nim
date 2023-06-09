@@ -265,7 +265,7 @@ proc writeValue*[T](w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} 
   cursor.finalWrite length.toOpenArray()
 
 proc readValue*(r: var SszReader, val: var auto) {.
-    raises: [ MalformedSszError, SszSizeMismatchError, IOError].} =
+    raises: [MalformedSszError, SszSizeMismatchError, IOError].} =
   mixin readSszBytes
   type T = type val
   when isFixedSize(T):
