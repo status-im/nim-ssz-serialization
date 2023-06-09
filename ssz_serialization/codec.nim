@@ -56,7 +56,7 @@ func fromSszBytes*(T: type bool, data: openArray[byte]): T {.raisesssz.} =
     raiseMalformedSszError(bool, "invalid boolean value")
   data[0] == 1
 
-func fromSszBytes*(T: type Digest, data: openArray[byte]): T {.raisesssz.} =
+func fromSszBytes*(T: type Digest, data: openArray[byte]): T {.raisesssz, noinit.} =
   if data.len != sizeof(result.data):
     raiseIncorrectSize T
   copyMem(result.data.addr, unsafeAddr data[0], sizeof(result.data))

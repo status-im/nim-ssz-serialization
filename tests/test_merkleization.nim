@@ -78,7 +78,7 @@ let cases = (
 suite "Merkleization":
   test "Calculate correct root from provided chunks":
     for testCase in cases.fields:
-      var merk = createMerkleizer(testCase.limit)
+      var merk = createMerkleizer(testCase.limit, internalParam = true)
       var i: uint32 = 0
 
       while i < testCase.count:
