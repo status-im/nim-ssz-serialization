@@ -6,7 +6,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [Defect, MalformedSszError, SszSizeMismatchError].}
+{.pragma: raisesssz, raises: [MalformedSszError, SszSizeMismatchError].}
 
 # Coding and decoding of primitive SSZ types - every "simple" type passed to
 # and from the SSZ library must have a `fromSssBytes` and `toSszType` overload.
@@ -20,7 +20,7 @@ export
   types
 
 func reallyRaiseMalformedSszError(typeName, msg: string) {.
-    raises: [Defect, MalformedSszError], noinline, noreturn.} =
+    raises: [MalformedSszError], noinline, noreturn.} =
   # `noinline` helps keep the C code tight on the happy path
   # passing `typeName` in avoids generating generic copies of this function
   raise (ref MalformedSszError)(msg: "SSZ " & typeName & ": " & msg)
