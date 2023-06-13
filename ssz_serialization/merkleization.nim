@@ -460,7 +460,7 @@ template createMerkleizer*(
   trs "CREATING A MERKLEIZER FOR ", totalElements, " (topLayer: ", topLayer, ")"
 
   const treeHeight = binaryTreeHeight totalElements
-  var combinedChunks {.noinit.}: array[treeHeight + 1, (Digest, Digest)]
+  var combinedChunks {.noinit.}: array[treeHeight, (Digest, Digest)]
 
   let topIndex = treeHeight - 1 - topLayer
 
