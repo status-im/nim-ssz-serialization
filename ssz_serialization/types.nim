@@ -44,6 +44,9 @@ func nextPow2Int64(x: int64): int64 =
   # TODO the nextPow2 in bitops2 works with uint64 - there's a bug in the nim
   #      compiler preventing it to be used - it seems that a conversion to
   #      uint64 cannot be done with the static maxLen :(
+  #
+  #      Works in Nim 2.0 and newer, so remove workaround when Nim 1.6 support
+  #      is dropped
   var v = x - 1
 
   # round down, make sure all bits are 1 below the threshold, then add 1
