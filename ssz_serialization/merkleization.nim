@@ -201,6 +201,9 @@ func addChunk*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
 
   inc merkleizer.totalChunks
 
+template isOdd(x: SomeNumber): bool =
+  (x and 1) != 0
+
 func addChunks*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
   doAssert merkleizer.totalChunks == 0
 
