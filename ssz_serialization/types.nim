@@ -158,25 +158,25 @@ template asSeq*(x: List): auto = distinctBase(x)
 template init*[T, N](L: type List[T, N], x: seq[T]): auto =
   List[T, N](x)
 
-template `$`*(x: List): auto = $(distinctBase x)
-template len*(x: List): auto = len(distinctBase x)
-template low*(x: List): auto = low(distinctBase x)
-template high*(x: List): auto = high(distinctBase x)
+template `$`*(x: List): auto = $(distinctBase(x))
+template len*(x: List): auto = len(distinctBase(x))
+template low*(x: List): auto = low(distinctBase(x))
+template high*(x: List): auto = high(distinctBase(x))
 template `[]`*(x: List, idx: auto): untyped = distinctBase(x)[idx]
 template `[]=`*(x: var List, idx: auto, val: auto) = distinctBase(x)[idx] = val
 template `==`*(a, b: List): bool = distinctBase(a) == distinctBase(b)
 
 template `&`*(a, b: List): auto = (type(a)(distinctBase(a) & distinctBase(b)))
 
-template items* (x: List): untyped = items(distinctBase x)
-template pairs* (x: List): untyped = pairs(distinctBase x)
-template mitems*(x: var List): untyped = mitems(distinctBase x)
-template mpairs*(x: var List): untyped = mpairs(distinctBase x)
-template contains* (x: List, val: auto): untyped = contains(distinctBase x, val)
+template items* (x: List): untyped = items(distinctBase(x))
+template pairs* (x: List): untyped = pairs(distinctBase(x))
+template mitems*(x: var List): untyped = mitems(distinctBase(x))
+template mpairs*(x: var List): untyped = mpairs(distinctBase(x))
+template contains* (x: List, val: auto): untyped = contains(distinctBase(x), val)
 
 func add*(x: var List, val: auto): bool =
   if x.len < x.maxLen:
-    add(distinctBase x, val)
+    add(distinctBase(x), val)
     true
   else:
     false
@@ -186,16 +186,16 @@ func setLenUninitialized*(x: var List, newLen: int): bool =
     # TODO https://github.com/nim-lang/Nim/issues/19727
     when List.T is SomeNumber:
       if x.len !=  newLen:
-        distinctBase x = newSeqUninitialized[x.T](newLen)
+        distinctBase(x) = newSeqUninitialized[x.T](newLen)
     else:
-      setLen(distinctBase x, newLen)
+      setLen(distinctBase(x), newLen)
     true
   else:
     false
 
 func setLen*(x: var List, newLen: int): bool =
   if newLen <= x.maxLen:
-    setLen(distinctBase x, newLen)
+    setLen(distinctBase(x), newLen)
     true
   else:
     false
