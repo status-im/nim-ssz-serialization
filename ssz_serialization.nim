@@ -13,7 +13,7 @@
 
 import
   std/[options, typetraits],
-  stew/[endians2, leb128, objects, results],
+  stew/[endians2, leb128, objects, ptrops, results],
   serialization, serialization/testing/tracing,
   ./ssz_serialization/[codec, bitseqs, types]
 
@@ -61,9 +61,11 @@ proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [IOEr
     else:
       s.writeMemCopy x
   elif x is array:
-    when x[0] is byte:
+    type ET = ElemType(type x)
+    when supportsBulkCopy(ET) or ET is bool:
       trs "APPENDING FIXED SIZE BYTES: ", x
-      s.write x
+      let p = cast[ptr byte](baseAddr x)
+      s.write makeOpenArray(p, x.len * sizeof(x[0]))
     else:
       for elem in x:
         trs "WRITING FIXED SIZE ARRAY ELEMENT"
@@ -123,11 +125,16 @@ template endRecord*(w: var SszWriter, ctx: var auto) =
   when ctx is VarSizedWriterCtx:
     finalize ctx.fixedParts
 
-proc writeSeq[T](w: var SszWriter, value: seq[T])
-                {.raises: [IOError].} =
-  # Please note that `writeSeq` exists in order to reduce the code bloat
+proc writeElements[T](w: var SszWriter, value: openArray[T])
+                     {.raises: [IOError].} =
+  # Please note that `writeElements` exists in order to reduce the code bloat
   # produced from generic instantiations of the unique `List[N, T]` types.
-  when isFixedSize(T):
+  when supportsBulkCopy(T):
+    trs "BULK COPYING ELEMENTS"
+    let p = cast[ptr byte](baseAddr value)
+    w.stream.write makeOpenArray(p, sizeof(T) * value.len)
+    trs "DONE"
+  elif isFixedSize(T):
     trs "WRITING LIST WITH FIXED SIZE ELEMENTS"
     for elem in value:
       w.stream.writeFixedSized toSszType(elem)
@@ -153,18 +160,19 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     doAssert value.selector == 0'u8
     w.writeValue 0'u8
     w.writeValue value.value
+  elif value is array:
+    writeElements(w, value)
   elif value is List:
-    # We reduce code bloat by forwarding all `List` types to a general `seq[T]` proc.
-    writeSeq(w, asSeq value)
+    writeElements(w, asSeq value)
   elif value is BitList:
     # ATTENTION! We can reuse `writeSeq` only as long as our BitList type is implemented
     # to internally match the binary representation of SSZ BitLists in memory.
-    writeSeq(w, bytes value)
+    writeElements(w, bytes value)
   elif value is OptionalType:
     if value.isSome:
       w.writeValue 1'u8
       w.writeValue value.get
-  elif value is object|tuple|array:
+  elif value is object|tuple:
     when isCaseObject(type(value)):
       isUnion(type(value))
 
@@ -189,7 +197,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
         else:
           w.writeVarSizeType toSszType(field)
     else:
-      trs "WRITING OBJECT OR ARRAY"
+      trs "WRITING OBJECT"
       var ctx = beginRecord(w, type value)
       enumerateSubFields(value, field):
         writeField w, ctx, astToStr(field), field
