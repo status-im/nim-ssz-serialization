@@ -246,12 +246,14 @@ template clearCache*(v: var Digest) =
 
 template maxChunks*(a: HashList|HashArray): int64 =
   ## Layer where data is
-  maxChunkIdx(a.T, a.maxLen)
+  const v = maxChunkIdx(a.T, a.maxLen) # force compile-time eval
+  v
 
 template maxDepth*(a: HashList|HashArray): int =
   ## Layer where data is
   static: doAssert a.maxChunks <= high(int64) div 2
-  layer(nextPow2(a.maxChunks.uint64).int64)
+  const v = layer(nextPow2(a.maxChunks.uint64).int64) # force compile-time eval
+  v
 
 template chunkIdx(a: HashList|HashArray, dataIdx: int64): int64 =
   chunkIdx(a.T, dataIdx)
