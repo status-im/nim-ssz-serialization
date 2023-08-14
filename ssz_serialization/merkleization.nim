@@ -192,23 +192,19 @@ template combineChunks(merkleizer: var SszMerkleizerImpl, start: int) =
       break
 
 template addChunkDirect(merkleizer: var SszMerkleizerImpl, body: untyped) =
+  # add chunk allowing `body` to write directly to `chunk` memory thus avoiding
+  # an extra copy - body must completely fill the chunk, including any zero
+  # padding
   if getBitLE(merkleizer.totalChunks, 0):
-    template chunk: Digest {.inject.} =
-      merkleizer.combinedChunks[0][1]
+    template chunk: Digest {.inject.} = merkleizer.combinedChunks[0][1]
     body
-
     merkleizer.combineChunks(0)
-
   else:
-    template chunk: Digest {.inject.} =
-      merkleizer.combinedChunks[0][0]
+    template chunk: Digest {.inject.} = merkleizer.combinedChunks[0][0]
     body
-    trs "WROTE BASE CHUNK ",
-      toHex(merkleizer.combinedChunks[0][0].data), " ", data.len
+    trs "WROTE BASE CHUNK ", toHex(merkleizer.combinedChunks[0][0].data)
 
   inc merkleizer.totalChunks
-
-
 
 func addChunk*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
   doAssert data.len > 0 and data.len <= bytesPerChunk
