@@ -32,6 +32,9 @@ type
 
   Limit* = int64
 
+  PartialContainer*[T; N: static Limit] = object
+    data*: T
+
   Digest* = MDigest[32 * 8]
 
 # A few index types from here onwards:

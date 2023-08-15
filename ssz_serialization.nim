@@ -164,6 +164,29 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     if value.isSome:
       w.writeValue 1'u8
       w.writeValue value.get
+  elif value is PartialContainer:
+    var
+      fieldIndex = 0
+      activeFields: BitArray[type(value).N]
+    enumerateSubFields(value.data, field):
+      doAssert fieldIndex < type(value).N,
+        $type(value).T & " has more than " & $type(value).N & " fields"
+      type T = type toSszType(field)
+      when T is OptionalType:
+        if field.isSome:
+          activeFields.setBit(fieldIndex)
+      else:
+        activeFields.setBit(fieldIndex)
+      inc fieldIndex
+    w.writeValue activeFields
+    enumerateSubFields(value.data, field):
+      type T = type toSszType(field)
+      when T is OptionalType:
+        if field.isSome:
+          w.writeValue toSszType(field.get)
+      else:
+        w.writeValue toSszType(field)
+
   elif value is object|tuple|array:
     when isCaseObject(type(value)):
       isUnion(type(value))
