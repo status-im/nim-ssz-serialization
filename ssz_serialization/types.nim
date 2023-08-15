@@ -8,7 +8,7 @@
 {.push raises: [].}
 
 import
-  std/[options, tables, typetraits, strformat],
+  std/[tables, typetraits, strformat],
   stew/shims/macros, stew/[byteutils, bitops2, objects, results], stint,
   nimcrypto/hash,
   serialization/[object_serialization, errors],
@@ -239,10 +239,12 @@ template isCached*(v: Digest): bool =
 
   # Checking and resetting the cache status are hotspots - profile before
   # touching!
-  cast[ptr uint64](unsafeAddr v.data[0])[] != 0 # endian safe
+  var tmp {.noinit.}: uint64
+  copyMem(addr tmp, unsafeAddr v.data[0], sizeof(tmp))
+  tmp != 0
 
 template clearCache*(v: var Digest) =
-  cast[ptr uint64](addr v.data[0])[] = 0 # endian safe
+  zeroMem(addr v.data[0], sizeof(uint64))
 
 template maxChunks*(a: HashList|HashArray): int64 =
   ## Layer where data is
@@ -627,8 +629,8 @@ proc writeValue*(writer: var JsonWriter, value: HashList)
 
 proc readValue*(reader: var JsonReader, value: var HashList)
                {.raises: [IOError, SerializationError].} =
-  value.resetCache()
   readValue(reader, value.data)
+  value.resetCache()
 
 template readValue*(reader: var JsonReader, value: var BitList) =
   type T = type(value)
