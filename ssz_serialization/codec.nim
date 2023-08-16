@@ -36,7 +36,7 @@ template setOutputSize[R, T](a: var array[R, T], length: int) =
   if length != a.len:
     raiseIncorrectSize a.type
 
-proc setOutputSize(list: var List, length: int) {.raisesssz.} =
+func setOutputSize(list: var List, length: int) {.raisesssz.} =
   # We will overwrite all bytes
   if not list.setLenUninitialized length:
     raiseMalformedSszError(typeof(list), "length exceeds list limit")
@@ -65,7 +65,7 @@ func fromSszBytes*(T: type Digest, data: openArray[byte]): T {.raisesssz, noinit
 template fromSszBytes*(T: type BitSeq, bytes: openArray[byte]): auto =
   BitSeq @bytes
 
-proc `[]`[T, U, V](s: openArray[T], x: HSlice[U, V]) {.error:
+func `[]`[T, U, V](s: openArray[T], x: HSlice[U, V]) {.error:
   "Please don't use openArray's [] as it allocates a result sequence".}
 
 template checkForForbiddenBits(ResulType: type,
@@ -351,12 +351,6 @@ proc readSszValue*[T](input: openArray[byte],
         val = options.some(v)
       else:
         val = Opt.some(v)
-
-  elif val is SingleMemberUnion:
-    readSszValue(input.toOpenArray(0, 0), val.selector)
-    if val.selector != 0'u8:
-      raiseMalformedSszError(T, "SingleMemberUnion selector must be 0")
-    readSszValue(input.toOpenArray(1, input.len - 1), val.value)
 
   elif val is UintN|bool:
     val = fromSszBytes(T, input)
