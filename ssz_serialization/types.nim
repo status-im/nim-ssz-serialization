@@ -489,6 +489,8 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
     return isFixedSize(ElemType(T))
   elif T is OptionalType:
     return false
+  elif T is PartialContainer:
+    return false
   elif T is object|tuple:
     when isCaseObject(T):
       return false
@@ -508,6 +510,8 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     type E = ElemType(T)
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
+  elif T is PartialContainer:
+    unsupported T0
   elif T is object|tuple:
     enumAllSerializedFields(T):
       when isFixedSize(FieldType):

@@ -52,10 +52,13 @@ proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [IOEr
   mixin toSszType
 
   when x is byte:
+    trs "appending byte"
     s.write x
   elif x is bool:
+    trs "appending bool"
     s.write byte(ord(x))
   elif x is UintN:
+    trs "appending uintN"
     when cpuEndian == bigEndian:
       s.write toBytesLE(x)
     else:
@@ -89,7 +92,7 @@ func init*(T: type SszWriter, stream: OutputStream): T =
 
 proc writeVarSizeType(w: var SszWriter, value: auto) {.gcsafe, raises: [IOError].}
 
-proc beginRecord*(w: var SszWriter, TT: type): auto  =
+proc beginRecord(w: var SszWriter, TT: type): auto  =
   type T = TT
   when isFixedSize(T):
     FixedSizedWriterCtx()
@@ -99,10 +102,10 @@ proc beginRecord*(w: var SszWriter, TT: type): auto  =
     VarSizedWriterCtx(offset: offset,
                       fixedParts: w.stream.delayFixedSizeWrite(offset))
 
-template writeField*(w: var SszWriter,
-                     ctx: var auto,
-                     fieldName: string,
-                     field: auto) =
+template writeField(w: var SszWriter,
+                    ctx: var auto,
+                    fieldName: string,
+                    field: auto) =
   mixin toSszType
   when ctx is FixedSizedWriterCtx:
     writeFixedSized(w.stream, toSszType(field))
@@ -112,16 +115,16 @@ template writeField*(w: var SszWriter,
     when isFixedSize(FieldType):
       writeFixedSized(ctx.fixedParts, toSszType(field))
     else:
-      trs "WRITING OFFSET ", ctx.offset, " FOR ", fieldName
+      echo "WRITING OFFSET ", ctx.offset, " FOR ", fieldName
       writeOffset(ctx.fixedParts, ctx.offset)
       let initPos = w.stream.pos
-      trs "WRITING VAR SIZE VALUE OF TYPE ", name(FieldType)
+      echo "WRITING VAR SIZE VALUE OF TYPE ", name(FieldType)
       when FieldType is BitList:
-        trs "BIT SEQ ", bytes(field)
+        echo "BIT SEQ ", bytes(field)
       writeVarSizeType(w, toSszType(field))
       ctx.offset += w.stream.pos - initPos
 
-template endRecord*(w: var SszWriter, ctx: var auto) =
+template endRecord(w: var SszWriter, ctx: var auto) =
   when ctx is VarSizedWriterCtx:
     finalize ctx.fixedParts
 
@@ -176,6 +179,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     var
       fieldIndex = 0
       activeFields: BitArray[type(value).N]
+      fixedSize = 0
     enumerateSubFields(value.data, field):
       doAssert fieldIndex < type(value).N,
         $type(value).T & " has more than " & $type(value).N & " fields"
@@ -183,18 +187,35 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       when T is OptionalType:
         if field.isSome:
           activeFields.setBit(fieldIndex)
+          type E = ElemType(T)
+          when isFixedSize(E):
+            echo "Adding " & $static(fixedPortionSize(E)) & " - " & $E
+            fixedSize += static(fixedPortionSize(E))
+          else:
+            fixedSize += sizeof(uint32)
       else:
         activeFields.setBit(fieldIndex)
+        when isFixedSize(T):
+          echo "Adding " & $static(fixedPortionSize(T)) & " - " & $T
+          fixedSize += static(fixedPortionSize(T))
+        else:
+          fixedSize += sizeof(uint32)
       inc fieldIndex
     w.writeValue activeFields
-    var ctx = beginRecord(w, type(value).T)
+    echo "Serializing with offset " & $fixedSize
+    var ctx = VarSizedWriterCtx(
+      offset: fixedSize,
+      fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
     enumerateSubFields(value.data, field):
       type T = type toSszType(field)
       when T is OptionalType:
         if field.isSome:
-          writeField w, ctx, astToStr(field.get), field.get
+          echo "Adding field " & $T
+          writeField w, ctx, astToStr(field), field.get
       else:
+        echo "Adding field " & $T
         writeField w, ctx, astToStr(field), field
+    echo "ending record"
     endRecord w, ctx
 
   elif value is object|tuple:
