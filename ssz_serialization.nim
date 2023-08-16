@@ -187,13 +187,15 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
         activeFields.setBit(fieldIndex)
       inc fieldIndex
     w.writeValue activeFields
+    var ctx = beginRecord(w, type(value).T)
     enumerateSubFields(value.data, field):
       type T = type toSszType(field)
       when T is OptionalType:
         if field.isSome:
-          w.writeValue toSszType(field.get)
+          writeField w, ctx, astToStr(field.get), field.get
       else:
-        w.writeValue toSszType(field)
+        writeField w, ctx, astToStr(field), field
+    endRecord w, ctx
 
   elif value is object|tuple:
     when isCaseObject(type(value)):
