@@ -115,12 +115,12 @@ template writeField(w: var SszWriter,
     when isFixedSize(FieldType):
       writeFixedSized(ctx.fixedParts, toSszType(field))
     else:
-      echo "WRITING OFFSET ", ctx.offset, " FOR ", fieldName
+      trs "WRITING OFFSET ", ctx.offset, " FOR ", fieldName
       writeOffset(ctx.fixedParts, ctx.offset)
       let initPos = w.stream.pos
-      echo "WRITING VAR SIZE VALUE OF TYPE ", name(FieldType)
+      trs "WRITING VAR SIZE VALUE OF TYPE ", name(FieldType)
       when FieldType is BitList:
-        echo "BIT SEQ ", bytes(field)
+        trs "BIT SEQ ", bytes(field)
       writeVarSizeType(w, toSszType(field))
       ctx.offset += w.stream.pos - initPos
 
@@ -189,20 +189,17 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
           activeFields.setBit(fieldIndex)
           type E = ElemType(T)
           when isFixedSize(E):
-            echo "Adding " & $static(fixedPortionSize(E)) & " - " & $E
             fixedSize += static(fixedPortionSize(E))
           else:
             fixedSize += sizeof(uint32)
       else:
         activeFields.setBit(fieldIndex)
         when isFixedSize(T):
-          echo "Adding " & $static(fixedPortionSize(T)) & " - " & $T
           fixedSize += static(fixedPortionSize(T))
         else:
           fixedSize += sizeof(uint32)
       inc fieldIndex
     w.writeValue activeFields
-    echo "Serializing with offset " & $fixedSize
     var ctx = VarSizedWriterCtx(
       offset: fixedSize,
       fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
@@ -210,12 +207,9 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       type T = type toSszType(field)
       when T is OptionalType:
         if field.isSome:
-          echo "Adding field " & $T
           writeField w, ctx, astToStr(field), field.get
       else:
-        echo "Adding field " & $T
         writeField w, ctx, astToStr(field), field
-    echo "ending record"
     endRecord w, ctx
 
   elif value is object|tuple:
