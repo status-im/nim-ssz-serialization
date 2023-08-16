@@ -8,7 +8,7 @@
 {.push raises: [].}
 
 import
-  std/[options, tables, typetraits, strformat],
+  std/[tables, typetraits, strformat],
   stew/shims/macros, stew/[byteutils, bitops2, objects, results], stint,
   nimcrypto/hash,
   serialization/[object_serialization, errors],
@@ -149,43 +149,56 @@ type
     actualSszSize*: int
     elementSize*: int
 
-  # These are supported by the SSZ library - anything that's not covered here
-  # needs to overload toSszType and fromSszBytes
+  # These are directly supported by the SSZ library - anything that's not
+  # covered here needs to create overloads for toSszType / fromSszBytes
+  # (basic types) or writeValue / readValue (complex types)
   SszType* =
     BasicType | array | HashArray | List | HashList | BitArray | BitList |
-    object | tuple
+    Digest | object | tuple
 
 template asSeq*(x: List): auto = distinctBase(x)
 
 template init*[T, N](L: type List[T, N], x: seq[T]): auto =
   List[T, N](x)
 
-template `$`*(x: List): auto = $(distinctBase x)
-template len*(x: List): auto = len(distinctBase x)
-template low*(x: List): auto = low(distinctBase x)
-template high*(x: List): auto = high(distinctBase x)
+template `$`*(x: List): auto = $(distinctBase(x))
+template len*(x: List): auto = len(distinctBase(x))
+template low*(x: List): auto = low(distinctBase(x))
+template high*(x: List): auto = high(distinctBase(x))
 template `[]`*(x: List, idx: auto): untyped = distinctBase(x)[idx]
 template `[]=`*(x: var List, idx: auto, val: auto) = distinctBase(x)[idx] = val
 template `==`*(a, b: List): bool = distinctBase(a) == distinctBase(b)
 
 template `&`*(a, b: List): auto = (type(a)(distinctBase(a) & distinctBase(b)))
 
-template items* (x: List): untyped = items(distinctBase x)
-template pairs* (x: List): untyped = pairs(distinctBase x)
-template mitems*(x: var List): untyped = mitems(distinctBase x)
-template mpairs*(x: var List): untyped = mpairs(distinctBase x)
-template contains* (x: List, val: auto): untyped = contains(distinctBase x, val)
+template items* (x: List): untyped = items(distinctBase(x))
+template pairs* (x: List): untyped = pairs(distinctBase(x))
+template mitems*(x: var List): untyped = mitems(distinctBase(x))
+template mpairs*(x: var List): untyped = mpairs(distinctBase(x))
+template contains* (x: List, val: auto): untyped = contains(distinctBase(x), val)
 
 func add*(x: var List, val: auto): bool =
   if x.len < x.maxLen:
-    add(distinctBase x, val)
+    add(distinctBase(x), val)
+    true
+  else:
+    false
+
+func setLenUninitialized*(x: var List, newLen: int): bool =
+  if newLen <= x.maxLen:
+    # TODO https://github.com/nim-lang/Nim/issues/19727
+    when List.T is SomeNumber:
+      if x.len !=  newLen:
+        distinctBase(x) = newSeqUninitialized[x.T](newLen)
+    else:
+      setLen(distinctBase(x), newLen)
     true
   else:
     false
 
 func setLen*(x: var List, newLen: int): bool =
   if newLen <= x.maxLen:
-    setLen(distinctBase x, newLen)
+    setLen(distinctBase(x), newLen)
     true
   else:
     false
@@ -229,19 +242,23 @@ template isCached*(v: Digest): bool =
 
   # Checking and resetting the cache status are hotspots - profile before
   # touching!
-  cast[ptr uint64](unsafeAddr v.data[0])[] != 0 # endian safe
+  var tmp {.noinit.}: uint64
+  copyMem(addr tmp, unsafeAddr v.data[0], sizeof(tmp))
+  tmp != 0
 
 template clearCache*(v: var Digest) =
-  cast[ptr uint64](addr v.data[0])[] = 0 # endian safe
+  zeroMem(addr v.data[0], sizeof(uint64))
 
 template maxChunks*(a: HashList|HashArray): int64 =
   ## Layer where data is
-  maxChunkIdx(a.T, a.maxLen)
+  const v = maxChunkIdx(a.T, a.maxLen) # force compile-time eval
+  v
 
 template maxDepth*(a: HashList|HashArray): int =
   ## Layer where data is
   static: doAssert a.maxChunks <= high(int64) div 2
-  layer(nextPow2(a.maxChunks.uint64).int64)
+  const v = layer(nextPow2(a.maxChunks.uint64).int64) # force compile-time eval
+  v
 
 template chunkIdx(a: HashList|HashArray, dataIdx: int64): int64 =
   chunkIdx(a.T, dataIdx)
@@ -446,6 +463,21 @@ template ElemType*(T: type seq): untyped =
 template ElemType*(T0: type List): untyped =
   T0.T
 
+func supportsBulkCopy*(T: type): bool {.compileTime.} =
+  # Bulk copy types are those that match the following requirements:
+  # * have no padding / alignment differences compared to their raw SSZ encoding
+  # * have no validity constraints (ie bool which must be 0/1)
+  # * supportsCopyMem (of course)
+  when T is array:
+    supportsBulkCopy(ElemType(T))
+  elif T is Digest:
+    true
+  else:
+    when cpuEndian == bigEndian:
+      T is byte
+    else:
+      T is UintN
+
 func isFixedSize*(T0: type): bool {.compileTime.} =
   mixin toSszType, enumAllSerializedFields
 
@@ -572,10 +604,7 @@ func getFieldBoundingOffsets*(RecordType: type,
   anonConst getFieldBoundingOffsetsImpl(T, fieldName)
 
 template enumerateSubFields*(holder, fieldVar, body: untyped) =
-  when holder is array|HashArray:
-    for fieldVar in holder: body
-  else:
-    enumInstanceSerializedFields(holder, _{.used.}, fieldVar): body
+  enumInstanceSerializedFields(holder, _{.used.}, fieldVar): body
 
 method formatMsg*(
   err: ref SszSizeMismatchError,
@@ -603,8 +632,8 @@ proc writeValue*(writer: var JsonWriter, value: HashList)
 
 proc readValue*(reader: var JsonReader, value: var HashList)
                {.raises: [IOError, SerializationError].} =
-  value.resetCache()
   readValue(reader, value.data)
+  value.resetCache()
 
 template readValue*(reader: var JsonReader, value: var BitList) =
   type T = type(value)

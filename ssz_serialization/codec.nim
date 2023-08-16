@@ -37,7 +37,8 @@ template setOutputSize[R, T](a: var array[R, T], length: int) =
     raiseIncorrectSize a.type
 
 proc setOutputSize(list: var List, length: int) {.raisesssz.} =
-  if not list.setLen length:
+  # We will overwrite all bytes
+  if not list.setLenUninitialized length:
     raiseMalformedSszError(typeof(list), "length exceeds list limit")
 
 # fromSszBytes copies the wire representation to a Nim variable,
@@ -278,27 +279,29 @@ proc readSszValue*[T](input: openArray[byte],
   elif val is HashList | HashArray:
     readSszValue(input, val.data)
     val.resetCache()
-
+  elif val is Digest:
+    readSszValue(input, val.data)
   elif val is List|array:
-    type E = type val[0]
+    type E = ElemType(type val)
 
-    when E is byte:
-      val.setOutputSize input.len
-      if input.len > 0:
-        copyMem(addr val[0], unsafeAddr input[0], input.len)
-
-    elif isFixedSize(E):
+    when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
-      if input.len mod elemSize != 0:
-        var ex = new SszSizeMismatchError
-        ex.deserializedType = cstring typetraits.name(T)
-        ex.actualSszSize = input.len
-        ex.elementSize = elemSize
-        raise ex
+      when elemSize > 1:
+        if input.len mod elemSize != 0:
+          var ex = new SszSizeMismatchError
+          ex.deserializedType = cstring typetraits.name(T)
+          ex.actualSszSize = input.len
+          ex.elementSize = elemSize
+          raise ex
+
       val.setOutputSize input.len div elemSize
-      for i in 0 ..< val.len:
-        let offset = i * elemSize
-        readSszValue(input.toOpenArray(offset, offset + elemSize - 1), val[i])
+      when supportsBulkCopy(type val[0]):
+        if val.len > 0:
+          copyMem addr val[0], unsafeAddr input[0], input.len
+      else:
+        for i in 0 ..< val.len:
+          let offset = i * elemSize
+          readSszValue(input.toOpenArray(offset, offset + elemSize - 1), val[i])
 
     else:
       if input.len == 0:
