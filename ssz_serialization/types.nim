@@ -89,6 +89,7 @@ template layer*(vIdx: int64): int =
 func hashListIndicesLen(maxChunkIdx: int64): int =
   # TODO: This exists only to work-around a compilation issue when the complex
   # expression is used directly in the HastList array size definition below
+  # https://github.com/nim-lang/Nim/issues/22491
   int(layer(maxChunkIdx)) + 1
 
 type
