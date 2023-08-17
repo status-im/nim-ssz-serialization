@@ -429,14 +429,14 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
 
   merkleizer.totalChunks = newTotalChunks
 
-proc init*(S: type SszMerkleizer): S =
+func init*(S: type SszMerkleizer): S =
   new result.combinedChunks
   result.impl = SszMerkleizerImpl(
     combinedChunks: makeUncheckedArray(baseAddr result.combinedChunks[]),
     topIndex: binaryTreeHeight(result.limit) - 1,
     totalChunks: 0)
 
-proc init*(S: type SszMerkleizer,
+func init*(S: type SszMerkleizer,
            combinedChunks: openArray[Digest],
            totalChunks: uint64): S =
   new result.combinedChunks
@@ -447,7 +447,7 @@ proc init*(S: type SszMerkleizer,
     topIndex: binaryTreeHeight(result.limit) - 1,
     totalChunks: totalChunks)
 
-proc copy*[L: static[Limit]](cloned: SszMerkleizer[L]): SszMerkleizer[L] =
+func copy*[L: static[Limit]](cloned: SszMerkleizer[L]): SszMerkleizer[L] =
   new result.combinedChunks
   result.combinedChunks[] = cloned.combinedChunks[]
   result.impl = SszMerkleizerImpl(
@@ -795,10 +795,6 @@ func hashTreeRootAux[T](x: T): Digest {.noinit.} =
       mixInLength(hash_tree_root(toSszType(x.get)), length = 1)
     else:
       zeroHashes[1]
-  elif T is SingleMemberUnion:
-    doAssert x.selector == 0'u8
-    merkleizeFields(Limit 2):
-      addField hash_tree_root(toSszType(x.value))
   elif T is object|tuple:
     # when T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
@@ -991,47 +987,6 @@ func hashTreeRootAux[T](
             break
           inc j
         ? hash_tree_root_multi(x.get, indices, roots, loopOrder, i ..< j,
-                               atLayer + chunkLayer)
-        i = j
-      else: return unsupportedIndex
-  elif T is SingleMemberUnion:
-    doAssert x.selector == 0'u8
-    const
-      totalChunks = Limit 1
-      firstChunkIndex = nextPow2(totalChunks.uint64)
-      chunkLayer = log2trunc(firstChunkIndex)
-    var i = slice.a
-    while i <= slice.b:
-      let
-        index = indexAt(i)
-        indexLayer = log2trunc(index)
-      if index == 1.GeneralizedIndex:
-        var merkleizer = createMerkleizer(Limit 2, internalParam = true)
-        addField x.value
-        rootAt(i) = getFinalHash(merkleizer)
-        inc i
-      elif index == 3.GeneralizedIndex:
-        rootAt(i) = Digest()
-        inc i
-      elif index == 2.GeneralizedIndex:
-        rootAt(i) = hash_tree_root(x.value)
-        inc i
-      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
-        let
-          atLayer = atLayer + 1
-          index = indexAt(i)
-          indexLayer = log2trunc(index)
-          chunk = chunkContainingIndex(index)
-        var j = i + 1
-        while j <= slice.b:
-          let
-            index = indexAt(j)
-            indexLayer = log2trunc(index)
-          if indexLayer <= chunkLayer or
-              chunkContainingIndex(index) != chunk:
-            break
-          inc j
-        ? hash_tree_root_multi(x.value, indices, roots, loopOrder, i ..< j,
                                atLayer + chunkLayer)
         i = j
       else: return unsupportedIndex
@@ -1397,7 +1352,7 @@ template normalize(v: GeneralizedIndex): GeneralizedIndex =
 # is required to fill in all the roots. `enumAllSerializedFields` cannot be
 # used for pre-computation at compile time, because the generalized indices
 # depend on the specific case values defined by the specific object instance.
-proc cmpDepthFirst(x, y: GeneralizedIndex): int =
+func cmpDepthFirst(x, y: GeneralizedIndex): int =
   cmp(x.normalize, y.normalize)
 
 func merkleizationLoopOrderNimvm(
