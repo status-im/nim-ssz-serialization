@@ -623,8 +623,8 @@ template writeValue*(writer: var JsonWriter, value: List) =
   else:
     writeValue(writer, asSeq value)
 
-proc writeValue*(writer: var JsonWriter, value: HashList)
-                {.raises: [IOError, SerializationError].} =
+proc writeValue*(
+    writer: var JsonWriter, value: HashList) {.raises: [IOError].} =
   writeValue(writer, value.data)
 
 proc readValue*(reader: var JsonReader, value: var HashList)
