@@ -258,7 +258,8 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   else:
     unsupported T
 
-proc writeValue*[T](w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} =
+proc writeValue*[T](
+    w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} =
   var cursor = w.stream.delayVarSizeWrite(Leb128.maxLen(uint64))
   let initPos = w.stream.pos
   w.writeValue T(x)
