@@ -261,6 +261,7 @@ proc readSszValue*[T](input: openArray[byte],
     when false:
       # TODO: Nim doesn't like this simple type coercion,
       #       we'll rely on `cast` for now (see below)
+      # https://github.com/nim-lang/Nim/issues/22523
       readSszValue(input, MatchingListType val)
     else:
       static:
