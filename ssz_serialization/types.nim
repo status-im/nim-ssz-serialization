@@ -548,12 +548,10 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
   else:
     unsupported T0
 
-# TODO This should have been an iterator, but the VM can't compile the
-# code due to "too many registers required".
-func fieldInfos*(RecordType: type): seq[tuple[name: string,
-                                              offset: int,
-                                              fixedSize: int,
-                                              branchKey: string]] =
+iterator fieldInfos(RecordType: type): tuple[name: string,
+                                             offset: int,
+                                             fixedSize: int,
+                                             branchKey: string] =
   mixin enumAllSerializedFields
 
   var
@@ -584,7 +582,7 @@ func fieldInfos*(RecordType: type): seq[tuple[name: string,
       except KeyError as e:
         raiseAssert e.msg
 
-    result.add((fieldName, fieldOffset, fixedSize, branchKey))
+    yield (fieldName, fieldOffset, fixedSize, branchKey)
 
 func getFieldBoundingOffsetsImpl(RecordType: type,
                                  fieldName: static string):
