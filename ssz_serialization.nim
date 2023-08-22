@@ -44,7 +44,7 @@ template sizePrefixed*[TT](x: TT): untyped =
   type T = TT
   SizePrefixed[T](x)
 
-proc init*(T: type SszReader,
+func init*(T: type SszReader,
            stream: InputStream): T =
   T(stream: stream)
 
@@ -92,7 +92,7 @@ func init*(T: type SszWriter, stream: OutputStream): T =
 
 proc writeVarSizeType(w: var SszWriter, value: auto) {.gcsafe, raises: [IOError].}
 
-proc beginRecord(w: var SszWriter, TT: type): auto  =
+func beginRecord(w: var SszWriter, TT: type): auto =
   type T = TT
   when isFixedSize(T):
     FixedSizedWriterCtx()
@@ -159,10 +159,6 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
 
   when value is HashArray|HashList:
     writeVarSizeType(w, value.data)
-  elif value is SingleMemberUnion:
-    doAssert value.selector == 0'u8
-    w.writeValue 0'u8
-    w.writeValue value.value
   elif value is array:
     writeElements(w, value)
   elif value is List:
@@ -282,9 +278,6 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   elif T is BitList:
     return len(bytes(value))
 
-  elif T is SingleMemberUnion:
-    sszSize(toSszType value.value) + 1
-
   elif T is OptionalType:
     if value.isSome:
       1 + sszSize(value.unsafeGet)
@@ -305,7 +298,8 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   else:
     unsupported T
 
-proc writeValue*[T](w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} =
+proc writeValue*[T](
+    w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} =
   var cursor = w.stream.delayVarSizeWrite(Leb128.maxLen(uint64))
   let initPos = w.stream.pos
   w.writeValue T(x)

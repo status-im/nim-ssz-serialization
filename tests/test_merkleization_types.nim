@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2021 Status Research & Development GmbH
+# Copyright (c) 2021-2023 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -52,7 +52,7 @@ type
     q: array[2, E]
     r: List[E, 2]
     s: List[E, 2]
-    t: SingleMemberUnion[E]
+    t: List[E, 2]
     u: E
     v: tuple[a, b: bool]
     w: tuple[a, b: E, c: bool]
@@ -95,7 +95,7 @@ let
     q: [E(x: false, y: true), E(x: true, y: false)],
     r: List[E, 2](@[E(x: false, y: true), E(x: true, y: false)]),
     s: List[E, 2](@[]),
-    t: SingleMemberUnion[E](selector: 0, value: E(x: false, y: true)),
+    t: List[E, 2](@[]),
     u: E(x: false, y: true),
     v: (a: false, b: true),
     w: (a: E(x: false, y: true), b: E(x: true, y: false), c: true),
@@ -188,9 +188,9 @@ let
       101: d(0'u64),
 
       # t
-      204: d(0'u8),
-      205: d(1'u8),
-      103: d(0'u8),
+      204: d(0.u256),
+      205: d(0.u256),
+      103: d(0'u64),
 
       # u
       104: d(0'u8),

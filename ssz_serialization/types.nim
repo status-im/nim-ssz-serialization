@@ -92,15 +92,12 @@ template layer*(vIdx: int64): int =
 func hashListIndicesLen(maxChunkIdx: int64): int =
   # TODO: This exists only to work-around a compilation issue when the complex
   # expression is used directly in the HastList array size definition below
+  # https://github.com/nim-lang/Nim/issues/22491
   int(layer(maxChunkIdx)) + 1
 
 type
   List*[T; maxLen: static Limit] = distinct seq[T]
   BitList*[maxLen: static Limit] = distinct BitSeq
-
-  SingleMemberUnion*[T] = object
-    selector*: uint8
-    value*: T
 
   HashArray*[maxLen: static Limit; T] = object
     ## Array implementation that caches the hash of each chunk of data - see
@@ -630,8 +627,8 @@ template writeValue*(writer: var JsonWriter, value: List) =
   else:
     writeValue(writer, asSeq value)
 
-proc writeValue*(writer: var JsonWriter, value: HashList)
-                {.raises: [IOError, SerializationError].} =
+proc writeValue*(
+    writer: var JsonWriter, value: HashList) {.raises: [IOError].} =
   writeValue(writer, value.data)
 
 proc readValue*(reader: var JsonReader, value: var HashList)
