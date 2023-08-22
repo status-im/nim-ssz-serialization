@@ -795,6 +795,29 @@ func hashTreeRootAux[T](x: T): Digest {.noinit.} =
       mixInLength(hash_tree_root(toSszType(x.get)), length = 1)
     else:
       zeroHashes[1]
+  elif T is PartialContainer:
+    var
+      fieldIndex = 0
+      activeFields: BitArray[type(x).N]
+    let root = merkleizeFields(Limit type(x).N):
+      x.data.enumerateSubFields(f):
+        doAssert fieldIndex < type(x).N
+        type F = type toSszType(f)
+        let isActive =
+          when F is OptionalType:
+            f.isSome
+          else:
+            true
+        if isActive:
+          when F is OptionalType:
+            addField f.get
+          else:
+            addField f
+          activeFields.setBit(fieldIndex)
+        else:
+          addField zeroHashes[0]
+        inc fieldIndex
+    mergeBranches(root, hash_tree_root(activeFields))
   elif T is object|tuple:
     # when T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)

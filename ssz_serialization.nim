@@ -177,31 +177,36 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       activeFields: BitArray[type(value).N]
       fixedSize = 0
     enumerateSubFields(value.data, field):
-      doAssert fieldIndex < type(value).N,
-        $type(value).T & " has more than " & $type(value).N & " fields"
-      type T = type toSszType(field)
-      when T is OptionalType:
-        if field.isSome:
-          activeFields.setBit(fieldIndex)
-          type E = ElemType(T)
-          when isFixedSize(E):
-            fixedSize += static(fixedPortionSize(E))
-          else:
-            fixedSize += sizeof(uint32)
-      else:
-        activeFields.setBit(fieldIndex)
-        when isFixedSize(T):
-          fixedSize += static(fixedPortionSize(T))
+      doAssert fieldIndex < type(value).N
+      type F = type toSszType(field)
+      let isActive =
+        when F is OptionalType:
+          field.isSome
         else:
-          fixedSize += sizeof(uint32)
+          true
+      if isActive:
+        const size =
+          when F is OptionalType:
+            type E = ElemType(F)
+            when isFixedSize(E):
+              fixedPortionSize(E)
+            else:
+              sizeof(uint32)
+          else:
+            when isFixedSize(F):
+              fixedPortionSize(F)
+            else:
+              sizeof(uint32)
+        fixedSize += size
+        activeFields.setBit(fieldIndex)
       inc fieldIndex
     w.writeValue activeFields
     var ctx = VarSizedWriterCtx(
       offset: fixedSize,
       fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
     enumerateSubFields(value.data, field):
-      type T = type toSszType(field)
-      when T is OptionalType:
+      type F = type toSszType(field)
+      when F is OptionalType:
         if field.isSome:
           writeField w, ctx, astToStr(field), field.get
       else:

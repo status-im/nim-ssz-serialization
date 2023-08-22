@@ -37,6 +37,15 @@ type
 
   Digest* = MDigest[32 * 8]
 
+template `.`*(a: PartialContainer, k: untyped): auto =
+  a.data.k
+
+template `.`*(a: var PartialContainer, k: untyped): auto =
+  a.data.k
+
+template `.=`*(a: var PartialContainer, k: untyped, v: untyped): untyped =
+  a.data.k = v
+
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
 # * chunkIdx - leaf data index after chunking starting from 0
