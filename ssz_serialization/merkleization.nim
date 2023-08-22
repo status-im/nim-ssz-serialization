@@ -5,7 +5,7 @@
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
-# This module contains the parts necessary to create a merkle hash from the core
+# This module contains the parts necessary to create a Merkle hash from the core
 # SSZ types outlined in the spec:
 # https://github.com/ethereum/consensus-specs/blob/v1.0.1/ssz/simple-serialize.md#merkleization
 
@@ -317,7 +317,7 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
   template writeResult(chunkIdx, level: int, chunk: Digest) =
     result[chunkIdx * proofHeight + level] = chunk
 
-  # We'll start by generating the first row of the merkle tree.
+  # We'll start by generating the first row of the Merkle tree.
   var currPairEnd = if inRowIdx.isOdd:
     # an odd chunk number means that we must combine the
     # hash with the existing pending sibling hash in the
@@ -1126,7 +1126,7 @@ func hashTreeRootCachedPtr*(x: HashArray, vIdx: int64): ptr Digest =
   # `var` and `lent` returns don't work for the constant zero hashes
   # The instance must not be mutated! This is an internal low-level API.
 
-  doAssert vIdx >= 1, "Only valid for flat merkle tree indices"
+  doAssert vIdx >= 1, "Only valid for flat Merkle tree indices"
 
   let px = unsafeAddr x.hashes[vIdx]
   if not isCached(x.hashes[vIdx]):
@@ -1139,7 +1139,7 @@ func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
   # `var` and `lent` returns don't work for the constant zero hashes
   # The instance must not be mutated! This is an internal low-level API.
 
-  doAssert vIdx >= 1, "Only valid for flat merkle tree indices"
+  doAssert vIdx >= 1, "Only valid for flat Merkle tree indices"
 
   let
     layer = layer(vIdx)

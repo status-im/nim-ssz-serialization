@@ -124,7 +124,7 @@ func calculate_multi_merkle_root_impl(
       keys.add index
   keys.sort(SortOrder.Descending)
 
-  # The merkle tree is processed from bottom to top, pulling in helper
+  # The Merkle tree is processed from bottom to top, pulling in helper
   # indices from `proof` as needed. During processing, the `keys` list
   # may temporarily end up being split into two parts, sorted individually.
   # An additional index tracks the current maximum element of the list.
