@@ -37,7 +37,7 @@ type
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
 # * chunkIdx - leaf data index after chunking starting from 0
-# * vIdx - virtual index in merkle tree - the root is found at index 1, its
+# * vIdx - virtual index in Merkle tree - the root is found at index 1, its
 #          two children at 2, 3 then 4, 5, 6, 7 etc
 
 func nextPow2Int64(x: int64): int64 =
@@ -104,12 +104,12 @@ type
 
   HashList*[T; maxLen: static Limit] = object
     ## List implementation that caches the hash of each chunk of data as well
-    ## as the combined hash of each level of the merkle tree using a flattened
+    ## as the combined hash of each level of the Merkle tree using a flattened
     ## list of hashes.
     ##
-    ## The merkle tree of a list is formed by imagining a virtual buffer of
+    ## The Merkle tree of a list is formed by imagining a virtual buffer of
     ## `maxLen` length which is zero-filled where there is no data. Then,
-    ## a merkle tree of hashes is formed as usual - at each level of the tree,
+    ## a Merkle tree of hashes is formed as usual - at each level of the tree,
     ## iff the hash is combined from two zero-filled chunks, the hash is not
     ## stored in the `hashes` list - instead, `indices` keeps track of where in
     ## the list each level starts. When the length of `data` changes, the
@@ -280,7 +280,7 @@ func cacheNodes*(depth, leaves: int): int =
   res
 
 func clearCaches*(a: var HashList, dataIdx: int64) =
-  ## Clear each level of the merkle tree up to the root affected by a data
+  ## Clear each level of the Merkle tree up to the root affected by a data
   ## change at `dataIdx`.
   if a.hashes.len == 0:
     return
@@ -303,7 +303,7 @@ func clearCaches*(a: var HashList, dataIdx: int64) =
   clearCache(a.hashes[0])
 
 func clearCache*(a: var HashList) =
-  # Clear the full merkle tree, in anticipation of a complete rewrite of the
+  # Clear the full Merkle tree, in anticipation of a complete rewrite of the
   # contents
   for c in a.hashes.mitems(): clearCache(c)
 
