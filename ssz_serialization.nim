@@ -52,13 +52,10 @@ proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [IOEr
   mixin toSszType
 
   when x is byte:
-    trs "appending byte"
     s.write x
   elif x is bool:
-    trs "appending bool"
     s.write byte(ord(x))
   elif x is UintN:
-    trs "appending uintN"
     when cpuEndian == bigEndian:
       s.write toBytesLE(x)
     else:
@@ -124,7 +121,7 @@ template writeField*(w: var SszWriter,
       writeVarSizeType(w, toSszType(field))
       ctx.offset += w.stream.pos - initPos
 
-template endRecord(w: var SszWriter, ctx: var auto) =
+template endRecord*(w: var SszWriter, ctx: var auto) =
   when ctx is VarSizedWriterCtx:
     finalize ctx.fixedParts
 
