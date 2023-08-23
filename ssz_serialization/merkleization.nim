@@ -195,6 +195,10 @@ template addChunkDirect(merkleizer: var SszMerkleizerImpl, body: untyped) =
   # add chunk allowing `body` to write directly to `chunk` memory thus avoiding
   # an extra copy - body must completely fill the chunk, including any zero
   # padding
+
+  # the following mixin is a workaround for nim 1.6.12
+  # and the bug seems to be fixed in nim 1.6.14
+  mixin combineChunks
   if getBitLE(merkleizer.totalChunks, 0):
     template chunk: Digest {.inject.} = merkleizer.combinedChunks[0][1]
     body
