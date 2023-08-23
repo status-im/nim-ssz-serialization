@@ -102,10 +102,10 @@ func beginRecord*(w: var SszWriter, TT: type): auto =
     VarSizedWriterCtx(offset: offset,
                       fixedParts: w.stream.delayFixedSizeWrite(offset))
 
-template writeField(w: var SszWriter,
-                    ctx: var auto,
-                    fieldName: string,
-                    field: auto) =
+template writeField*(w: var SszWriter,
+                     ctx: var auto,
+                     fieldName: string,
+                     field: auto) =
   mixin toSszType
   when ctx is FixedSizedWriterCtx:
     writeFixedSized(w.stream, toSszType(field))
