@@ -15,6 +15,8 @@ import
   json_serialization,
   "."/[bitseqs]
 
+from std/sequtils import newSeqWith
+
 from nimcrypto/utils import fromHex  # needed to disambiguate properly
 
 export stint, bitseqs, json_serialization
@@ -114,7 +116,7 @@ type
     ## stored in the `hashes` list - instead, `indices` keeps track of where in
     ## the list each level starts. When the length of `data` changes, the
     ## `hashes` and `indices` structures must be updated accordingly using
-    ## `growHashes`.
+    ## `resizeHashes`.
     ##
     ## All mutating operators (those that take `var HashList`) will
     ## automatically invalidate the cache for the relevant chunks - the leaf and
@@ -279,6 +281,24 @@ func cacheNodes*(depth, leaves: int): int =
     res += nodesAtLayer(i, depth, leaves)
   res
 
+# Indicates that after growing, the hashes, while they'll be considered cached,
+# also do not allow inference that layers nearer the Merkle hash tree have also
+# been cleared and that the hash cache clearing must continue to the root.
+#
+# False positives are possible, but harmless: if a cleared entry coincidentally
+# matches this pattern, then it inefficiently recomputes some Merkle tree nodes
+# and still creates a correct result.
+const uninitSentinel = Digest(data: [
+  0, 0, 0, 0, 0, 0, 0, 0,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1])
+
+# Aside from these conditions, the specific value of the sentinel is arbitrary.
+static:
+  doAssert uninitSentinel != default(Digest)
+  doAssert uninitSentinel.data.toOpenArray(0, 7) == default(array[8, byte])
+
 func clearCaches*(a: var HashList, dataIdx: int64) =
   ## Clear each level of the Merkle tree up to the root affected by a data
   ## change at `dataIdx`.
@@ -292,7 +312,13 @@ func clearCaches*(a: var HashList, dataIdx: int64) =
     let
       idxInLayer = idx - (1'i64 shl layer)
       layerIdx = idxInLayer + a.indices[layer]
+
     if layerIdx < a.indices[layer + 1]:
+      if  a.hashes[layerIdx].data.toOpenArray(0, 7) ==
+            static(default(array[8, byte])) and
+          a.hashes[layerIdx] != uninitSentinel:
+        return
+
       # Only clear cache when we're actually storing it - ie it hasn't been
       # skipped by the "combined zero hash" optimization
       clearCache(a.hashes[layerIdx])
@@ -307,28 +333,32 @@ func clearCache*(a: var HashList) =
   # contents
   for c in a.hashes.mitems(): clearCache(c)
 
-func growHashes*(a: var HashList) =
-  ## Ensure that the hash cache is big enough for the data in the list - must
-  ## be called whenever `data` grows.
+func resizeHashes*(a: var HashList) =
+  ## Ensure the hash cache is the correct size for the data in the list - must
+  ## be called whenever `data` shrinks or grows.
   let
     leaves = int(
       chunkIdx(a, a.data.len() + dataPerChunk(a.T) - 1))
     newSize = 1 + cacheNodes(a.maxDepth, leaves)
 
-  if a.hashes.len >= newSize:
+  # Growing might be because of add(), addDefault(), or in-place reading of a
+  # larger HashList. In-place reading of a smaller HashList causes shrinking.
+  if a.hashes.len == newSize:
     return
 
   var
-    newHashes = newSeq[Digest](newSize)
+    newHashes = newSeqWith(newSize, uninitSentinel)
     newIndices = default(type a.indices)
 
-  if a.hashes.len != newSize:
-    newIndices[0] = nodesAtLayer(0, a.maxDepth, leaves)
-    for i in 1..a.maxDepth:
-      newIndices[i] = newIndices[i - 1] + nodesAtLayer(i - 1, a.maxDepth, leaves)
+  newIndices[0] = nodesAtLayer(0, a.maxDepth, leaves)
+  for i in 1..a.maxDepth:
+    newIndices[i] =
+      newIndices[i - 1] + nodesAtLayer(i - 1, a.maxDepth, leaves)
 
-  for i in 1..<a.maxDepth:
-    for j in 0..<(a.indices[i] - a.indices[i-1]):
+  # When shrinking, truncate each layer
+  for i in 1 ..< a.maxDepth:
+    for j in 0 ..< min(
+        a.indices[i] - a.indices[i-1], newIndices[i] - newIndices[i - 1]):
       newHashes[newIndices[i - 1] + j] = a.hashes[a.indices[i - 1] + j]
 
   swap(a.hashes, newHashes)
@@ -339,7 +369,7 @@ func resetCache*(a: var HashList) =
   ## rewritten "manually" without going through the exported operators
   a.hashes.setLen(0)
   a.indices = default(type a.indices)
-  a.growHashes()
+  a.resizeHashes()
 
 func resetCache*(a: var HashArray) =
   for h in a.hashes.mitems():
@@ -349,7 +379,7 @@ template len*(a: type HashArray): auto = int(a.maxLen)
 
 func add*(x: var HashList, val: auto): bool =
   if add(x.data, val):
-    x.growHashes()
+    x.resizeHashes()
     clearCaches(x, x.data.len() - 1)
     true
   else:
@@ -360,13 +390,13 @@ func addDefault*(x: var HashList): ptr x.T =
     return nil
 
   distinctBase(x.data).setLen(x.data.len + 1)
-  x.growHashes()
+  x.resizeHashes()
   clearCaches(x, x.data.len() - 1)
   addr x.data[^1]
 
 template init*[T, N](L: type HashList[T, N], x: seq[T]): auto =
   var tmp = HashList[T, N](data: List[T, N].init(x))
-  tmp.growHashes()
+  tmp.resizeHashes()
   tmp
 
 template len*(x: HashList|HashArray): auto = len(x.data)
@@ -627,7 +657,6 @@ proc writeValue*(
 proc readValue*(reader: var JsonReader, value: var HashList)
                {.raises: [IOError, SerializationError].} =
   readValue(reader, value.data)
-  value.resetCache()
 
 template readValue*(reader: var JsonReader, value: var BitList) =
   type T = type(value)

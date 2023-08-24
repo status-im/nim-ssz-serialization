@@ -16,6 +16,8 @@ import
   stew/[endians2, objects, results], stew/shims/macros,
   ./types
 
+from stew/assign2 import assign
+
 export
   types
 
@@ -235,8 +237,20 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
 func initSszUnion(T: type, input: openArray[byte]): T {.raisesssz.} =
   initSszUnionImpl(T, input)
 
+type HashListOperations = ref object
+  clearCaches: proc(idx: int) {.noSideEffect, raises: [].}
+  resetCache: proc() {.noSideEffect, raises: [].}
+  resizeHashes: proc() {.noSideEffect, raises: [].}
+
+func hashListClosures(hl: ptr auto): HashListOperations =
+  HashListOperations(
+    clearCaches: func(idx: int) {.raises: [].} = clearCaches(hl[], idx),
+    resetCache: func() {.raises: [].} = resetCache(hl[]),
+    resizeHashes: func() {.raises: [].} = resizeHashes hl[])
+
 proc readSszValue*[T](input: openArray[byte],
-                      val: var T) {.raisesssz.} =
+                      val: var T,
+                      hashListOperations: HashListOperations = nil) {.raisesssz.} =
   mixin fromSszBytes, toSszType
 
   template readOffsetUnchecked(n: int): uint32 {.used.}=
@@ -277,13 +291,20 @@ proc readSszValue*[T](input: openArray[byte],
     if resultBytesCount == maxExpectedSize:
       checkForForbiddenBits(T, input, val.maxLen + 1)
 
-  elif val is HashList | HashArray:
+  elif val is HashList:
+    readSszValue(input, val.data, hashListClosures(addr val))
+  elif val is HashArray:
     readSszValue(input, val.data)
     val.resetCache()
   elif val is Digest:
     readSszValue(input, val.data)
   elif val is List|array:
     type E = ElemType(type val)
+
+    # This is arbitrary, but keeps the initial implementation from affecting
+    # non-HashLists.
+    when val is array:
+      doAssert hashListOperations.isNil
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -299,10 +320,32 @@ proc readSszValue*[T](input: openArray[byte],
       when supportsBulkCopy(type val[0]):
         if val.len > 0:
           copyMem addr val[0], unsafeAddr input[0], input.len
+
+        # There's no selective invalidation here, because it would require a
+        # potential performance tradeoff, either interfering with bulk copy,
+        # or involving more verification of changed hash entries.
+        if not hashListOperations.isNil:
+          hashListOperations.resetCache()
       else:
-        for i in 0 ..< val.len:
-          let offset = i * elemSize
-          readSszValue(input.toOpenArray(offset, offset + elemSize - 1), val[i])
+        if hashListOperations.isNil:
+          for i in 0 ..< val.len:
+            let offset = i * elemSize
+            readSszValue(input.toOpenArray(offset, offset + elemSize - 1), val[i])
+        else:
+          var prevValue: E
+          hashListOperations.resizeHashes()
+
+          for i in 0 ..< val.len:
+            let offset = i * elemSize
+            assign(prevValue, val[i])
+            readSszValue(input.toOpenArray(offset, offset + elemSize - 1), val[i])
+            if prevValue != val[i]:
+              hashListOperations.clearCaches(i)
+
+          # Unconditionally trigger small, O(1) updates to handle when the list
+          # shrinks without otherwise changing.
+          hashListOperations.clearCaches(0)
+          hashListOperations.clearCaches(max(val.len - 1, 0))
 
     else:
       if input.len == 0:
@@ -323,15 +366,36 @@ proc readSszValue*[T](input: openArray[byte],
         raiseMalformedSszError(T, "incorrect encoding of zero length")
 
       val.setOutputSize resultLen
-      for i in 1 ..< resultLen:
-        let nextOffset = readOffset(i * offsetSize)
-        if nextOffset < offset:
-          raiseMalformedSszError(T, "list element offsets are decreasing")
-        else:
-          readSszValue(input.toOpenArray(offset, nextOffset - 1), val[i - 1])
-        offset = nextOffset
+      if hashListOperations.isNil:
+        for i in 1 ..< resultLen:
+          let nextOffset = readOffset(i * offsetSize)
+          if nextOffset < offset:
+            raiseMalformedSszError(T, "list element offsets are decreasing")
+          else:
+            readSszValue(input.toOpenArray(offset, nextOffset - 1), val[i - 1])
+          offset = nextOffset
+      else:
+        var prevValue: E
+        hashListOperations.resizeHashes()
+
+        for i in 1 ..< resultLen:
+          let nextOffset = readOffset(i * offsetSize)
+          if nextOffset < offset:
+            raiseMalformedSszError(T, "list element offsets are decreasing")
+          else:
+            assign(prevValue, val[i - 1])
+            readSszValue(input.toOpenArray(offset, nextOffset - 1), val[i - 1])
+            if prevValue != val[i - 1]:
+              hashListOperations.clearCaches(i - 1)
+          offset = nextOffset
 
       readSszValue(input.toOpenArray(offset, input.len - 1), val[resultLen - 1])
+
+      if not hashListOperations.isNil:
+        # Unconditionally trigger small, O(1) updates to handle when the list
+        # shrinks without otherwise changing.
+        hashListOperations.clearCaches(0)
+        hashListOperations.clearCaches(max(resultLen - 1, 0))
 
   elif val is OptionalType:
     type E = ElemType(T)
