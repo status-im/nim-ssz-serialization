@@ -314,8 +314,7 @@ func clearCaches*(a: var HashList, dataIdx: int64) =
       layerIdx = idxInLayer + a.indices[layer]
 
     if layerIdx < a.indices[layer + 1]:
-      if  a.hashes[layerIdx].data.toOpenArray(0, 7) ==
-            static(default(array[8, byte])) and
+      if  (not isCached(a.hashes[layerIdx])) and
           a.hashes[layerIdx] != uninitSentinel:
         return
 
