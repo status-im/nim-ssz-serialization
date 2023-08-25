@@ -236,11 +236,15 @@ template isCached*(v: Digest): bool =
   ## Nim initializes values this way, and while there may be false positives,
   ## that's fine.
 
-  # Checking and resetting the cache status are hotspots - profile before
-  # touching!
-  var tmp {.noinit.}: uint64
-  copyMem(addr tmp, unsafeAddr v.data[0], sizeof(tmp))
-  tmp != 0
+  when nimvm:
+    v.data.toOpenArray(0, sizeof(uint64) - 1) !=
+      default(array[sizeof(uint64), byte])
+  else:
+    # Checking and resetting the cache status are hotspots - profile before
+    # touching!
+    var tmp {.noinit.}: uint64
+    copyMem(addr tmp, unsafeAddr v.data[0], sizeof(tmp))
+    tmp != 0
 
 template clearCache*(v: var Digest) =
   zeroMem(addr v.data[0], sizeof(uint64))
@@ -297,7 +301,7 @@ const uninitSentinel = Digest(data: [
 # Aside from these conditions, the specific value of the sentinel is arbitrary.
 static:
   doAssert uninitSentinel != default(Digest)
-  doAssert uninitSentinel.data.toOpenArray(0, 7) == default(array[8, byte])
+  doAssert not uninitSentinel.isCached
 
 func clearCaches*(a: var HashList, dataIdx: int64) =
   ## Clear each level of the Merkle tree up to the root affected by a data
