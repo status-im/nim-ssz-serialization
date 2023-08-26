@@ -13,7 +13,7 @@ import
   nimcrypto/hash,
   serialization/[object_serialization, errors],
   json_serialization,
-  "."/[bitseqs]
+  "."/bitseqs
 
 from std/sequtils import newSeqWith
 
