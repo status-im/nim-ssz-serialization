@@ -9,13 +9,12 @@
 
 import
   std/[tables, typetraits, strformat],
-  stew/shims/macros, stew/[byteutils, bitops2, objects, results], stint,
+  stew/shims/macros, stew/[assign2, byteutils, bitops2, objects, results],
+  stint,
   nimcrypto/hash,
   serialization/[object_serialization, errors],
   json_serialization,
   "."/bitseqs
-
-from std/sequtils import newSeqWith
 
 from nimcrypto/utils import fromHex  # needed to disambiguate properly
 
@@ -350,8 +349,13 @@ func resizeHashes*(a: var HashList) =
     return
 
   var
-    newHashes = newSeqWith(newSize, uninitSentinel)
+    newHashes = newSeq[Digest](newSize)
     newIndices = default(type a.indices)
+
+  # newSeqWith already does this, just with potentially less efficient `=`
+  # rather than assign(): https://github.com/nim-lang/Nim/issues/22554
+  for i in 0 ..< newSize:
+    assign(newHashes[i], uninitSentinel)
 
   newIndices[0] = nodesAtLayer(0, a.maxDepth, leaves)
   for i in 1..a.maxDepth:
