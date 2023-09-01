@@ -16,6 +16,8 @@ import
   stew/[endians2, objects, results], stew/shims/macros,
   ./types
 
+from stew/assign2 import assign
+
 export
   types
 
@@ -277,7 +279,89 @@ proc readSszValue*[T](input: openArray[byte],
     if resultBytesCount == maxExpectedSize:
       checkForForbiddenBits(T, input, val.maxLen + 1)
 
-  elif val is HashList | HashArray:
+  elif val is HashList:
+    type E = ElemType(type val)
+
+    when isFixedSize(E):
+      const elemSize = fixedPortionSize(E)
+      when elemSize > 1:
+        if input.len mod elemSize != 0:
+          var ex = new SszSizeMismatchError
+          ex.deserializedType = cstring typetraits.name(T)
+          ex.actualSszSize = input.len
+          ex.elementSize = elemSize
+          raise ex
+
+      val.data.setOutputSize input.len div elemSize
+      when supportsBulkCopy(type E):
+        if val.data.len > 0:
+          copyMem addr val.data[0], unsafeAddr input[0], input.len
+
+        # There's no selective invalidation here, because it would require a
+        # potential performance tradeoff, either interfering with bulk copy,
+        # or involving more verification of changed hash entries.
+        val.resetCache()
+      else:
+        var prevValue: E
+        val.resizeHashes()
+
+        for i in 0 ..< val.len:
+          let offset = i * elemSize
+          assign(prevValue, val.data[i])
+          readSszValue(
+            input.toOpenArray(offset, offset + elemSize - 1), val.data[i])
+          if prevValue != val.data[i]:
+            val.clearCaches(i)
+
+        # Unconditionally trigger small, O(1) updates to handle when the list
+        # shrinks without otherwise changing.
+        val.clearCaches(0)
+        val.clearCaches(max(val.len - 1, 0))
+
+    else:
+      if input.len == 0:
+        # This is an empty list.
+        # The default initialization of the return value is fine.
+        val.data.setOutputSize 0
+        val.resetCache()
+        return
+      elif input.len < offsetSize:
+        raiseMalformedSszError(T, "input of insufficient size")
+
+      var offset = readOffset 0
+      let resultLen = offset div offsetSize
+
+      if resultLen == 0:
+        # If there are too many elements, other constraints detect problems
+        # (not monotonically increasing, past end of input, or last element
+        # not matching up with its nextOffset properly)
+        raiseMalformedSszError(T, "incorrect encoding of zero length")
+
+      val.data.setOutputSize resultLen
+      val.resizeHashes()
+
+      var prevValue: E
+      for i in 1 ..< resultLen:
+        let nextOffset = readOffset(i * offsetSize)
+        if nextOffset < offset:
+          raiseMalformedSszError(T, "list element offsets are decreasing")
+        else:
+          assign(prevValue, val.data[i - 1])
+          readSszValue(
+            input.toOpenArray(offset, nextOffset - 1), val.data[i - 1])
+          if prevValue != val.data[i - 1]:
+            val.clearCaches(i - 1)
+        offset = nextOffset
+
+      readSszValue(
+        input.toOpenArray(offset, input.len - 1), val.data[resultLen - 1])
+
+      # Unconditionally trigger small, O(1) updates to handle when the list
+      # shrinks without otherwise changing.
+      val.clearCaches(0)
+      val.clearCaches(max(val.len - 1, 0))
+
+  elif val is HashArray:
     readSszValue(input, val.data)
     val.resetCache()
   elif val is Digest:
