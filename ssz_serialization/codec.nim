@@ -293,7 +293,7 @@ proc readSszValue*[T](input: openArray[byte],
           raise ex
 
       val.data.setOutputSize input.len div elemSize
-      when supportsBulkCopy(type val.data[0]):
+      when supportsBulkCopy(type E):
         if val.data.len > 0:
           copyMem addr val.data[0], unsafeAddr input[0], input.len
 
