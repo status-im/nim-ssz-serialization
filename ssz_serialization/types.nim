@@ -292,7 +292,7 @@ func cacheNodes*(depth, leaves: int): int =
 # matches this pattern, then it inefficiently recomputes some Merkle tree nodes
 # and still creates a correct result.
 const uninitSentinel = Digest(data: [
-  0, 0, 0, 0, 0, 0, 0, 0,
+  byte 0, 0, 0, 0, 0, 0, 0, 0,
   1, 1, 1, 1, 1, 1, 1, 1,
   1, 1, 1, 1, 1, 1, 1, 1,
   1, 1, 1, 1, 1, 1, 1, 1])
