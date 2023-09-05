@@ -615,9 +615,9 @@ func chunkedHashTreeRoot[T: BasicType](
 
   getFinalHash(merkleizer)
 
-template chunkedHashTreeRoot[T: not BasicType](
+func chunkedHashTreeRoot[T: not BasicType](
     merkleizer: var SszMerkleizerImpl, arr: openArray[T],
-    firstIdx, numFromFirst: Limit): Digest =
+    firstIdx, numFromFirst: Limit): Digest {.noinit.} =
   for i in 0 ..< numFromFirst:
     addChunkDirect(merkleizer):
       chunk = hash_tree_root(arr[firstIdx + i])
