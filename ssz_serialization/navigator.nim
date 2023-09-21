@@ -6,7 +6,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [MalformedSszError, SszSizeMismatchError].}
+{.pragma: raisesssz, raises: [SszError].}
 
 import
   stew/[ptrops, objects],
@@ -140,4 +140,3 @@ func `[]`*[T](n: SszNavigator[T]): T {.raisesssz.} =
 
 converter derefNavigator*[T](n: SszNavigator[T]): T {.raisesssz.} =
   n[]
-

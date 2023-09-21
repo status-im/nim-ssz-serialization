@@ -6,7 +6,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [MalformedSszError, SszSizeMismatchError].}
+{.pragma: raisesssz, raises: [SszError].}
 
 # Coding and decoding of primitive SSZ types - every "simple" type passed to
 # and from the SSZ library must have a `fromSssBytes` and `toSszType` overload.
