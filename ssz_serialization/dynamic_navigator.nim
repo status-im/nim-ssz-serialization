@@ -24,31 +24,31 @@ type
   FieldInfo = ref object
     name: string
     fieldType: TypeInfo
-    navigator: proc (m: MemRange): MemRange {. gcsafe
-                                               noSideEffect
-                                               raises: [SszError] .}
+    navigator: proc (m: MemRange): MemRange {.
+      gcsafe, noSideEffect, raises: [IOError, SszError] .}
+
   TypeInfo = ref object
     case kind: ObjKind
     of Record:
       fields: seq[FieldInfo]
     of Indexable:
       elemType: TypeInfo
-      navigator: proc (m: MemRange, idx: int): MemRange {. gcsafe
-                                                           noSideEffect
-                                                           raises: [SszError] .}
+      navigator: proc (m: MemRange, idx: int): MemRange {.
+        gcsafe, noSideEffect, raises: [IOError, SszError] .}
     else:
       discard
 
     jsonPrinter: proc (m: MemRange,
                        outStream: OutputStream,
-                       pretty: bool) {.gcsafe, raises: [SszError].}
+                       pretty: bool) {.gcsafe, raises: [IOError, SszError].}
 
   DynamicSszNavigator* = object
     m: MemRange
     typ: TypeInfo
 
 proc jsonPrinterImpl[T](
-    m: MemRange, outStream: OutputStream, pretty: bool) {.raises: [SszError].} =
+    m: MemRange, outStream: OutputStream, pretty: bool
+) {.raises: [IOError, SszError].} =
   var typedNavigator = sszMount(m, T)
   var jsonWriter = Json.Writer.init(outStream, pretty)
   # TODO: it should be possible to serialize the navigator object
@@ -63,12 +63,12 @@ func findField(fields: seq[FieldInfo], name: string): FieldInfo =
       return field
 
 func indexableNavigatorImpl[T](
-    m: MemRange, idx: int): MemRange {.raises: [SszError].} =
+    m: MemRange, idx: int): MemRange {.raises: [IOError, SszError].} =
   var typedNavigator = sszMount(m, T)
   getMemRange(typedNavigator[idx])
 
 func fieldNavigatorImpl[RecordType; FieldType; fieldName: static string](
-    m: MemRange): MemRange {.raises: [SszError].} =
+    m: MemRange): MemRange {.raises: [IOError, SszError].} =
   # TODO: Make sure this doesn't fail with a Defect when
   #       navigating to an inactive field in a case object.
   var typedNavigator = sszMount(m, RecordType)
@@ -107,7 +107,7 @@ func genTypeInfo(T: type): TypeInfo =
 
 func `[]`*(
     n: DynamicSszNavigator, idx: int
-): DynamicSszNavigator {.raises: [SszError].} =
+): DynamicSszNavigator {.raises: [IOError, SszError].} =
   doAssert n.typ.kind == Indexable
   DynamicSszNavigator(m: n.typ.navigator(n.m, idx), typ: n.typ.elemType)
 
@@ -153,11 +153,12 @@ func init*(T: type DynamicSszNavigator,
 
 proc writeJson*(
     n: DynamicSszNavigator, outStream: OutputStream, pretty = true
-) {.raises: [SszError].} =
+) {.raises: [IOError, SszError].} =
   n.typ.jsonPrinter(n.m, outStream, pretty)
 
 func toJson*(
-    n: DynamicSszNavigator, pretty = true): string {.raises: [SszError].} =
+    n: DynamicSszNavigator, pretty = true
+): string {.raises: [IOError, SszError].} =
   var outStream = memoryOutput()
   {.noSideEffect.}:
     # We are assuming that there are no side-effects here
