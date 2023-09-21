@@ -6,7 +6,6 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [SszError].}
 
 ## SSZ serialization for core SSZ types, as specified in:
 # https://github.com/ethereum/consensus-specs/blob/v1.0.1/ssz/simple-serialize.md#serialization
@@ -281,7 +280,8 @@ proc readValue*(
     # size of the dynamic portion to consume the right number of bytes.
     readSszBytes(r.stream.read(r.stream.len.get), val)
 
-proc readSszBytes*[T](data: openArray[byte], val: var T) {.raisesssz.} =
+proc readSszBytes*[T](
+    data: openArray[byte], val: var T) {.raises: [SszError].} =
   # Overload `readSszBytes` to perform custom operations on T after
   # deserialization
   mixin readSszValue

@@ -6,7 +6,6 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [SszError].}
 
 import
   stew/[ptrops, objects],
@@ -49,9 +48,10 @@ template checkBounds(m: MemRange, offset: int) =
 template toOpenArray(m: MemRange): auto =
   makeOpenArray(m.startAddr, m.length)
 
-func navigateToField*[T](n: SszNavigator[T],
-                         fieldName: static string,
-                         FieldType: type): SszNavigator[FieldType] {.raisesssz.} =
+func navigateToField*[T](
+    n: SszNavigator[T],
+    fieldName: static string,
+    FieldType: type): SszNavigator[FieldType] {.raises: [SszError].} =
   mixin toSszType
   type SszFieldType = type toSszType(declval FieldType)
 
@@ -83,7 +83,7 @@ template `.`*[T](n: SszNavigator[T], field: untyped): auto =
   type FieldType = type(default(RecType).field)
   navigateToField(n, astToStr(field), FieldType)
 
-func indexVarSizeList(m: MemRange, idx: int): MemRange {.raisesssz.} =
+func indexVarSizeList(m: MemRange, idx: int): MemRange {.raises: [SszError].} =
   template readOffset(pos): int =
     int fromSszBytes(uint32, makeOpenArray(offset(m.startAddr, pos), offsetSize))
 
@@ -130,7 +130,7 @@ template `[]`*[T](n: SszNavigator[seq[T]], idx: int): SszNavigator[T] =
 template `[]`*[R, T](n: SszNavigator[array[R, T]], idx: int): SszNavigator[T] =
   indexList(n, idx, T)
 
-func `[]`*[T](n: SszNavigator[T]): T {.raisesssz.} =
+func `[]`*[T](n: SszNavigator[T]): T {.raises: [SszError].} =
   mixin toSszType, fromSszBytes
   type SszRepr = type toSszType(declval T)
   when type(SszRepr) is type(T) or T is List:
@@ -138,5 +138,5 @@ func `[]`*[T](n: SszNavigator[T]): T {.raisesssz.} =
   else:
     fromSszBytes(T, toOpenArray(n.m))
 
-converter derefNavigator*[T](n: SszNavigator[T]): T {.raisesssz.} =
+converter derefNavigator*[T](n: SszNavigator[T]): T {.raises: [SszError].} =
   n[]
