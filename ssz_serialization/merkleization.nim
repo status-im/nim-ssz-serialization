@@ -11,11 +11,10 @@
 
 {.push raises: [].}
 
-# TODO heavy `result` usage due to https://github.com/nim-lang/Nim/issues/19357
-# impacting `Digest`
-# Also, several other NRVO bugs are worked around using `addr`/`ptr` - in
-# particular when the RVO:d value should be written directly to an array / list
-# or when a complex expression is involved
+# TODO https://github.com/nim-lang/Nim/issues/19357 and general pointer aliasing
+# misdetection means we use output parameters rather than return values for a
+# large part of the internal implemenation thus avoiding spurious `zeroMem` calls
+# and other artefacts of the introduction of hidden temporaries
 
 import
   std/[algorithm, options, sequtils],
@@ -52,7 +51,14 @@ func binaryTreeHeight*(totalElements: Limit): int =
   bitWidth nextPow2(uint64 totalElements)
 
 type
-  SszMerkleizerImpl = object
+  SszMerkleizer*[limit: static[Limit]] = object
+    ## The Merkleizer incrementally computes the SSZ-style Merkle root of a tree
+    ## with `limit` leaf nodes.
+    ##
+    ## As chunks are added, the combined hash of each pair of chunks is computed
+    ## and partially propagated up the tree in the `combinedChunks` array -
+    ## finally, `getFinalHash` computes the rest of the tree as if all-zeroes
+    ## chunks filled the rest of the tree up to the `limit`.
     # The code is structured in a way that some buffering and caching happens
     # in this module - therefore, we make sure to fill a 64-byte buffer
     # whenever possible to avoid the internal buffer copying that
@@ -60,20 +66,17 @@ type
     # The two digests represent the left and right nodes that get combined to
     # a parent node in the tree.
     # TODO it's possible to further parallelize by using even wider buffers here
-    combinedChunks: ptr UncheckedArray[(Digest, Digest)]
-    totalChunks: uint64
+
+    combinedChunks: array[binaryTreeHeight limit, (Digest, Digest)]
+    totalChunks*: uint64 # Public for historical reasons
     topIndex: int
     internal: bool
 
-  SszMerkleizer*[limit: static[Limit]] = object
-    combinedChunks: ref array[binaryTreeHeight limit, (Digest, Digest)]
-    impl: SszMerkleizerImpl
-
 template getChunkCount*(m: SszMerkleizer): uint64 =
-  m.impl.totalChunks
+  m.totalChunks
 
 func getCombinedChunks*(m: SszMerkleizer): seq[Digest] =
-  mapIt(toOpenArray(m.impl.combinedChunks, 0, m.impl.topIndex), it[0])
+  mapIt(toOpenArray(m.combinedChunks, 0, m.topIndex), it[0])
 
 when USE_BLST_SHA256:
   export blscurve.update
@@ -109,10 +112,10 @@ template computeDigest*(body: untyped): Digest =
         body
         finish(h)
 
-func digest*(a: openArray[byte]): Digest {.noinit.} =
+func digest(a: openArray[byte], res: var Digest) =
   trs "DIGESTING ARRAYS 1 ", toHex(a)
   when nimvm:
-    block:
+    res = block:
       var h: sha256
       h.init()
       h.update(a)
@@ -120,9 +123,9 @@ func digest*(a: openArray[byte]): Digest {.noinit.} =
   else:
     when USE_BLST_SHA256:
       # BLST has a fast assembly optimized SHA256
-      result.data.bls_sha256_digest(a)
+      res.data.bls_sha256_digest(a)
     else:
-      block:
+      res = block:
         # We use the init-update-finish interface to avoid
         # the expensive burning/clearing memory (20~30% perf)
         var h {.noinit.}: DigestCtx
@@ -130,68 +133,69 @@ func digest*(a: openArray[byte]): Digest {.noinit.} =
         h.update(a)
         h.finish()
 
-func digest(a, b: openArray[byte]): Digest {.noinit.} =
+func digest*(a: openArray[byte]): Digest {.noinit.} =
+  digest(a, result)
+
+func digest(a, b: openArray[byte], res: var Digest) =
   when nimvm:
-    result =
+    res =
       computeDigest:
         trs "DIGESTING ARRAYS 2 ", toHex(a), " ", toHex(b)
 
         h.update a
         h.update b
   else:
-    if b.len() == 0:
-      result = digest(a)
-    elif distance(baseAddr a, baseAddr b) == a.len:
+    if distance(baseAddr a, baseAddr b) == a.len:
       # Adjacent in memory, make a single call (avoids copies inside the
       # digester)
-      result = digest(makeOpenArray(baseAddr a, a.len + b.len))
+      digest(makeOpenArray(baseAddr a, a.len + b.len), res)
     elif a.len + b.len == 64:
       # Single call to digester
       var buf {.noinit.}: array[64, byte]
       if a.len > 0:
         copyMem(addr buf[0], unsafeAddr a[0], a.len)
       # b.len > 0 per above..
-      copyMem(addr buf[a.len], unsafeAddr b[0], b.len)
-      result = digest(buf)
+      if b.len > 0:
+        copyMem(addr buf[a.len], unsafeAddr b[0], b.len)
+      digest(buf, res)
     else:
-      result =
+      res =
         computeDigest:
           trs "DIGESTING ARRAYS 2 ", toHex(a), " ", toHex(b)
 
           h.update a
           h.update b
-  trs "HASH RESULT ", result
+  trs "HASH RESULT ", res
 
-template mergeBranches(existing: Digest, newData: array[32, byte]): Digest =
+template mergeBranches(existing: Digest, newData: array[32, byte], res: var Digest) =
   trs "MERGING BRANCHES ARRAY"
-  digest(existing.data, newData)
+  digest(existing.data, newData, res)
 
-template mergeBranches(a, b: Digest): Digest =
+template mergeBranches(a, b: Digest, res: var Digest) =
   trs "MERGING BRANCHES DIGEST"
-  digest(a.data, b.data)
+  digest(a.data, b.data, res)
 
 func computeZeroHashes: array[sizeof(Limit) * 8, Digest] =
   result[0] = Digest()
   for i in 1 .. result.high:
-    result[i] = mergeBranches(result[i - 1], result[i - 1])
+    mergeBranches(result[i - 1], result[i - 1], result[i])
 
 const zeroHashes* = computeZeroHashes()
 
-template combineChunks(merkleizer: var SszMerkleizerImpl, start: int) =
+template combineChunks(merkleizer: var SszMerkleizer, start: int) =
   for i in start..<merkleizer.topIndex:
     trs "CALLING MERGE BRANCHES"
     if getBitLE(merkleizer.totalChunks, i + 1):
-      # chunkPtr avoids a temporary in the generated nim code
-      let chunkPtr = addr merkleizer.combinedChunks[i + 1][1]
-      chunkPtr[] = mergeBranches(
-        merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1])
+      mergeBranches(
+        merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
+        merkleizer.combinedChunks[i + 1][1])
     else:
-      let chunkPtr = addr merkleizer.combinedChunks[i + 1][0]
-      chunkPtr[] = mergeBranches(
-        merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1])
+      mergeBranches(
+        merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
+        merkleizer.combinedChunks[i + 1][0])
       break
 
-template addChunkDirect(merkleizer: var SszMerkleizerImpl, body: untyped) =
+template addChunkDirect(merkleizer: var SszMerkleizer, body: untyped) =
   # add chunk allowing `body` to write directly to `chunk` memory thus avoiding
   # an extra copy - body must completely fill the chunk, including any zero
   # padding
@@ -199,6 +203,11 @@ template addChunkDirect(merkleizer: var SszMerkleizerImpl, body: untyped) =
   # the following mixin is a workaround for nim 1.6.12
   # and the bug seems to be fixed in nim 1.6.14
   mixin combineChunks
+
+  # TODO panic here isn't great - turn this into a bool-returning function?
+  doAssert merkleizer.totalChunks < merkleizer.limit.uint64,
+    "Adding chunks would exceed merklelizer limit " & $merkleizer.limit
+
   if getBitLE(merkleizer.totalChunks, 0):
     template chunk: Digest {.inject.} = merkleizer.combinedChunks[0][1]
     body
@@ -210,18 +219,24 @@ template addChunkDirect(merkleizer: var SszMerkleizerImpl, body: untyped) =
 
   inc merkleizer.totalChunks
 
-func addChunk*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
+func addChunk*(merkleizer: var SszMerkleizer, data: openArray[byte]) =
   doAssert data.len > 0 and data.len <= bytesPerChunk
-  addChunkDirect(merkleizer):
-    assign(chunk.data.toOpenArray(0, data.high), data)
-    if data.len < bytesPerChunk:
-      zeroMem(addr chunk.data[data.len], bytesPerChunk - data.len)
+
+  when merkleizer.limit > 0:
+    addChunkDirect(merkleizer):
+      assign(chunk.data.toOpenArray(0, data.high), data)
+      if data.len < bytesPerChunk:
+        zeroMem(addr chunk.data[data.len], bytesPerChunk - data.len)
+  else:
+    raiseAssert "Cannot add chunks to 0-length merkleizer"
 
 template isOdd(x: SomeNumber): bool =
   (x and 1) != 0
 
-func addChunks*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
+func addChunks*(merkleizer: var SszMerkleizer, data: openArray[byte]) =
   doAssert merkleizer.totalChunks == 0
+  doAssert merkleizer.limit * bytesPerChunk >= data.len,
+    "Adding chunks would exceed merklelizer limit " & $merkleizer.limit
 
   var done = 0
   while done < data.len:
@@ -229,25 +244,28 @@ func addChunks*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
       remaining = data.len - done
 
     if remaining >= bytesPerChunk * 2:
-      if not merkleizer.internal:
-        # Needed for getCombinedChunks
-        assign(
-          merkleizer.combinedChunks[0][0].data,
-          data.toOpenArray(done, done + bytesPerChunk - 1))
+      when merkleizer.limit > 1: # Defeat compile-time index checking
+        if not merkleizer.internal:
+          # Needed for getCombinedChunks
+          assign(
+            merkleizer.combinedChunks[0][0].data,
+            data.toOpenArray(done, done + bytesPerChunk - 1))
 
-      trs "COMPUTING COMBINED DATA HASH ", done
+        trs "COMPUTING COMBINED DATA HASH ", done
 
-      if getBitLE(merkleizer.totalChunks, 1):
-        merkleizer.combinedChunks[1][1] = digest(
-          data.toOpenArray(done, done + bytesPerChunk * 2 - 1))
+        if getBitLE(merkleizer.totalChunks, 1):
+          digest(
+            data.toOpenArray(done, done + bytesPerChunk * 2 - 1),
+            merkleizer.combinedChunks[1][1])
 
-        merkleizer.combineChunks(1)
-      else:
-        merkleizer.combinedChunks[1][0] = digest(
-          data.toOpenArray(done, done + bytesPerChunk * 2 - 1))
+          merkleizer.combineChunks(1)
+        else:
+          digest(
+            data.toOpenArray(done, done + bytesPerChunk * 2 - 1),
+            merkleizer.combinedChunks[1][0])
 
-      done += bytesPerChunk * 2
-      merkleizer.totalChunks += 2
+        done += bytesPerChunk * 2
+        merkleizer.totalChunks += 2
     else:
       trs "COMPUTING REMAINDER DATA HASH ", remaining
       if remaining > bytesPerChunk:
@@ -257,7 +275,7 @@ func addChunks*(merkleizer: var SszMerkleizerImpl, data: openArray[byte]) =
       merkleizer.addChunk(data.toOpenArray(done, data.high))
       break
 
-func addChunkAndGenMerkleProof*(merkleizer: var SszMerkleizerImpl,
+func addChunkAndGenMerkleProof*(merkleizer: var SszMerkleizer,
                                 hash: Digest,
                                 outProof: var openArray[Digest]) =
   var
@@ -269,17 +287,17 @@ func addChunkAndGenMerkleProof*(merkleizer: var SszMerkleizerImpl,
   for level in 0 .. merkleizer.topIndex:
     if getBitLE(merkleizer.totalChunks, level):
       outProof[level] = merkleizer.combinedChunks[level][0]
-      hash = mergeBranches(merkleizer.combinedChunks[level][0], hash)
+      mergeBranches(merkleizer.combinedChunks[level][0], hash, hash)
     else:
       if not hashWrittenToMerkleizer:
         merkleizer.combinedChunks[level][0] = hash
         hashWrittenToMerkleizer = true
       outProof[level] = zeroHashes[level]
-      hash = mergeBranches(hash, zeroHashes[level])
+      mergeBranches(hash, zeroHashes[level], hash)
 
   merkleizer.totalChunks += 1
 
-func completeStartedChunk(merkleizer: var SszMerkleizerImpl,
+func completeStartedChunk(merkleizer: var SszMerkleizer,
                           hash: Digest, atLevel: int) =
   when false:
     let
@@ -290,12 +308,12 @@ func completeStartedChunk(merkleizer: var SszMerkleizerImpl,
   var hash = hash
   for i in atLevel .. merkleizer.topIndex:
     if getBitLE(merkleizer.totalChunks, i):
-      hash = mergeBranches(merkleizer.combinedChunks[i][0], hash)
+      mergeBranches(merkleizer.combinedChunks[i][0], hash, hash)
     else:
       merkleizer.combinedChunks[i][0] = hash
       break
 
-func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
+func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizer,
                                   chunks: openArray[Digest]): seq[Digest] =
   doAssert chunks.len > 0 and merkleizer.topIndex > 0
 
@@ -313,7 +331,8 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
     # number of elements in the base layer is odd and `chunks.len * 2 - 1`
     # otherwise. Each row may also need a single extra element at most if
     # it must be combined with the existing values in the Merkleizer:
-    merkleTree = newSeqOfCap[Digest](chunks.len + merkleizer.topIndex)
+    merkleTree = newSeq[Digest](chunks.len + merkleizer.topIndex)
+    merkleTreeIdx = 0
     inRowIdx = merkleizer.totalChunks
     postUpdateInRowIdx = newTotalChunks
     zeroMixed = false
@@ -327,10 +346,12 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
     # hash with the existing pending sibling hash in the
     # merkleizer.
     writeResult(0, 0, merkleizer.combinedChunks[0][0])
-    merkleTree.add mergeBranches(merkleizer.combinedChunks[0][0], chunks[0])
+    mergeBranches(
+      merkleizer.combinedChunks[0][0], chunks[0], merkleTree[merkleTreeIdx])
 
     # TODO: can we immediately write this out?
-    merkleizer.completeStartedChunk(merkleTree[^1], 1)
+    merkleizer.completeStartedChunk(merkleTree[merkleTreeIdx], 1)
+    merkleTreeIdx += 1
     2
   else:
     1
@@ -341,20 +362,23 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
   while currPairEnd < chunks.len:
     writeResult(currPairEnd - 1, 0, chunks[currPairEnd])
     writeResult(currPairEnd, 0, chunks[currPairEnd - 1])
-    merkleTree.add mergeBranches(chunks[currPairEnd - 1],
-                                 chunks[currPairEnd])
+    mergeBranches(
+      chunks[currPairEnd - 1], chunks[currPairEnd], merkleTree[merkleTreeIdx])
+    merkleTreeIdx += 1
     currPairEnd += 2
 
   if currPairEnd - 1 < chunks.len:
     zeroMixed = true
     writeResult(currPairEnd - 1, 0, zeroHashes[0])
-    merkleTree.add mergeBranches(chunks[currPairEnd - 1],
-                                 zeroHashes[0])
+    mergeBranches(
+      chunks[currPairEnd - 1], zeroHashes[0], merkleTree[merkleTreeIdx])
+    merkleTreeIdx += 1
+
   var
     level = 0
     baseChunksPerElement = 1
     treeRowStart = 0
-    rowLen = merkleTree.len
+    rowLen = merkleTreeIdx
 
   template writeProofs(rowChunkIdx: int, hash: Digest) =
     let
@@ -378,11 +402,13 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
         # hash with the existing pending sibling hash in the
         # merkleizer.
         writeProofs(0, merkleizer.combinedChunks[level][0])
-        merkleTree.add mergeBranches(merkleizer.combinedChunks[level][0],
-                                     merkleTree[treeRowStart])
+        mergeBranches(
+          merkleizer.combinedChunks[level][0], merkleTree[treeRowStart],
+          merkleTree[merkleTreeIdx])
 
         # TODO: can we immediately write this out?
-        merkleizer.completeStartedChunk(merkleTree[^1], level + 1)
+        merkleizer.completeStartedChunk(merkleTree[merkleTreeIdx], level + 1)
+        merkleTreeIdx += 1
         2
       else:
         1
@@ -393,18 +419,23 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
       while currPairEnd < rowLen:
         writeProofs(currPairEnd - 1, merkleTree[treeRowStart + currPairEnd])
         writeProofs(currPairEnd, merkleTree[treeRowStart + currPairEnd - 1])
-        merkleTree.add mergeBranches(merkleTree[treeRowStart + currPairEnd - 1],
-                                     merkleTree[treeRowStart + currPairEnd])
+        mergeBranches(
+          merkleTree[treeRowStart + currPairEnd - 1],
+          merkleTree[treeRowStart + currPairEnd],
+          merkleTree[merkleTreeIdx])
+        merkleTreeIdx += 1
         currPairEnd += 2
 
       if currPairEnd - 1 < rowLen:
         zeroMixed = true
         writeProofs(currPairEnd - 1, zeroHashes[level])
-        merkleTree.add mergeBranches(merkleTree[treeRowStart + currPairEnd - 1],
-                                     zeroHashes[level])
+        mergeBranches(
+          merkleTree[treeRowStart + currPairEnd - 1], zeroHashes[level],
+          merkleTree[merkleTreeIdx])
+        merkleTreeIdx += 1
 
       treeRowStart += rowLen
-      rowLen = merkleTree.len - treeRowStart
+      rowLen = merkleTreeIdx - treeRowStart
 
       if rowLen == 1:
         break
@@ -412,12 +443,13 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
   doAssert rowLen == 1
 
   if (inRowIdx and 2) != 0:
-    merkleizer.completeStartedChunk(
-      mergeBranches(merkleizer.combinedChunks[level + 1][0], merkleTree[^1]),
-      level + 2)
+    var tmp {.noinit.}: Digest
+    mergeBranches(
+      merkleizer.combinedChunks[level + 1][0], merkleTree[merkleTreeIdx], tmp)
+    merkleizer.completeStartedChunk(tmp, level + 2)
 
   if (not zeroMixed) and (postUpdateInRowIdx and 2) != 0:
-    merkleizer.combinedChunks[level + 1][0] = merkleTree[^1]
+    merkleizer.combinedChunks[level + 1][0] = merkleTree[merkleTreeIdx]
 
   while level < merkleizer.topIndex:
     inc level
@@ -434,64 +466,38 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizerImpl,
   merkleizer.totalChunks = newTotalChunks
 
 func init*(S: type SszMerkleizer): S =
-  new result.combinedChunks
-  result.impl = SszMerkleizerImpl(
-    combinedChunks: makeUncheckedArray(baseAddr result.combinedChunks[]),
-    topIndex: binaryTreeHeight(result.limit) - 1,
+  S(
+    topIndex: binaryTreeHeight(S.limit) - 1,
     totalChunks: 0)
 
 func init*(S: type SszMerkleizer,
            combinedChunks: openArray[Digest],
            totalChunks: uint64): S =
-  new result.combinedChunks
   for i in 0..<combinedChunks.len:
-    result.combinedChunks[][i][0] = combinedChunks[i]
-  result.impl = SszMerkleizerImpl(
-    combinedChunks: makeUncheckedArray(baseAddr result.combinedChunks[]),
-    topIndex: binaryTreeHeight(result.limit) - 1,
-    totalChunks: totalChunks)
+    result.combinedChunks[i][0] = combinedChunks[i]
+  result.topIndex = binaryTreeHeight(S.limit) - 1
+  result.totalChunks = totalChunks
 
-func copy*[L: static[Limit]](cloned: SszMerkleizer[L]): SszMerkleizer[L] =
-  new result.combinedChunks
-  result.combinedChunks[] = cloned.combinedChunks[]
-  result.impl = SszMerkleizerImpl(
-    combinedChunks: makeUncheckedArray(baseAddr result.combinedChunks[]),
-    topIndex: binaryTreeHeight(L) - 1,
-    totalChunks: cloned.totalChunks)
-
-template addChunksAndGenMerkleProofs*(
-    merkleizer: var SszMerkleizer,
-    chunks: openArray[Digest]): seq[Digest] =
-  addChunksAndGenMerkleProofs(merkleizer.impl, chunks)
-
-template addChunk*(merkleizer: var SszMerkleizer, data: openArray[byte]) =
-  addChunk(merkleizer.impl, data)
-
-template totalChunks*(merkleizer: SszMerkleizer): uint64 =
-  merkleizer.impl.totalChunks
-
-template getFinalHash*(merkleizer: SszMerkleizer): Digest =
-  merkleizer.impl.getFinalHash
+func copy*[L: static[Limit]](cloned: SszMerkleizer[L]): SszMerkleizer[L] {.deprecated.} =
+  cloned
 
 template createMerkleizer*(
     totalElements: static Limit, topLayer = 0,
-    internalParam = false): SszMerkleizerImpl =
+    internalParam = false): auto =
   trs "CREATING A MERKLEIZER FOR ", totalElements, " (topLayer: ", topLayer, ")"
 
   const treeHeight = binaryTreeHeight totalElements
-  var combinedChunks {.noinit.}: array[treeHeight, (Digest, Digest)]
-
   let topIndex = treeHeight - 1 - topLayer
 
-  SszMerkleizerImpl(
-    combinedChunks: makeUncheckedArray(baseAddr combinedChunks),
+  SszMerkleizer[totalElements](
     topIndex: if (topIndex < 0): 0 else: topIndex,
     totalChunks: 0,
     internal: internalParam)
 
-func getFinalHash*(merkleizer: SszMerkleizerImpl): Digest {.noinit.} =
+func getFinalHash(merkleizer: var SszMerkleizer, res: var Digest) =
   if merkleizer.totalChunks == 0:
-    return zeroHashes[merkleizer.topIndex]
+    res = zeroHashes[merkleizer.topIndex]
+    return
 
   let
     bottomHashIdx = firstOne(merkleizer.totalChunks) - 1
@@ -509,50 +515,59 @@ func getFinalHash*(merkleizer: SszMerkleizerImpl): Digest {.noinit.} =
       merkleizer.combinedChunks[bottomHashIdx][1],
       zeroHashes[bottomHashIdx])
 
-    block: # avoid temporary
-      let chunkPtr = addr merkleizer.combinedChunks[bottomHashIdx + 1][1]
-      chunkPtr[] = mergeBranches(
+    block:
+      mergeBranches(
         merkleizer.combinedChunks[bottomHashIdx][0],
-        merkleizer.combinedChunks[bottomHashIdx][1])
+        merkleizer.combinedChunks[bottomHashIdx][1],
+        merkleizer.combinedChunks[bottomHashIdx + 1][1])
 
     for i in bottomHashIdx + 1 ..< topHashIdx:
       if i == topHashIdx - 1:
         if getBitLE(merkleizer.totalChunks, i):
           trs "COMBINED"
-          result = mergeBranches(
-            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1])
+          mergeBranches(
+            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
+            res)
         else:
           trs "COMBINED WITH ZERO"
-          result = mergeBranches(merkleizer.combinedChunks[i][1], zeroHashes[i])
+          mergeBranches(merkleizer.combinedChunks[i][1], zeroHashes[i], res)
       else:
-        let chunkPtr = addr merkleizer.combinedChunks[i + 1][1]
         if getBitLE(merkleizer.totalChunks, i):
           trs "COMBINED"
-          chunkPtr[] = mergeBranches(
-            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1])
+          mergeBranches(
+            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
+            merkleizer.combinedChunks[i + 1][1])
         else:
           trs "COMBINED WITH ZERO"
-          chunkPtr[] = mergeBranches(
-            merkleizer.combinedChunks[i][1], zeroHashes[i])
+          mergeBranches(
+            merkleizer.combinedChunks[i][1], zeroHashes[i],
+            merkleizer.combinedChunks[i + 1][1])
 
   elif bottomHashIdx == topHashIdx:
     # We have a perfect tree (chunks == 2**n) at just the right height!
-    result = merkleizer.combinedChunks[bottomHashIdx][0]
+    res = merkleizer.combinedChunks[bottomHashIdx][0]
   else:
     # We have a perfect tree of user chunks, but we have more work to
     # do - we must extend it to reach the desired height
-    result = mergeBranches(merkleizer.combinedChunks[bottomHashIdx][0],
-                           zeroHashes[bottomHashIdx])
+    mergeBranches(
+      merkleizer.combinedChunks[bottomHashIdx][0], zeroHashes[bottomHashIdx],
+      res)
 
     for i in bottomHashIdx + 1 ..< topHashIdx:
-      result = mergeBranches(result, zeroHashes[i])
+      mergeBranches(res, zeroHashes[i], res)
 
-func mixInLength*(root: Digest, length: int): Digest {.noinit.} =
+func getFinalHash*(merkleizer: var SszMerkleizer): Digest {.noinit.} =
+  getFinalHash(merkleizer, result)
+
+func mixInLength(root: Digest, length: int, res: var Digest) =
   var buf {.noinit.}: array[64, byte]
   assign(buf.toOpenArray(0, root.data.high), root.data)
   assign(buf.toOpenArray(32, 39), uint64(length).toBytesLE())
   zeroMem(addr buf[40], 24)
-  digest(buf)
+  digest(buf, res)
+
+func mixInLength*(root: Digest, length: int): Digest {.noinit.} =
+  mixInLength(root, length, result)
 
 func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [], noinit.}
 
@@ -570,12 +585,12 @@ template addField(field) =
     chunk = hash_tree_root(field)
   trs "CHUNK ADDED"
 
-template merkleizeFields(totalChunks: static Limit, body: untyped): Digest =
+template merkleizeFields(totalChunks: static Limit, res: var Digest, body: untyped) =
   var merkleizer {.inject.} = createMerkleizer(totalChunks, internalParam = true)
 
   body
 
-  getFinalHash(merkleizer)
+  getFinalHash(merkleizer, res)
 
 template writeBytesLE(chunk: var array[bytesPerChunk, byte], atParam: int,
                       val: UintN) =
@@ -583,8 +598,8 @@ template writeBytesLE(chunk: var array[bytesPerChunk, byte], atParam: int,
   chunk[at ..< at + sizeof(val)] = toBytesLE(val)
 
 func chunkedHashTreeRoot[T: BasicType](
-    merkleizer: var SszMerkleizerImpl, arr: openArray[T],
-    firstIdx, numFromFirst: Limit): Digest {.noinit.} =
+    merkleizer: var SszMerkleizer, arr: openArray[T],
+    firstIdx, numFromFirst: Limit, res: var Digest) =
   static:
     doAssert bytesPerChunk mod sizeof(T) == 0
 
@@ -613,19 +628,19 @@ func chunkedHashTreeRoot[T: BasicType](
         lastChunk.writeBytesLE(i * sizeof(T), arr[firstIdx + writtenValues + i])
       addChunk(merkleizer, lastChunk)
 
-  getFinalHash(merkleizer)
+  getFinalHash(merkleizer, res)
 
 func chunkedHashTreeRoot[T: not BasicType](
-    merkleizer: var SszMerkleizerImpl, arr: openArray[T],
-    firstIdx, numFromFirst: Limit): Digest {.noinit.} =
+    merkleizer: var SszMerkleizer, arr: openArray[T],
+    firstIdx, numFromFirst: Limit, res: var Digest) =
   for i in 0 ..< numFromFirst:
     addChunkDirect(merkleizer):
       chunk = hash_tree_root(arr[firstIdx + i])
-  getFinalHash(merkleizer)
+  getFinalHash(merkleizer, res)
 
 template chunkedHashTreeRoot[T](
     totalChunks: static Limit, arr: openArray[T],
-    chunks: Slice[Limit], topLayer: int): Digest =
+    chunks: Slice[Limit], topLayer: int, res: var Digest) =
   const valuesPerChunk =
     when T is BasicType:
       bytesPerChunk div sizeof(T)
@@ -634,25 +649,25 @@ template chunkedHashTreeRoot[T](
   let firstIdx = chunks.a * valuesPerChunk
   if arr.len <= firstIdx:
     const treeHeight = binaryTreeHeight totalChunks
-    zeroHashes[treeHeight - 1 - topLayer]
+    res = zeroHashes[treeHeight - 1 - topLayer]
   else:
     var merkleizer = createMerkleizer(totalChunks, topLayer, internalParam = true)
     let numFromFirst =
       min((chunks.b - chunks.a + 1) * valuesPerChunk, arr.len - firstIdx)
-    chunkedHashTreeRoot(merkleizer, arr, firstIdx, numFromFirst)
+    chunkedHashTreeRoot(merkleizer, arr, firstIdx, numFromFirst, res)
 
 template chunkedHashTreeRoot[T](
-    totalChunks: static Limit, arr: openArray[T]): Digest =
+    totalChunks: static Limit, arr: openArray[T], res: var Digest) =
   if arr.len <= 0:
     const treeHeight = binaryTreeHeight totalChunks
-    zeroHashes[treeHeight - 1]
+    res = zeroHashes[treeHeight - 1]
   else:
     var merkleizer = createMerkleizer(totalChunks, internalParam = true)
-    chunkedHashTreeRoot(merkleizer, arr, 0, arr.len)
+    chunkedHashTreeRoot(merkleizer, arr, 0, arr.len, res)
 
 func bitListHashTreeRoot(
-    merkleizer: var SszMerkleizerImpl, x: BitSeq,
-    chunks: Slice[Limit]): Digest {.noinit.} =
+    merkleizer: var SszMerkleizer, x: BitSeq, chunks: Slice[Limit],
+    res: var Digest) =
   # TODO: Switch to a simpler BitList representation and
   #       replace this with `chunkedHashTreeRoot`
   var
@@ -663,7 +678,8 @@ func bitListHashTreeRoot(
     if totalBytes == 1:
       # This is an empty bit list.
       # It should be hashed as a tree containing all zeros:
-      return zeroHashes[merkleizer.topIndex]
+      res = zeroHashes[merkleizer.topIndex]
+      return
 
     totalBytes -= 1
     lastCorrectedByte = bytes(x)[^2]
@@ -698,17 +714,17 @@ func bitListHashTreeRoot(
 
     addChunk(merkleizer, lastChunk.toOpenArray(0, bytesInLastChunk - 1))
 
-  getFinalHash(merkleizer)
+  getFinalHash(merkleizer, res)
 
 template bitListHashTreeRoot(
     totalChunks: static Limit, x: BitSeq,
-    chunks: Slice[Limit], topLayer: int): Digest =
+    chunks: Slice[Limit], topLayer: int, res: var Digest) =
   var merkleizer = createMerkleizer(totalChunks, topLayer, internalParam = true)
-  bitListHashTreeRoot(merkleizer, x, chunks)
+  bitListHashTreeRoot(merkleizer, x, chunks, res)
 
 template bitListHashTreeRoot(
-    totalChunks: static Limit, x: BitSeq): Digest =
-  bitListHashTreeRoot(totalChunks, x, 0.Limit ..< totalChunks, topLayer = 0)
+    totalChunks: static Limit, x: BitSeq, res: var Digest) =
+  bitListHashTreeRoot(totalChunks, x, 0.Limit ..< totalChunks, topLayer = 0, res)
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
   when T is BitArray|BitList:
@@ -757,55 +773,57 @@ template rootAt(i: int): Digest =
 const unsupportedIndex =
   err(Result[void, string], "Generalized index not supported.")
 
-func hashTreeRootAux[T](x: T): Digest {.noinit.} =
+func hashTreeRootAux[T](x: T, res: var Digest) =
   when T is bool|char:
-    result.data[0] = byte(x)
-    zeroMem(addr result.data[1], sizeof(result.data) - sizeof(x))
+    res.data[0] = byte(x)
+    zeroMem(addr res.data[1], sizeof(res.data) - sizeof(x))
   elif T is UintN:
     when cpuEndian == bigEndian:
-      result.data[0..<sizeof(x)] = toBytesLE(x)
+      res.data[0..<sizeof(x)] = toBytesLE(x)
     else:
-      copyMem(addr result.data[0], unsafeAddr x, sizeof x)
-    when sizeof(x) < sizeof(result.data):
-      zeroMem(addr result.data[sizeof x], sizeof(result.data) - sizeof(x))
+      copyMem(addr res.data[0], unsafeAddr x, sizeof x)
+    when sizeof(x) < sizeof(res.data):
+      zeroMem(addr res.data[sizeof x], sizeof(res.data) - sizeof(x))
   elif T is BitArray:
-    hashTreeRootAux(x.bytes)
+    hashTreeRootAux(x.bytes, res)
   elif T is BitList:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    let contentsHash {.noinit.} = bitListHashTreeRoot(totalChunks, BitSeq x)
-    mixInLength(contentsHash, x.len)
+    var contentsHash {.noinit.}: Digest
+    bitListHashTreeRoot(totalChunks, BitSeq x, contentsHash)
+    mixInLength(contentsHash, x.len, res)
   elif T is array:
     type E = ElemType(T)
-    when E is BasicType and sizeof(T) <= sizeof(result.data):
+    when E is BasicType and sizeof(T) <= sizeof(res.data):
       when sizeof(E) == 1 or cpuEndian == littleEndian:
-        copyMem(addr result.data[0], unsafeAddr x, sizeof x)
+        copyMem(addr res.data[0], unsafeAddr x, sizeof x)
       else:
         var pos = 0
         for e in x:
-          writeBytesLE(result.data, pos, e)
+          writeBytesLE(res.data, pos, e)
           pos += sizeof(E)
-      when sizeof(x) < sizeof(result.data):
-        zeroMem(addr result.data[sizeof x], sizeof(result.data) - sizeof(x))
+      when sizeof(x) < sizeof(res.data):
+        zeroMem(addr res.data[sizeof x], sizeof(res.data) - sizeof(x))
     else:
       trs "FIXED TYPE; USE CHUNK STREAM"
       const totalChunks = maxChunksCount(T, x.len)
-      chunkedHashTreeRoot(totalChunks, x)
+      chunkedHashTreeRoot(totalChunks, x, res)
   elif T is List:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    let contentsHash {.noinit.} = chunkedHashTreeRoot(totalChunks, asSeq x)
-    mixInLength(contentsHash, x.len)
+    var contentsHash {.noinit.}: Digest
+    chunkedHashTreeRoot(totalChunks, asSeq x, contentsHash)
+    mixInLength(contentsHash, x.len, res)
   elif T is OptionalType:
     if x.isSome:
-      mixInLength(hash_tree_root(toSszType(x.get)), length = 1)
+      mixInLength(hash_tree_root(toSszType(x.get)), length = 1, res)
     else:
-      zeroHashes[1]
+      res = zeroHashes[1]
   elif T is object|tuple:
     # when T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
     trs "MERKLEIZING FIELDS"
     const totalChunks = totalSerializedFields(T)
-    merkleizeFields(Limit totalChunks):
+    merkleizeFields(Limit totalChunks, res):
       x.enumerateSubFields(f):
         addField f
   else:
@@ -821,7 +839,7 @@ func hashTreeRootAux[T](
   when T is BasicType:
     for i in slice:
       if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
-      rootAt(i) = hashTreeRootAux(x)
+      hashTreeRootAux(x, rootAt(i))
   elif T is BitArray:
     ? hashTreeRootAux(x.bytes, indices, roots, loopOrder, slice, atLayer)
   elif T is BitList:
@@ -835,14 +853,15 @@ func hashTreeRootAux[T](
         index = indexAt(i)
         indexLayer = log2trunc(index)
       if index == 1.GeneralizedIndex:
-        let contentsHash {.noinit.} = bitListHashTreeRoot(totalChunks, BitSeq x)
-        rootAt(i) = mixInLength(contentsHash, x.len)
+        var contentsHash {.noinit.}: Digest
+        bitListHashTreeRoot(totalChunks, BitSeq x, contentsHash)
+        mixInLength(contentsHash, x.len, rootAt(i))
         inc i
       elif index == 3.GeneralizedIndex:
-        rootAt(i) = hashTreeRootAux(x.len.uint64)
+        hashTreeRootAux(x.len.uint64, rootAt(i))
         inc i
       elif index == 2.GeneralizedIndex:
-        rootAt(i) = bitListHashTreeRoot(totalChunks, BitSeq x)
+        bitListHashTreeRoot(totalChunks, BitSeq x, rootAt(i))
         inc i
       elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
         let
@@ -851,8 +870,8 @@ func hashTreeRootAux[T](
           indexLayer = log2trunc(index)
         if indexLayer <= chunkLayer:
           let chunks = chunksForIndex(index)
-          rootAt(i) = bitListHashTreeRoot(totalChunks, BitSeq x,
-                                          chunks, indexLayer)
+          bitListHashTreeRoot(
+            totalChunks, BitSeq x, chunks, indexLayer, rootAt(i))
           inc i
         else: return unsupportedIndex
       else: return unsupportedIndex
@@ -861,7 +880,7 @@ func hashTreeRootAux[T](
     when E is BasicType and sizeof(T) <= sizeof(roots[0].data):
       for i in slice:
         if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
-        rootAt(i) = hashTreeRootAux(x)
+        hashTreeRootAux(x, rootAt(i))
     else:
       trs "FIXED TYPE; USE CHUNK STREAM"
       const
@@ -874,12 +893,11 @@ func hashTreeRootAux[T](
           index = indexAt(i)
           indexLayer = log2trunc(index)
         if index == 1.GeneralizedIndex:
-          rootAt(i) = chunkedHashTreeRoot(totalChunks, x)
+          chunkedHashTreeRoot(totalChunks, x, rootAt(i))
           inc i
         elif indexLayer <= chunkLayer:
           let chunks = chunksForIndex(index)
-          rootAt(i) = chunkedHashTreeRoot(totalChunks, x,
-                                          chunks, indexLayer)
+          chunkedHashTreeRoot(totalChunks, x, chunks, indexLayer, rootAt(i))
           inc i
         else:
           when ElemType(typeof(x)) is BasicType: return unsupportedIndex
@@ -909,14 +927,15 @@ func hashTreeRootAux[T](
         index = indexAt(i)
         indexLayer = log2trunc(index)
       if index == 1.GeneralizedIndex:
-        let contentsHash {.noinit.} = chunkedHashTreeRoot(totalChunks, asSeq x)
-        rootAt(i) = mixInLength(contentsHash, x.len)
+        var contentsHash {.noinit.}: Digest
+        chunkedHashTreeRoot(totalChunks, asSeq x, contentsHash)
+        mixInLength(contentsHash, x.len, rootAt(i))
         inc i
       elif index == 3.GeneralizedIndex:
-        rootAt(i) = hashTreeRootAux(x.len.uint64)
+        hashTreeRootAux(x.len.uint64, rootAt(i))
         inc i
       elif index == 2.GeneralizedIndex:
-        rootAt(i) = chunkedHashTreeRoot(totalChunks, asSeq x)
+        chunkedHashTreeRoot(totalChunks, asSeq x, rootAt(i))
         inc i
       elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
         let
@@ -925,8 +944,8 @@ func hashTreeRootAux[T](
           indexLayer = log2trunc(index)
         if indexLayer <= chunkLayer:
           let chunks = chunksForIndex(index)
-          rootAt(i) = chunkedHashTreeRoot(totalChunks, asSeq x,
-                                          chunks, indexLayer)
+          chunkedHashTreeRoot(
+            totalChunks, asSeq x, chunks, indexLayer, rootAt(i))
           inc i
         else:
           when ElemType(typeof(x)) is BasicType: return unsupportedIndex
@@ -958,13 +977,13 @@ func hashTreeRootAux[T](
         indexLayer = log2trunc(index)
       if index == 1.GeneralizedIndex:
         if x.isSome:
-          rootAt(i) = mixInLength(hash_tree_root(toSszType(x.get)), length = 1)
+          mixInLength(hash_tree_root(toSszType(x.get)), length = 1, rootAt(i))
         else:
           rootAt(i) = zeroHashes[1]
         inc i
       elif index == 3.GeneralizedIndex:
         if x.isSome:
-          rootAt(i) = hashTreeRootAux(1.uint64)
+          hashTreeRootAux(1.uint64, rootAt(i))
         else:
           rootAt(i) = zeroHashes[0]
         inc i
@@ -1004,14 +1023,13 @@ func hashTreeRootAux[T](
       firstChunkIndex = nextPow2(totalChunks.uint64)
       chunkLayer = log2trunc(firstChunkIndex)
     var
-      combinedChunks {.noinit.}: array[chunkLayer + 1, (Digest, Digest)]
       i = slice.a
       fieldIndex = 0.Limit
       isActive = false
       index {.noinit.}: GeneralizedIndex
       indexLayer {.noinit.}: int
       chunks {.noinit.}: Slice[Limit]
-      merkleizer {.noinit.}: SszMerkleizerImpl
+      merkleizer {.noinit.}: SszMerkleizer[totalSerializedFields(T)]
       chunk {.noinit.}: Limit
       nextField {.noinit.}: Limit
     x.enumerateSubFields(f):
@@ -1024,9 +1042,8 @@ func hashTreeRootAux[T](
               chunkForIndex(index)
             elif indexLayer < chunkLayer:
               chunks = chunksForIndex(index)
-              merkleizer = SszMerkleizerImpl(
-                combinedChunks: makeUncheckedArray(baseAddr combinedChunks),
-                topIndex: chunkLayer - indexLayer)
+              merkleizer.topIndex = chunkLayer - indexLayer
+              merkleizer.totalChunks = 0
               chunks.a
             else:
               chunk = chunkContainingIndex(index)
@@ -1068,9 +1085,8 @@ func hashTreeRootAux[T](
         isActive = false
       elif indexLayer < chunkLayer:
         if not isActive:
-          merkleizer = SszMerkleizerImpl(
-            combinedChunks: makeUncheckedArray(baseAddr combinedChunks),
-            topIndex: chunkLayer - indexLayer)
+          merkleizer.topIndex = chunkLayer - indexLayer
+          merkleizer.totalChunks = 0
         rootAt(i) = getFinalHash(merkleizer)
         inc i
         isActive = false
@@ -1079,7 +1095,7 @@ func hashTreeRootAux[T](
     unsupported T
   ok()
 
-func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest {.noinit.} =
+func mergedDataHash(x: HashArray|HashList, chunkIdx: int64, res: var Digest) =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
   trs "DATA HASH ", chunkIdx, " ", x.data.len
 
@@ -1093,7 +1109,7 @@ func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest {.noinit.} =
       byteLen = x.data.len * sizeof(x.T)
 
     if byteIdx >= byteLen:
-      zeroHashes[1]
+      res = zeroHashes[1]
     else:
       let
         nbytes = min(byteLen - byteIdx, 64)
@@ -1101,29 +1117,31 @@ func mergedDataHash(x: HashArray|HashList, chunkIdx: int64): Digest {.noinit.} =
 
       digest(
         toOpenArray(bytes, int(byteIdx), int(byteIdx + nbytes - 1)),
-        toOpenArray(zero64, 0, int(padding - 1)))
+        toOpenArray(zero64, 0, int(padding - 1)),
+        res)
   else:
     if chunkIdx + 1 > x.data.len():
-      zeroHashes[x.maxDepth]
+      res = zeroHashes[x.maxDepth]
     elif chunkIdx + 1 == x.data.len():
-      mergeBranches(
-        hash_tree_root(x.data[chunkIdx]),
-        zeroDigest)
+      let left {.noinit.} = hash_tree_root(x.data[chunkIdx])
+      mergeBranches(left, zeroDigest, res)
     else:
-      mergeBranches(
-        hash_tree_root(x.data[chunkIdx]),
-        hash_tree_root(x.data[chunkIdx + 1]))
+      let
+        left {.noinit.} = hash_tree_root(x.data[chunkIdx])
+        right {.noinit.} = hash_tree_root(x.data[chunkIdx + 1])
 
-template mergedHash(x: HashArray|HashList, vIdxParam: int64): Digest =
+      mergeBranches(left, right, res)
+
+template mergedHash(x: HashArray|HashList, vIdxParam: int64, res: var Digest) =
   # The merged hash of the data at `vIdx` and `vIdx + 1`
   let vIdx = vIdxParam
   if vIdx >= x.maxChunks:
     let dataIdx = vIdx - x.maxChunks
-    mergedDataHash(x, dataIdx)
+    mergedDataHash(x, dataIdx, res)
   else:
     mergeBranches(
-      hashTreeRootCachedPtr(x, vIdx)[],
-      hashTreeRootCachedPtr(x, vIdx + 1)[])
+      hashTreeRootCachedPtr(x, vIdx)[], hashTreeRootCachedPtr(x, vIdx + 1)[],
+      res)
 
 func hashTreeRootCachedPtr*(x: HashArray, vIdx: int64): ptr Digest =
   # Return a short-lived pointer to the given digest - a pointer is used because
@@ -1135,7 +1153,7 @@ func hashTreeRootCachedPtr*(x: HashArray, vIdx: int64): ptr Digest =
   let px = unsafeAddr x.hashes[vIdx]
   if not isCached(x.hashes[vIdx]):
     # TODO oops. so much for maintaining non-mutability.
-    px[] = mergedHash(x, vIdx * 2)
+    mergedHash(x, vIdx * 2, px[])
   px
 
 func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
@@ -1161,7 +1179,7 @@ func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
     if not isCached(px[]):
       trs "REFRESHING ", vIdx, " ", layerIdx, " ", layer
       # TODO oops. so much for maintaining non-mutability.
-      px[] = mergedHash(x, vIdx * 2)
+      mergedHash(x, vIdx * 2, px[])
     else:
       trs "CACHED ", layerIdx
     px
@@ -1172,15 +1190,15 @@ func hashTreeRootCached*(x: HashArray): Digest {.noinit.} =
 func hashTreeRootCached*(x: HashList): Digest {.noinit.} =
   if x.data.len == 0:
     mergeBranches(
-      zeroHashes[x.maxDepth],
-      zeroHashes[0]) # mixInLength with 0!
+      zeroHashes[x.maxDepth], zeroHashes[0],
+      result) # mixInLength with 0!
   else:
     if not isCached(x.hashes[0]):
       # TODO oops. so much for maintaining non-mutability.
       let px = unsafeAddr x.hashes[0]
-      px[] = mixInLength(hashTreeRootCachedPtr(x, 1)[], x.data.len)
+      mixInLength(hashTreeRootCachedPtr(x, 1)[], x.data.len, px[])
 
-    x.hashes[0]
+    result = x.hashes[0]
 
 func hashTreeRootCached*(
     x: HashArray,
@@ -1203,8 +1221,7 @@ func hashTreeRootCached*(
       inc i
     elif indexLayer == chunkLayer:
       let chunks = chunksForIndex(index)
-      rootAt(i) = chunkedHashTreeRoot(totalChunks, x.data,
-                                      chunks, indexLayer)
+      chunkedHashTreeRoot(totalChunks, x.data, chunks, indexLayer, rootAt(i))
       inc i
     elif indexLayer < chunkLayer:
       rootAt(i) = hashTreeRootCachedPtr(x, index.int64)[]
@@ -1249,7 +1266,7 @@ func hashTreeRootCached*(
       rootAt(i) = hashTreeRootCached(x)
       inc i
     elif index == 3.GeneralizedIndex:
-      rootAt(i) = hashTreeRootAux(x.len.uint64)
+      hashTreeRootAux(x.len.uint64, rootAt(i))
       inc i
     elif index == 2.GeneralizedIndex:
       rootAt(i) = hashTreeRootCachedPtr(x, 1)[]
@@ -1261,8 +1278,8 @@ func hashTreeRootCached*(
         indexLayer = log2trunc(index)
       if indexLayer == chunkLayer:
         let chunks = chunksForIndex(index)
-        rootAt(i) = chunkedHashTreeRoot(totalChunks, asSeq x.data,
-                                        chunks, indexLayer)
+        chunkedHashTreeRoot(
+          totalChunks, asSeq x.data, chunks, indexLayer, rootAt(i))
         inc i
       elif indexLayer < chunkLayer:
         rootAt(i) = hashTreeRootCachedPtr(x, index.int64)[]
@@ -1291,11 +1308,10 @@ func hash_tree_root*(x: auto): Digest {.noinit.} =
   trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x))
   mixin toSszType
 
-  result =
-    when x is HashArray|HashList:
-      hashTreeRootCached(x)
-    else:
-      hashTreeRootAux(toSszType(x))
+  when x is HashArray|HashList:
+    result = hashTreeRootCached(x)
+  else:
+    hashTreeRootAux(toSszType(x), result)
 
   trs "HASH TREE ROOT FOR ", name(typeof(x)), " = ", "0x", $result
 
