@@ -1,6 +1,6 @@
+{.used.}
+
 import
-  unittest2,
-  stew/byteutils,
   ../ssz_serialization/merkleization
 
 type
@@ -42,6 +42,6 @@ proc main() =
   var h: ExecutionPayload
   # under nim 1.6.12, hash_tree_root failed to compile
   # but the bug fixed in nim > 1.6.14
-  let z = hash_tree_root(h)
+  let z {.used.} = hash_tree_root(h)
 
 main()
