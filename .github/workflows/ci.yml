@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency: # Cancel stale PR builds (but not push builds)
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -43,6 +47,7 @@ jobs:
 
     name: '${{ matrix.target.os }}-${{ matrix.target.cpu }} (Nim ${{ matrix.branch }})'
     runs-on: ${{ matrix.builder }}
+    continue-on-error: ${{ matrix.branch == 'devel' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -66,13 +71,6 @@ jobs:
           EOF
           chmod 755 external/bin/gcc external/bin/g++
           echo '${{ github.workspace }}/external/bin' >> $GITHUB_PATH
-
-      - name: 'Install dependencies (macOS)'
-        if: runner.os == 'macOS' && matrix.branch == 'devel'
-        run: |
-          brew install openssl@1.1
-          ln -s $(brew --prefix)/opt/openssl/lib/libcrypto.1.1.dylib /usr/local/lib
-          ln -s $(brew --prefix)/opt/openssl/lib/libssl.1.1.dylib /usr/local/lib/
 
       - name: MSYS2 (Windows i386)
         if: runner.os == 'Windows' && matrix.target.cpu == 'i386'
@@ -98,25 +96,25 @@ jobs:
       - name: Restore Nim DLLs dependencies (Windows) from cache
         if: runner.os == 'Windows'
         id: windows-dlls-cache
-        uses: actions/cache@v3
+        uses: actions/cache@v2
         with:
-          path: external/dlls
-          key: 'dlls'
+          path: external/dlls-${{ matrix.target.cpu }}
+          key: 'dlls-${{ matrix.target.cpu }}'
 
-      - name: Install DLL dependencies (Windows)
+      - name: Install DLLs dependencies (Windows)
         if: >
           steps.windows-dlls-cache.outputs.cache-hit != 'true' &&
           runner.os == 'Windows'
         run: |
-          mkdir external
+          mkdir -p external
           curl -L "https://nim-lang.org/download/windeps.zip" -o external/windeps.zip
-          7z x external/windeps.zip -oexternal/dlls
+          7z x -y external/windeps.zip -oexternal/dlls-${{ matrix.target.cpu }}
 
       - name: Path to cached dependencies (Windows)
         if: >
           runner.os == 'Windows'
         run: |
-          echo '${{ github.workspace }}'"/external/dlls" >> $GITHUB_PATH
+          echo "${{ github.workspace }}/external/dlls-${{ matrix.target.cpu }}" >> $GITHUB_PATH
 
       - name: Derive environment variables
         run: |

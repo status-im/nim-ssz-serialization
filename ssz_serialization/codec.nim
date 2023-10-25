@@ -6,7 +6,6 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [MalformedSszError, SszSizeMismatchError].}
 
 # Coding and decoding of primitive SSZ types - every "simple" type passed to
 # and from the SSZ library must have a `fromSssBytes` and `toSszType` overload.
@@ -38,14 +37,15 @@ template setOutputSize[R, T](a: var array[R, T], length: int) =
   if length != a.len:
     raiseIncorrectSize a.type
 
-func setOutputSize(list: var List, length: int) {.raisesssz.} =
+func setOutputSize(list: var List, length: int) {.raises: [SszError].} =
   # We will overwrite all bytes
   if not list.setLenUninitialized length:
     raiseMalformedSszError(typeof(list), "length exceeds list limit")
 
 # fromSszBytes copies the wire representation to a Nim variable,
 # assuming there's enough data in the buffer
-func fromSszBytes*(T: type UintN, data: openArray[byte]): T {.raisesssz.} =
+func fromSszBytes*(
+    T: type UintN, data: openArray[byte]): T {.raises: [SszError].} =
   ## Convert directly to bytes the size of the int. (e.g. ``uint16 = 2 bytes``)
   ## All integers are serialized as **little endian**.
   if data.len != sizeof(result):
@@ -53,13 +53,15 @@ func fromSszBytes*(T: type UintN, data: openArray[byte]): T {.raisesssz.} =
 
   T.fromBytesLE(data)
 
-func fromSszBytes*(T: type bool, data: openArray[byte]): T {.raisesssz.} =
+func fromSszBytes*(
+    T: type bool, data: openArray[byte]): T {.raises: [SszError].} =
   # Strict: only allow 0 or 1
   if data.len != 1 or byte(data[0]) > byte(1):
     raiseMalformedSszError(bool, "invalid boolean value")
   data[0] == 1
 
-func fromSszBytes*(T: type Digest, data: openArray[byte]): T {.raisesssz, noinit.} =
+func fromSszBytes*(
+    T: type Digest, data: openArray[byte]): T {.raises: [SszError], noinit.} =
   if data.len != sizeof(result.data):
     raiseIncorrectSize T
   copyMem(result.data.addr, unsafeAddr data[0], sizeof(result.data))
@@ -234,11 +236,11 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
 
   res
 
-func initSszUnion(T: type, input: openArray[byte]): T {.raisesssz.} =
+func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
   initSszUnionImpl(T, input)
 
-proc readSszValue*[T](input: openArray[byte],
-                      val: var T) {.raisesssz.} =
+proc readSszValue*[T](
+    input: openArray[byte], val: var T) {.raises: [SszError].} =
   mixin fromSszBytes, toSszType
 
   template readOffsetUnchecked(n: int): uint32 {.used.}=

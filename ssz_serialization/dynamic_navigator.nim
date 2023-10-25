@@ -6,7 +6,6 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
-{.pragma: raisesssz, raises: [IOError, MalformedSszError, SszSizeMismatchError].}
 
 import
   std/[strutils, parseutils],
@@ -25,30 +24,31 @@ type
   FieldInfo = ref object
     name: string
     fieldType: TypeInfo
-    navigator: proc (m: MemRange): MemRange {. gcsafe
-                                               noSideEffect
-                                               raisesssz }
+    navigator: proc (m: MemRange): MemRange {.
+      gcsafe, noSideEffect, raises: [IOError, SszError] .}
+
   TypeInfo = ref object
     case kind: ObjKind
     of Record:
       fields: seq[FieldInfo]
     of Indexable:
       elemType: TypeInfo
-      navigator: proc (m: MemRange, idx: int): MemRange {. gcsafe
-                                                           noSideEffect
-                                                           raisesssz }
+      navigator: proc (m: MemRange, idx: int): MemRange {.
+        gcsafe, noSideEffect, raises: [IOError, SszError] .}
     else:
       discard
 
     jsonPrinter: proc (m: MemRange,
                        outStream: OutputStream,
-                       pretty: bool) {.gcsafe, raisesssz.}
+                       pretty: bool) {.gcsafe, raises: [IOError, SszError].}
 
   DynamicSszNavigator* = object
     m: MemRange
     typ: TypeInfo
 
-proc jsonPrinterImpl[T](m: MemRange, outStream: OutputStream, pretty: bool) {.raisesssz.} =
+proc jsonPrinterImpl[T](
+    m: MemRange, outStream: OutputStream, pretty: bool
+) {.raises: [IOError, SszError].} =
   var typedNavigator = sszMount(m, T)
   var jsonWriter = Json.Writer.init(outStream, pretty)
   # TODO: it should be possible to serialize the navigator object
@@ -62,12 +62,13 @@ func findField(fields: seq[FieldInfo], name: string): FieldInfo =
     if field.name == name:
       return field
 
-func indexableNavigatorImpl[T](m: MemRange, idx: int): MemRange {.raisesssz.} =
+func indexableNavigatorImpl[T](
+    m: MemRange, idx: int): MemRange {.raises: [IOError, SszError].} =
   var typedNavigator = sszMount(m, T)
   getMemRange(typedNavigator[idx])
 
-func fieldNavigatorImpl[RecordType; FieldType;
-                        fieldName: static string](m: MemRange): MemRange {.raisesssz.} =
+func fieldNavigatorImpl[RecordType; FieldType; fieldName: static string](
+    m: MemRange): MemRange {.raises: [IOError, SszError].} =
   # TODO: Make sure this doesn't fail with a Defect when
   #       navigating to an inactive field in a case object.
   var typedNavigator = sszMount(m, RecordType)
@@ -104,12 +105,14 @@ func genTypeInfo(T: type): TypeInfo =
 
   result.jsonPrinter = jsonPrinterImpl[T]
 
-func `[]`*(n: DynamicSszNavigator, idx: int): DynamicSszNavigator {.raisesssz.} =
+func `[]`*(
+    n: DynamicSszNavigator, idx: int
+): DynamicSszNavigator {.raises: [IOError, SszError].} =
   doAssert n.typ.kind == Indexable
   DynamicSszNavigator(m: n.typ.navigator(n.m, idx), typ: n.typ.elemType)
 
 func navigate*(n: DynamicSszNavigator, path: string): DynamicSszNavigator {.
-               raises: [KeyError, IOError, MalformedSszError, SszSizeMismatchError, ValueError] .} =
+               raises: [KeyError, IOError, SszError, ValueError] .} =
   case n.typ.kind
   of Record:
     let fieldInfo = n.typ.fields.findField(path)
@@ -136,11 +139,11 @@ template navigatePathImpl(nav, iterabalePathFragments: untyped) =
       return
 
 func navigatePath*(n: DynamicSszNavigator, path: string): DynamicSszNavigator {.
-                   raises: [IOError, ValueError, MalformedSszError, SszSizeMismatchError] .} =
+                   raises: [IOError, ValueError, SszError] .} =
   navigatePathImpl n, split(path, '/')
 
 func navigatePath*(n: DynamicSszNavigator, path: openArray[string]): DynamicSszNavigator {.
-                   raises: [IOError, ValueError, MalformedSszError, SszSizeMismatchError] .} =
+                   raises: [IOError, ValueError, SszError] .} =
   navigatePathImpl n, path
 
 func init*(T: type DynamicSszNavigator,
@@ -148,10 +151,14 @@ func init*(T: type DynamicSszNavigator,
   T(m: MemRange(startAddr: unsafeAddr bytes[0], length: bytes.len),
     typ: typeInfo(Navigated))
 
-proc writeJson*(n: DynamicSszNavigator, outStream: OutputStream, pretty = true) {.raisesssz.} =
+proc writeJson*(
+    n: DynamicSszNavigator, outStream: OutputStream, pretty = true
+) {.raises: [IOError, SszError].} =
   n.typ.jsonPrinter(n.m, outStream, pretty)
 
-func toJson*(n: DynamicSszNavigator, pretty = true): string {.raisesssz.} =
+func toJson*(
+    n: DynamicSszNavigator, pretty = true
+): string {.raises: [IOError, SszError].} =
   var outStream = memoryOutput()
   {.noSideEffect.}:
     # We are assuming that there are no side-effects here
