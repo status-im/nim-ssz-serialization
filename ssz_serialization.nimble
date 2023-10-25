@@ -21,8 +21,7 @@ proc test(args, path: string) =
     mkDir "build"
   exec "nim " & getEnv("TEST_LANG", "c") & " " & getEnv("NIMFLAGS") & " " & args &
     " -r --skipParentCfg" &
-    " --styleCheck:usages --styleCheck:error" &
-    " --hint[XDeclaredButNotUsed]:off --hint[Processing]:off " &
+    " --styleCheck:usages --styleCheck:error --hint[Processing]:off " &
     path
 
 task test, "Run all tests":
