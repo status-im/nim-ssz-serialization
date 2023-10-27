@@ -33,18 +33,18 @@ type
 
   Limit* = int64
 
-  PartialContainer*[T; N: static Limit] = object
+  StableContainer*[T; N: static Limit] = object
     data*: T
 
   Digest* = MDigest[32 * 8]
 
-template `.`*(a: PartialContainer, k: untyped): auto =
+template `.`*(a: StableContainer, k: untyped): auto =
   a.data.k
 
-template `.`*(a: var PartialContainer, k: untyped): auto =
+template `.`*(a: var StableContainer, k: untyped): auto =
   a.data.k
 
-template `.=`*(a: var PartialContainer, k: untyped, v: untyped): untyped =
+template `.=`*(a: var StableContainer, k: untyped, v: untyped): untyped =
   a.data.k = v
 
 # A few index types from here onwards:
@@ -532,7 +532,7 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
     return isFixedSize(ElemType(T))
   elif T is OptionalType:
     return false
-  elif T is PartialContainer:
+  elif T is StableContainer:
     return false
   elif T is object|tuple:
     when isCaseObject(T):
@@ -553,7 +553,7 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     type E = ElemType(T)
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
-  elif T is PartialContainer:
+  elif T is StableContainer:
     unsupported T0
   elif T is object|tuple:
     enumAllSerializedFields(T):

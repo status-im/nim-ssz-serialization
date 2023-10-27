@@ -817,7 +817,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
       mixInLength(hash_tree_root(toSszType(x.get)), length = 1, res)
     else:
       res = zeroHashes[1]
-  elif T is PartialContainer:
+  elif T is StableContainer:
     var
       fieldIndex = 0
       activeFields: BitArray[type(x).N]

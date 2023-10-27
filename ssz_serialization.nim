@@ -167,7 +167,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     if value.isSome:
       w.writeValue 1'u8
       w.writeValue value.get
-  elif value is PartialContainer:
+  elif value is StableContainer:
     var
       fieldIndex = 0
       activeFields: BitArray[type(value).N]
