@@ -225,9 +225,6 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
 
           enumInstanceSerializedFields(caseObj, fieldName, field):
             when fieldName != `SelectorFieldNameLit`:
-              if `input`.len <= 1:
-                raiseMalformedSszError(`type recordDef`, "invalid empty for selector")
-
               readSszValue(`input`.toOpenArray(1, `input`.len - 1), field)
 
           caseObj
