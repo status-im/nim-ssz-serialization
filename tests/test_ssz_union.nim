@@ -112,6 +112,19 @@ suite "SSZ Union serialization":
         test.selector == decoded.selector
         test.variableObj == decoded.variableObj
 
+  test "Union with empty list":
+    let test = TestCaseObject(selector: SomeVariable,
+      variablePart: List[byte, 16](@[]))
+    let encoded = SSZ.encode(test)
+
+    check encoded.toHex() == "03"
+
+    let decoded = SSZ.decode(encoded, TestCaseObject)
+
+    check:
+      test.selector == decoded.selector
+      test.variablePart == decoded.variablePart
+
 suite "SSZ Union invalid inputs":
   test "No data":
     var encoded: seq[byte]
