@@ -43,3 +43,8 @@ task test, "Run all tests":
   if (NimMajor, NimMinor) > (1, 6):
     run "--mm:refc --threads:off -d:PREFER_BLST_SHA256=false", "tests/test_all"
     run "--mm:refc --threads:on -d:PREFER_BLST_SHA256=false", "tests/test_all"
+
+task fuzzHashtree, "Run fuzzing test":
+  # TODO We don't run because the timeout parameter doesn't seem to work so
+  # this takes too long
+  build "-d:release", "tests/fuzzing/fuzz_hashtree"

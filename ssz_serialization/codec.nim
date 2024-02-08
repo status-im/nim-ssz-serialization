@@ -11,7 +11,7 @@
 # and from the SSZ library must have a `fromSssBytes` and `toSszType` overload.
 
 import
-  std/[options, typetraits],
+  std/typetraits,
   stew/[endians2, objects, results], stew/shims/macros,
   ./types
 

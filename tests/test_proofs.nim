@@ -60,9 +60,7 @@ suite "Merkle proofs":
     for i in 0 ..< allLeaves.len:
       nodes[i + 8] = allLeaves[i]
     for i in countdown(7, 1):
-      nodes[i] = computeDigest:
-        h.update nodes[2 * i + 0].data
-        h.update nodes[2 * i + 1].data
+      nodes[i] = digest(nodes[2 * i + 0].data, nodes[2 * i + 1].data)
 
     proc verify(indices_int: openArray[int]) =
       let
