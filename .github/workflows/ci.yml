@@ -171,3 +171,8 @@ jobs:
             env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
             env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
           fi
+
+      - name: Fuzz a little
+        if: runner.os == 'Linux'
+        run: |
+          nimble fuzzHashtree
