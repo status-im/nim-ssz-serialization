@@ -94,7 +94,7 @@ func indexVarSizeList(m: MemRange, idx: int): MemRange {.raises: [SszError].} =
   let listLen = firstOffset div offsetSize
 
   if idx >= listLen:
-    # TODO: Use a RangeError here?
+    # TODO: Use a RangeDefect here?
     # This would require the user to check the `len` upfront
     raise newException(MalformedSszError, "Indexing past the end")
 
