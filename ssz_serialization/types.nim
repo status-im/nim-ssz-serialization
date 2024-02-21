@@ -644,6 +644,7 @@ method formatMsg*(
     "SSZ size mismatch"
 
 template readValue*(reader: var JsonReader, value: var List) =
+  mixin readValue
   when type(value[0]) is byte:
     value = type(value)(utils.fromHex(reader.readValue(string)))
   else:

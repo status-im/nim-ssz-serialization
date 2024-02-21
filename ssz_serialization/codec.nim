@@ -238,7 +238,7 @@ func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
 
 proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
-  mixin fromSszBytes, toSszType
+  mixin fromSszBytes, toSszType, readSszValue
 
   template readOffsetUnchecked(n: int): uint32 {.used.}=
     fromSszBytes(uint32, input.toOpenArray(n, n + offsetSize - 1))

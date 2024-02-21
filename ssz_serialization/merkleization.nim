@@ -648,6 +648,7 @@ func chunkedHashTreeRoot[T: BasicType](
 func chunkedHashTreeRoot[T: not BasicType](
     merkleizer: var SszMerkleizer2, arr: openArray[T],
     firstIdx, numFromFirst: Limit, res: var Digest) =
+  mixin hash_tree_root
   for i in 0 ..< numFromFirst:
     addChunkDirect(merkleizer):
       chunk = hash_tree_root(arr[firstIdx + i])
@@ -787,6 +788,7 @@ const unsupportedIndex =
   err(Result[void, string], "Generalized index not supported.")
 
 func hashTreeRootAux[T](x: T, res: var Digest) =
+  mixin hash_tree_root
   when T is bool|char:
     res.data[0] = byte(x)
     zeroMem(addr res.data[1], sizeof(res.data) - sizeof(x))
@@ -827,7 +829,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     mixInLength(contentsHash, x.len, res)
   elif T is OptionalType:
     if x.isSome:
-      mixInLength(hash_tree_root(toSszType(x.get)), length = 1, res)
+      mixInLength(hash_tree_root(x.get), length = 1, res)
     else:
       res = zeroHashes[1]
   elif T is object|tuple:
@@ -849,6 +851,7 @@ func hashTreeRootAux[T](
     loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
+  mixin hash_tree_root
   when T is BasicType:
     for i in slice:
       if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
@@ -990,7 +993,7 @@ func hashTreeRootAux[T](
         indexLayer = log2trunc(index)
       if index == 1.GeneralizedIndex:
         if x.isSome:
-          mixInLength(hash_tree_root(toSszType(x.get)), length = 1, rootAt(i))
+          mixInLength(hash_tree_root(x.get), length = 1, rootAt(i))
         else:
           rootAt(i) = zeroHashes[1]
         inc i
@@ -1111,6 +1114,7 @@ func hashTreeRootAux[T](
 
 func mergedDataHash(x: HashArray|HashList, chunkIdx: int64, res: var Digest) =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
+  mixin hash_tree_root
   trs "DATA HASH ", chunkIdx, " ", x.data.len
 
   when x.T is BasicType or x.T is Digest:
