@@ -200,16 +200,18 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
   else:
     unsupported type(value)
 
+func sszSize*(value: auto): int {.gcsafe, raises:[].}
+
 proc writeValue*(w: var SszWriter, x: auto) {.gcsafe, raises: [IOError].} =
   mixin toSszType
   type T = type toSszType(x)
+
+  w.stream.ensureRunway(sszSize(x))
 
   when isFixedSize(T):
     w.stream.writeFixedSized toSszType(x)
   else:
     w.writeVarSizeType toSszType(x)
-
-func sszSize*(value: auto): int {.gcsafe, raises:[].}
 
 func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
   result = len(value) * offsetSize
@@ -259,11 +261,12 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
 
 proc writeValue*[T](
     w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} =
-  var cursor = w.stream.delayVarSizeWrite(Leb128.maxLen(uint64))
-  let initPos = w.stream.pos
+  let
+    len = sszSize(T(x))
+    len128 = toBytes(len, Leb128)
+  w.ensureRunway(len + len128.len)
+  w.write(len128.toOpenArray())
   w.writeValue T(x)
-  let length = toBytes(uint64(w.stream.pos - initPos), Leb128)
-  cursor.finalWrite length.toOpenArray()
 
 proc readValue*(
     r: var SszReader, val: var auto) {.raises: [SszError, IOError].} =
