@@ -128,6 +128,7 @@ proc writeElements[T](w: var SszWriter, value: openArray[T])
                      {.raises: [IOError].} =
   # Please note that `writeElements` exists in order to reduce the code bloat
   # produced from generic instantiations of the unique `List[N, T]` types.
+  mixin toSszType
   when supportsBulkCopy(T):
     trs "BULK COPYING ELEMENTS"
     let p = cast[ptr byte](baseAddr value)
