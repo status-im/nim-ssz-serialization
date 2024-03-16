@@ -279,7 +279,7 @@ proc readSszValue*[T](
       checkForForbiddenBits(T, input, val.maxLen + 1)
 
   elif val is HashList:
-    type E = ElemType(type val)
+    type E = typeof toSszType(declVal ElemType(typeof val))
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -361,12 +361,12 @@ proc readSszValue*[T](
       val.clearCaches(max(val.len - 1, 0))
 
   elif val is HashArray:
-    readSszValue(input, val.data)
+    readSszValue(input, toSszType(val.data))
     val.resetCache()
   elif val is Digest:
     readSszValue(input, val.data)
   elif val is List|array:
-    type E = ElemType(type val)
+    type E = typeof toSszType(declVal ElemType(typeof val))
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -385,7 +385,8 @@ proc readSszValue*[T](
       else:
         for i in 0 ..< val.len:
           let offset = i * elemSize
-          readSszValue(input.toOpenArray(offset, offset + elemSize - 1), val[i])
+          readSszValue(
+            input.toOpenArray(offset, offset + elemSize - 1), toSszType(val[i]))
 
     else:
       if input.len == 0:
