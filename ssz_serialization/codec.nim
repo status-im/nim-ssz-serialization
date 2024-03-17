@@ -279,7 +279,7 @@ proc readSszValue*[T](
       checkForForbiddenBits(T, input, val.maxLen + 1)
 
   elif val is HashList:
-    type E = typeof toSszType(declVal ElemType(typeof val))
+    type E = typeof toSszType(declval ElemType(typeof val))
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -366,7 +366,7 @@ proc readSszValue*[T](
   elif val is Digest:
     readSszValue(input, val.data)
   elif val is List|array:
-    type E = typeof toSszType(declVal ElemType(typeof val))
+    type E = typeof toSszType(declval ElemType(typeof val))
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -412,10 +412,12 @@ proc readSszValue*[T](
         if nextOffset < offset:
           raiseMalformedSszError(T, "list element offsets are decreasing")
         else:
-          readSszValue(input.toOpenArray(offset, nextOffset - 1), val[i - 1])
+          readSszValue(
+            input.toOpenArray(offset, nextOffset - 1), toSszType(val[i - 1]))
         offset = nextOffset
 
-      readSszValue(input.toOpenArray(offset, input.len - 1), val[resultLen - 1])
+      readSszValue(
+        input.toOpenArray(offset, input.len - 1), toSszType(val[resultLen - 1]))
 
   elif val is OptionalType:
     type E = ElemType(T)
