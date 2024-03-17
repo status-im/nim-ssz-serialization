@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2024 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -86,7 +86,7 @@ proc typeInfo*(T: type): TypeInfo =
 
 func genTypeInfo(T: type): TypeInfo =
   mixin toSszType, enumAllSerializedFields
-  type SszType = type toSszType(declval T)
+  type SszType = type toSszType(default T)
   result = when type(SszType) isnot T:
     TypeInfo(kind: LeafValue)
   elif T is object:
