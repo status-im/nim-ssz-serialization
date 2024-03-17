@@ -65,7 +65,13 @@ func nextPow2Int64(x: int64): int64 =
 
 template dataPerChunk(T: type): int =
   # How many data items fit in a chunk
-  when T is BasicType:
+  mixin toSszType
+  const isCompressed =
+    when compiles(toSszType(declval T)):
+      (typeof toSszType(declval T)) is BasicType
+    else:
+      T is BasicType
+  when isCompressed:
     bytesPerChunk div sizeof(T)
   else:
     1
@@ -512,7 +518,7 @@ func supportsBulkCopy*(T: type): bool {.compileTime.} =
 func isFixedSize*(T0: type): bool {.compileTime.} =
   mixin toSszType, enumAllSerializedFields
 
-  type T = type toSszType(declval T0)
+  type T = type toSszType(default T0)
 
   when T is BasicType:
     return true

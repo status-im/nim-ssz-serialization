@@ -272,7 +272,7 @@ proc writeValue*[T](
 proc readValue*(
     r: var SszReader, val: var auto) {.raises: [SszError, IOError].} =
   mixin readSszBytes
-  type T = type val
+  type T = typeof val
   when isFixedSize(T):
     const minimalSize = fixedPortionSize(T)
     if r.stream.readable(minimalSize):
@@ -288,5 +288,5 @@ proc readSszBytes*[T](
     data: openArray[byte], val: var T) {.raises: [SszError].} =
   # Overload `readSszBytes` to perform custom operations on T after
   # deserialization
-  mixin readSszValue
-  readSszValue(data, val)
+  mixin readSszValue, toSszType
+  readSszValue(data, toSszType(val))
