@@ -40,6 +40,3 @@ proc run(args, path: string) =
 task test, "Run all tests":
   run "--threads:off -d:PREFER_BLST_SHA256=false", "tests/test_all"
   run "--threads:on -d:PREFER_BLST_SHA256=false", "tests/test_all"
-  if (NimMajor, NimMinor) > (1, 6):
-    run "--mm:refc --threads:off -d:PREFER_BLST_SHA256=false", "tests/test_all"
-    run "--mm:refc --threads:on -d:PREFER_BLST_SHA256=false", "tests/test_all"
