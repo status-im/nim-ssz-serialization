@@ -37,6 +37,9 @@ template toSszType*(v: DistinctInt): auto = uint64(v)
 template fromSszBytes*(T: type DistinctInt, bytes: openArray[byte]): T =
   T fromSszBytes(uint64, bytes)
 
+func `==`(a, b: DistinctInt): bool =
+  distinctBase(a) == distinctBase(b)
+
 template reject(stmt) =
   doAssert(not compiles(stmt))
 
@@ -398,3 +401,40 @@ suite "Distinct":
       a = default(HashArray[32, uint64])
       b = default(HashArray[32, DistinctInt])
     check sizeof(a) == sizeof(b)
+
+  test "Digest":
+    type
+      MockDigest = object
+        data: array[32*8, byte]
+
+    var
+      x: Digest
+      y: MockDigest
+      xx: Digest
+      yy: MockDigest
+
+    let
+      encodedX = SSZ.encode(x)
+      encodedY = SSZ.encode(y)
+
+    check encodedX != encodedY
+
+    readSszBytes(encodedX, xx)
+    readSszBytes(encodedY, yy)
+
+    check xx == x
+    check yy == y
+
+  test "Object with distinct field":
+    type
+      ObjectWithDistinctField = object
+        color: DistinctInt
+
+    let
+      obj = ObjectWithDistinctField(color: DistinctInt 123)
+      encodedObj = SSZ.encode(obj)
+
+    var xx: ObjectWithDistinctField
+    readSszBytes(encodedObj, xx)
+
+    check xx == obj

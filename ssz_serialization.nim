@@ -288,5 +288,14 @@ proc readSszBytes*[T](
     data: openArray[byte], val: var T) {.raises: [SszError].} =
   # Overload `readSszBytes` to perform custom operations on T after
   # deserialization
-  mixin readSszValue, toSszType
-  readSszValue(data, toSszType(val))
+  mixin readSszValue
+
+  when T isnot SszType:
+    mixin toSszType
+    readSszValue(data, toSszType(val))
+  else:
+    # Although inside toSszType already have
+    # compile time check for SszType,
+    # somehow it will trigger `dereferencing pointer to incomplete type`
+    # error on linux gcc.
+    readSszValue(data, val)
