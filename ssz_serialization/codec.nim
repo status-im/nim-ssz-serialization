@@ -250,7 +250,9 @@ proc readSszValue*[T](
         T, "list element offset points past the end of the input")
     int(offset)
 
-  when val is BitList:
+  when compiles(fromSszBytes(T, input)):
+    val = fromSszBytes(T, input)
+  elif val is BitList:
     if input.len == 0:
       raiseMalformedSszError(T, "invalid empty value")
 
@@ -438,9 +440,6 @@ proc readSszValue*[T](
         val = options.some(v)
       else:
         val = Opt.some(v)
-
-  elif val is UintN|bool:
-    val = fromSszBytes(T, input)
 
   elif val is BitArray:
     if sizeof(val) != input.len:
