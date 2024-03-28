@@ -271,8 +271,8 @@ proc writeValue*[T](
 
 proc readValue*(
     r: var SszReader, val: var auto) {.raises: [SszError, IOError].} =
-  mixin readSszBytes
-  type T = typeof val
+  mixin readSszBytes, toSszType
+  type T = typeof toSszType(val)
   when isFixedSize(T):
     const minimalSize = fixedPortionSize(T)
     if r.stream.readable(minimalSize):
@@ -289,13 +289,4 @@ proc readSszBytes*[T](
   # Overload `readSszBytes` to perform custom operations on T after
   # deserialization
   mixin readSszValue
-
-  when T isnot SszType:
-    mixin toSszType
-    readSszValue(data, toSszType(val))
-  else:
-    # Although inside toSszType already have
-    # compile time check for SszType,
-    # somehow it will trigger `dereferencing pointer to incomplete type`
-    # error on linux gcc.
-    readSszValue(data, val)
+  readSszValue(data, val)
