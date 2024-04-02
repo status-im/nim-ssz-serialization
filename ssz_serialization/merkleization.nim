@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2024 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -18,8 +18,8 @@
 
 import
   std/[algorithm, options, sequtils],
-  stew/[assign2, bitops2, endians2, ptrops, results],
-  nimcrypto/hash,
+  stew/[assign2, bitops2, endians2, objects, ptrops, results],
+  nimcrypto/[hash, sha2],
   serialization/testing/tracing,
   "."/[bitseqs, codec, digest, types]
 
@@ -546,16 +546,24 @@ func chunkedHashTreeRoot[T: BasicType](
 func chunkedHashTreeRoot[T: not BasicType](
     merkleizer: var SszMerkleizer2, arr: openArray[T],
     firstIdx, numFromFirst: Limit, res: var Digest) =
-  for i in 0 ..< numFromFirst:
-    addChunkDirect(merkleizer):
-      chunk = hash_tree_root(arr[firstIdx + i])
-  getFinalHash(merkleizer, res)
+  mixin hash_tree_root, toSszType
+  type S = typeof toSszType(declval T)
+  when S is BasicType:
+    chunkedHashTreeRoot(
+      merkleizer, openArray[S](arr), firstIdx, numFromFirst, res)
+  else:
+    for i in 0 ..< numFromFirst:
+      addChunkDirect(merkleizer):
+        chunk = hash_tree_root(arr[firstIdx + i])
+    getFinalHash(merkleizer, res)
 
 func chunkedHashTreeRoot[T](
     height: static Limit, arr: openArray[T],
     chunks: Slice[Limit], topLayer: int, res: var Digest) =
+  mixin toSszType
+  type S = typeof toSszType(declval T)
   const valuesPerChunk =
-    when T is BasicType:
+    when S is BasicType:
       bytesPerChunk div sizeof(T)
     else:
       1
@@ -685,6 +693,7 @@ const unsupportedIndex =
   err(Result[void, string], "Generalized index not supported.")
 
 func hashTreeRootAux[T](x: T, res: var Digest) =
+  mixin hash_tree_root, toSszType
   when T is bool|char:
     res.data[0] = byte(x)
     zeroMem(addr res.data[1], sizeof(res.data) - sizeof(x))
@@ -725,7 +734,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     mixInLength(contentsHash, x.len, res)
   elif T is OptionalType:
     if x.isSome:
-      mixInLength(hash_tree_root(toSszType(x.get)), length = 1, res)
+      mixInLength(hash_tree_root(x.get), length = 1, res)
     else:
       res = zeroHashes[1]
   elif T is object|tuple:
@@ -747,6 +756,7 @@ func hashTreeRootAux[T](
     loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
+  mixin hash_tree_root, toSszType
   when T is BasicType:
     for i in slice:
       if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
@@ -787,7 +797,7 @@ func hashTreeRootAux[T](
         else: return unsupportedIndex
       else: return unsupportedIndex
   elif T is array:
-    type E = ElemType(T)
+    type E = typeof toSszType(declval ElemType(T))
     when E is BasicType and sizeof(T) <= sizeof(roots[0].data):
       for i in slice:
         if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
@@ -811,7 +821,8 @@ func hashTreeRootAux[T](
           chunkedHashTreeRoot(binaryTreeHeight totalChunks, x, chunks, indexLayer, rootAt(i))
           inc i
         else:
-          when ElemType(typeof(x)) is BasicType: return unsupportedIndex
+          when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
+            return unsupportedIndex
           else:
             let chunk = chunkContainingIndex(index)
             if chunk >= x.len: return unsupportedIndex
@@ -859,7 +870,8 @@ func hashTreeRootAux[T](
             binaryTreeHeight totalChunks, asSeq x, chunks, indexLayer, rootAt(i))
           inc i
         else:
-          when ElemType(typeof(x)) is BasicType: return unsupportedIndex
+          when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
+            return unsupportedIndex
           else:
             let chunk = chunkContainingIndex(index)
             if chunk >= x.len: return unsupportedIndex
@@ -888,7 +900,7 @@ func hashTreeRootAux[T](
         indexLayer = log2trunc(index)
       if index == 1.GeneralizedIndex:
         if x.isSome:
-          mixInLength(hash_tree_root(toSszType(x.get)), length = 1, rootAt(i))
+          mixInLength(hash_tree_root(x.get), length = 1, rootAt(i))
         else:
           rootAt(i) = zeroHashes[1]
         inc i
@@ -1009,9 +1021,10 @@ func hashTreeRootAux[T](
 
 func mergedDataHash(x: HashArray|HashList, chunkIdx: int64, res: var Digest) =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
+  mixin hash_tree_root, toSszType
   trs "DATA HASH ", chunkIdx, " ", x.data.len
-
-  when x.T is BasicType or x.T is Digest:
+  type S = typeof toSszType(declval x.T)
+  when S is BasicType | Digest:
     when cpuEndian == bigEndian:
       unsupported typeof(x) # No bigendian support here!
 
@@ -1061,7 +1074,6 @@ func hashTreeRootCachedPtr*(x: HashArray, vIdx: int64): ptr Digest =
   # The instance must not be mutated! This is an internal low-level API.
 
   doAssert vIdx >= 1, "Only valid for flat Merkle tree indices"
-
   let px = unsafeAddr x.hashes[vIdx]
   if not isCached(x.hashes[vIdx]):
     # TODO oops. so much for maintaining non-mutability.
@@ -1119,6 +1131,7 @@ func hashTreeRootCached*(
     loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
+  mixin toSszType
   const
     totalChunks = x.maxChunks
     firstChunkIndex = nextPow2(totalChunks.uint64)
@@ -1140,7 +1153,7 @@ func hashTreeRootCached*(
       rootAt(i) = hashTreeRootCachedPtr(x, index.int64)[]
       inc i
     else:
-      when ElemType(typeof(x)) is BasicType:
+      when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
         return unsupportedIndex
       else:
         let chunk = chunkContainingIndex(index)
@@ -1166,6 +1179,7 @@ func hashTreeRootCached*(
     loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
+  mixin toSszType
   const
     totalChunks = x.maxChunks
     firstChunkIndex = nextPow2(totalChunks.uint64)
@@ -1198,7 +1212,8 @@ func hashTreeRootCached*(
         rootAt(i) = hashTreeRootCachedPtr(x, index.int64)[]
         inc i
       else:
-        when ElemType(typeof(x)) is BasicType: return unsupportedIndex
+        when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
+          return unsupportedIndex
         else:
           let chunk = chunkContainingIndex(index)
           if chunk >= x.len: return unsupportedIndex

@@ -31,7 +31,7 @@ when USE_HASHTREE_SHA256 and (defined(clang) or defined(gcc)) and
   {.hint: "Hashtree SHA256 backend enabled".}
   const hasHashTree = true
 
-  import hashtree_abi
+  import ../vendor/hashtree/hashtree_abi
 else:
   const hasHashTree = false
 

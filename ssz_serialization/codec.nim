@@ -238,7 +238,7 @@ func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
 
 proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
-  mixin fromSszBytes, toSszType
+  mixin fromSszBytes, toSszType, readSszValue
 
   template readOffsetUnchecked(n: int): uint32 {.used.}=
     fromSszBytes(uint32, input.toOpenArray(n, n + offsetSize - 1))
@@ -250,7 +250,9 @@ proc readSszValue*[T](
         T, "list element offset points past the end of the input")
     int(offset)
 
-  when val is BitList:
+  when compiles(fromSszBytes(T, input)):
+    val = fromSszBytes(T, input)
+  elif val is BitList:
     if input.len == 0:
       raiseMalformedSszError(T, "invalid empty value")
 
@@ -279,7 +281,7 @@ proc readSszValue*[T](
       checkForForbiddenBits(T, input, val.maxLen + 1)
 
   elif val is HashList:
-    type E = ElemType(type val)
+    type E = typeof toSszType(declval ElemType(typeof val))
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -361,12 +363,12 @@ proc readSszValue*[T](
       val.clearCaches(max(val.len - 1, 0))
 
   elif val is HashArray:
-    readSszValue(input, val.data)
+    readSszValue(input, toSszType(val.data))
     val.resetCache()
   elif val is Digest:
     readSszValue(input, val.data)
   elif val is List|array:
-    type E = ElemType(type val)
+    type E = typeof toSszType(declval ElemType(typeof val))
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -385,7 +387,8 @@ proc readSszValue*[T](
       else:
         for i in 0 ..< val.len:
           let offset = i * elemSize
-          readSszValue(input.toOpenArray(offset, offset + elemSize - 1), val[i])
+          readSszValue(
+            input.toOpenArray(offset, offset + elemSize - 1), toSszType(val[i]))
 
     else:
       if input.len == 0:
@@ -411,10 +414,12 @@ proc readSszValue*[T](
         if nextOffset < offset:
           raiseMalformedSszError(T, "list element offsets are decreasing")
         else:
-          readSszValue(input.toOpenArray(offset, nextOffset - 1), val[i - 1])
+          readSszValue(
+            input.toOpenArray(offset, nextOffset - 1), toSszType(val[i - 1]))
         offset = nextOffset
 
-      readSszValue(input.toOpenArray(offset, input.len - 1), val[resultLen - 1])
+      readSszValue(
+        input.toOpenArray(offset, input.len - 1), toSszType(val[resultLen - 1]))
 
   elif val is OptionalType:
     type E = ElemType(T)
@@ -435,9 +440,6 @@ proc readSszValue*[T](
         val = options.some(v)
       else:
         val = Opt.some(v)
-
-  elif val is UintN|bool:
-    val = fromSszBytes(T, input)
 
   elif val is BitArray:
     if sizeof(val) != input.len:

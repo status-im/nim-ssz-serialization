@@ -128,6 +128,7 @@ proc writeElements[T](w: var SszWriter, value: openArray[T])
                      {.raises: [IOError].} =
   # Please note that `writeElements` exists in order to reduce the code bloat
   # produced from generic instantiations of the unique `List[N, T]` types.
+  mixin toSszType
   when supportsBulkCopy(T):
     trs "BULK COPYING ELEMENTS"
     let p = cast[ptr byte](baseAddr value)
@@ -200,16 +201,18 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
   else:
     unsupported type(value)
 
+func sszSize*(value: auto): int {.gcsafe, raises:[].}
+
 proc writeValue*(w: var SszWriter, x: auto) {.gcsafe, raises: [IOError].} =
   mixin toSszType
   type T = type toSszType(x)
+
+  w.stream.ensureRunway(sszSize(x))
 
   when isFixedSize(T):
     w.stream.writeFixedSized toSszType(x)
   else:
     w.writeVarSizeType toSszType(x)
-
-func sszSize*(value: auto): int {.gcsafe, raises:[].}
 
 func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
   result = len(value) * offsetSize
@@ -259,16 +262,17 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
 
 proc writeValue*[T](
     w: var SszWriter, x: SizePrefixed[T]) {.raises: [IOError].} =
-  var cursor = w.stream.delayVarSizeWrite(Leb128.maxLen(uint64))
-  let initPos = w.stream.pos
+  let
+    len = sszSize(T(x))
+    len128 = toBytes(len, Leb128)
+  w.ensureRunway(len + len128.len)
+  w.write(len128.toOpenArray())
   w.writeValue T(x)
-  let length = toBytes(uint64(w.stream.pos - initPos), Leb128)
-  cursor.finalWrite length.toOpenArray()
 
 proc readValue*(
     r: var SszReader, val: var auto) {.raises: [SszError, IOError].} =
-  mixin readSszBytes
-  type T = type val
+  mixin readSszBytes, toSszType
+  type T = typeof toSszType(val)
   when isFixedSize(T):
     const minimalSize = fixedPortionSize(T)
     if r.stream.readable(minimalSize):

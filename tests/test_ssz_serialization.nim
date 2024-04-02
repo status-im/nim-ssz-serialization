@@ -30,14 +30,27 @@ type
   NonFixed = object
     data: HashList[uint64, 1024]
 
+  DistinctInt = distinct uint64
+
+template toSszType*(v: DistinctInt): auto = uint64(v)
+
+template fromSszBytes*(T: type DistinctInt, bytes: openArray[byte]): T =
+  T fromSszBytes(uint64, bytes)
+
+func `==`(a, b: DistinctInt): bool =
+  distinctBase(a) == distinctBase(b)
+
 template reject(stmt) =
   doAssert(not compiles(stmt))
 
 static:
   doAssert isFixedSize(bool) == true
+  doAssert isFixedSize(uint64) == true
+  doAssert isFixedSize(DistinctInt) == true
 
   doAssert fixedPortionSize(array[10, bool]) == 10
   doAssert fixedPortionSize(array[SomeEnum, uint64]) == 24
+  doAssert fixedPortionSize(array[SomeEnum, DistinctInt]) == 24
   doAssert fixedPortionSize(array[3..5, List[byte, 256]]) == 12
 
   doAssert isFixedSize(array[20, bool]) == true
@@ -156,11 +169,15 @@ suite "SSZ navigator":
       hash_tree_root(leaves3) == hash_tree_root(leaves3.data)
 
   test "basictype":
-    var leaves = HashList[uint64, 1'i64 shl 3]()
-    while leaves.len < leaves.maxLen:
-      check:
-        leaves.add leaves.len.uint64
-        hash_tree_root(leaves) == hash_tree_root(leaves.data)
+    template checkType(typ: untyped): untyped =
+      var leaves = HashList[typ, 1'i64 shl 3]()
+      while leaves.len < leaves.maxLen:
+        check:
+          leaves.add leaves.len.typ
+          hash_tree_root(leaves) == hash_tree_root(leaves.data)
+
+    checkType uint64
+    checkType DistinctInt
 
 suite "SSZ dynamic navigator":
   test "navigating fields":
@@ -220,57 +237,65 @@ suite "hash":
 
     both: check: it.li.add Digest()
 
-    var y: HashArray[32, uint64]
-    check: hash_tree_root(y) == hash_tree_root(y.data)
-    for i in 0..<y.len:
-      y[i] = 42'u64
+    template checkType(typ: untyped): untyped =
+      var y: HashArray[32, typ]
       check: hash_tree_root(y) == hash_tree_root(y.data)
+      for i in 0..<y.len:
+        y[i] = 42.typ
+        check: hash_tree_root(y) == hash_tree_root(y.data)
+
+    checkType uint64
+    checkType DistinctInt
 
   test "HashList fixed":
-    type MyList = HashList[uint64, 1024]
-    var
-      small, large: MyList
+    template checkType(typ: untyped): untyped =
+      type MyList = HashList[typ, 1024]
+      var
+        small, large: MyList
 
-    let
-      emptyBytes = SSZ.encode(small)
-      emptyRoot = hash_tree_root(small)
+      let
+        emptyBytes = SSZ.encode(small)
+        emptyRoot = hash_tree_root(small)
 
-    check: small.add(10'u64)
+      check: small.add(10.typ)
 
-    for i in 0..<100:
-      check: large.add(uint64(i))
+      for i in 0..<100:
+        check: large.add(i.typ)
 
-    let
-      sroot = hash_tree_root(small)
-      lroot = hash_tree_root(large)
+      let
+        sroot = hash_tree_root(small)
+        lroot = hash_tree_root(large)
 
-    check:
-      sroot == hash_tree_root(small.data)
-      lroot == hash_tree_root(large.data)
+      check:
+        sroot == hash_tree_root(small.data)
+        lroot == hash_tree_root(large.data)
 
-    var
-      sbytes = SSZ.encode(small)
-      lbytes = SSZ.encode(large)
-      sloaded = SSZ.decode(sbytes, MyList)
-      lloaded = SSZ.decode(lbytes, MyList)
+      var
+        sbytes = SSZ.encode(small)
+        lbytes = SSZ.encode(large)
+        sloaded = SSZ.decode(sbytes, MyList)
+        lloaded = SSZ.decode(lbytes, MyList)
 
-    check:
-      sroot == hash_tree_root(sloaded)
-      lroot == hash_tree_root(lloaded)
+      check:
+        sroot == hash_tree_root(sloaded)
+        lroot == hash_tree_root(lloaded)
 
-    # Here we smoke test that the cache is reset correctly even when reading
-    # into an existing instance - the instances are size-swapped so the reader
-    # will have some more work to do
-    readSszValue(sbytes, lloaded)
-    readSszValue(lbytes, sloaded)
+      # Here we smoke test that the cache is reset correctly even when reading
+      # into an existing instance - the instances are size-swapped so the reader
+      # will have some more work to do
+      readSszValue(sbytes, lloaded)
+      readSszValue(lbytes, sloaded)
 
-    check:
-      lroot == hash_tree_root(sloaded)
-      sroot == hash_tree_root(lloaded)
+      check:
+        lroot == hash_tree_root(sloaded)
+        sroot == hash_tree_root(lloaded)
 
-    readSszValue(emptyBytes, sloaded)
-    check:
-      emptyRoot == hash_tree_root(sloaded)
+      readSszValue(emptyBytes, sloaded)
+      check:
+        emptyRoot == hash_tree_root(sloaded)
+
+    checkType uint64
+    checkType DistinctInt
 
   test "HashList variable":
     type MyList = HashList[NonFixed, 1024]
@@ -332,7 +357,8 @@ suite "underlong values":
         readSszBytes(encoded[0..^2], t2)
 
     test "Overlong SSZ.decode: " & type(t).name():
-      when not (t is BasicType | BitArray | array | HashArray | BitList | Simple):
+      type S = typeof toSszType(t)
+      when S isnot BasicType | BitArray | array | HashArray | BitList | Simple:
         let encoded = SSZ.encode(t)
         expect(SszError):
           discard SSZ.decode(encoded & @[32'u8], type t)
@@ -340,7 +366,8 @@ suite "underlong values":
         skip # TODO Difference between decode and readSszBytes needs revisiting
 
     test "Overlong readSszBytes: " & type(t).name():
-      when not (t is BitList | Simple):
+      type S = typeof toSszType(t)
+      when S isnot BitList | Simple:
         let encoded = SSZ.encode(t)
         var t2: type t
         expect(SszError):
@@ -356,11 +383,58 @@ suite "underlong values":
   testit(default(uint64))
   testit(default(UInt128))
   testit(default(UInt256))
+  testit(default(DistinctInt))
   testit(default(array[32, uint8]))
   testit(default(HashArray[32, uint8]))
   testit(List[uint64, 32].init(@[42'u64]))
+  testit(List[DistinctInt, 32].init(@[42.DistinctInt]))
   testit(HashList[uint64, 32].init(@[42'u64]))
+  testit(HashList[DistinctInt, 32].init(@[42.DistinctInt]))
   testit(default(BitArray[32]))
   testit(BitList[32].init(10))
   testit(default(Simple))
   # TODO testit((32'u8, )) fails with a semcheck bug
+
+suite "Distinct":
+  test "HashArray":
+    let
+      a = default(HashArray[32, uint64])
+      b = default(HashArray[32, DistinctInt])
+    check sizeof(a) == sizeof(b)
+
+  test "Digest":
+    type
+      MockDigest = object
+        data: array[32*8, byte]
+
+    var
+      x: Digest
+      y: MockDigest
+      xx: Digest
+      yy: MockDigest
+
+    let
+      encodedX = SSZ.encode(x)
+      encodedY = SSZ.encode(y)
+
+    check encodedX != encodedY
+
+    readSszBytes(encodedX, xx)
+    readSszBytes(encodedY, yy)
+
+    check xx == x
+    check yy == y
+
+  test "Object with distinct field":
+    type
+      ObjectWithDistinctField = object
+        color: DistinctInt
+
+    let
+      obj = ObjectWithDistinctField(color: DistinctInt 123)
+      encodedObj = SSZ.encode(obj)
+
+    var xx: ObjectWithDistinctField
+    readSszBytes(encodedObj, xx)
+
+    check xx == obj
