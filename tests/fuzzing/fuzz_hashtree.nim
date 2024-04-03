@@ -1,4 +1,4 @@
-import system/ansi_c, ../../ssz_serialization/hashtree_abi, stew/ptrops, blscurve
+import system/ansi_c, ../../vendor/hashtree/hashtree_abi, stew/ptrops, blscurve
 
 proc testOneInput(
     data: ptr UncheckedArray[byte], len: csize_t
