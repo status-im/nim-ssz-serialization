@@ -7,8 +7,19 @@
 
 import nimcrypto/[hash, sha2], stew/ptrops, ./types
 
+# Depending on platform, we have several SHA256 implementations to choose from:
+# * nimcrypto is pure nim and used for compile-time evaluation and fallback
+# * blst has CPU-specific optimisations and can be used for all hashing on those
+#   platforms and is generally faster than nimcrypto
+# * hashtree is specialized for hashing 64-byte chunks as happens in a merkle
+#   tree - it has limited hardware and compiler support but is faster than
+#   blst for the cases it supports
+#
+# Depending on the below preference flags, we'll enable the faster backends
+# the faster backends will be used where they are supported
+
 const PREFER_BLST_SHA256* {.booldefine.} = true
-const USE_HASHTREE_SHA256* {.booldefine.} = true
+const PREFER_HASHTREE_SHA256* {.booldefine.} = true
 
 when PREFER_BLST_SHA256:
   import blscurve
@@ -23,17 +34,18 @@ when USE_BLST_SHA256:
   {.hint: "BLST SHA256 backend enabled".}
   type DigestCtx* = BLST_SHA256_CTX
 else:
-  {.hint: "nimbcrypto SHA256 backend enabled".}
+  {.hint: "nimcrypto SHA256 backend enabled".}
   type DigestCtx* = sha2.sha256
 
-when USE_HASHTREE_SHA256 and (defined(clang) or defined(gcc)) and
-    (defined(arm64) or defined(amd64)) and (defined(linux) or defined(windows)):
+when PREFER_HASHTREE_SHA256 and defined(gcc) and
+    (defined(arm64) or defined(amd64)) and
+    (defined(linux) or defined(windows)):
   {.hint: "Hashtree SHA256 backend enabled".}
-  const hasHashTree = true
+  const USE_HASHTREE_SHA256 = true
 
   import ../vendor/hashtree/hashtree_abi
 else:
-  const hasHashTree = false
+  const USE_HASHTREE_SHA256 = false
 
 template computeDigest*(body: untyped): Digest =
   ## This little helper will init the hash function and return the sliced
@@ -69,7 +81,7 @@ func digest*(a: openArray[byte], res: var Digest) =
       h.update(a)
       h.finish()
   else:
-    when hasHashTree:
+    when USE_HASHTREE_SHA256:
       if a.len() == 64:
         hashtree_hash(baseAddr res.data, baseAddr a, 1)
         return
@@ -128,7 +140,7 @@ func digest*(a, b: openArray[byte], res: var Digest) =
 func digest*(a, b: openArray[byte]): Digest {.noinit.} =
   digest(a, b, result)
 
-when hasHashTree:
+when USE_HASHTREE_SHA256:
   # hashtree needs a fallback for when there is no CPU support
   func digest64(
       output: pointer, input: pointer, count: uint64

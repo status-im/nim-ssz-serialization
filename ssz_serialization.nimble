@@ -40,7 +40,7 @@ proc run(args, path: string) =
 task test, "Run all tests":
   for blst in [false, true]:
     for hashtree in [false, true]:
-      let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:USE_HASHTREE_SHA256=" & $hashtree
+      let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
       run opts, "tests/test_all"
       if (NimMajor, NimMinor) > (1, 6):
         run "--mm:refc " & opts, "tests/test_all"
