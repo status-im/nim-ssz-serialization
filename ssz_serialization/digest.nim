@@ -37,9 +37,10 @@ else:
   {.hint: "nimcrypto SHA256 backend enabled".}
   type DigestCtx* = sha2.sha256
 
-when PREFER_HASHTREE_SHA256 and defined(gcc) and
+when PREFER_HASHTREE_SHA256 and
     (defined(arm64) or defined(amd64)) and
-    (defined(linux) or defined(windows)):
+    ((defined(gcc) and (defined(linux) or defined(windows))) or
+      (defined(clang) and defined(linux))):
   {.hint: "Hashtree SHA256 backend enabled".}
   const USE_HASHTREE_SHA256 = true
 
