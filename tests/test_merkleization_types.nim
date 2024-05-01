@@ -24,9 +24,7 @@ func d(x: UintN): Digest =
   d([x])
 
 func d(a, b: Digest): Digest =
-  computeDigest:
-    h.update a.data
-    h.update b.data
+  digest(a.data, b.data)
 
 type
   E = object

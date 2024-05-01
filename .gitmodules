@@ -1,0 +1,3 @@
+[submodule "vendor/hashtree"]
+	path = vendor/hashtree
+	url = https://github.com/status-im/hashtree.git

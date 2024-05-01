@@ -10,9 +10,9 @@
 import
   std/[algorithm, math, sequtils, sets, tables],
   stew/[bitops2, results],
-  ./merkleization
+  "."/[digest, merkleization]
 
-export merkleization
+export digest, merkleization
 
 # https://github.com/ethereum/consensus-specs/blob/v1.1.6/specs/altair/sync-protocol.md#get_subtree_index
 func get_subtree_index*(idx: GeneralizedIndex): uint64 =
@@ -104,6 +104,10 @@ func calculate_multi_merkle_root_impl(
   template getExisting[A, B](t: var Table[A, B], key: A): var B =
     try: t[key]
     except KeyError: raiseAssert "Unreachable"
+  template popExisting[A, B](t: var Table[A, B], key: A): var B =
+    var tmp {.noinit.}: Digest
+    doAssert t.pop(key, tmp)
+    tmp
 
   # Populate data structure with all leaves.
   # This data structure only scales with the number of `leaves`,
@@ -153,20 +157,20 @@ func calculate_multi_merkle_root_impl(
       else:
         # Compute expected root for parent. This deletes child roots.
         # Because the list is sorted in descending order, they are not needed.
-        let root = computeDigest:
+        let root =
           if helper < helper_indices.len and helper_indices[helper] == sibling:
             # The next proof item is required to form the parent hash.
+            let h = helper
+            inc(helper)
             if sibling == left:
-              h.update proof[helper].data
-              h.update objects.getExisting(right).data; objects.del right
+              digest(proof[h].data, objects.popExisting(right).data)
             else:
-              h.update objects.getExisting(left).data;  objects.del left
-              h.update proof[helper].data
-            inc helper
+              digest(objects.popExisting(left).data, proof[h].data)
           else:
             # Both siblings are already known.
-            h.update objects.getExisting(left).data;  objects.del left
-            h.update objects.getExisting(right).data; objects.del right
+            digest(
+              objects.popExisting(left).data,
+              objects.popExisting(right).data)
 
         # Store parent root, and replace the current list entry with its parent.
         if objects.hasKeyOrPut(parent, root):
