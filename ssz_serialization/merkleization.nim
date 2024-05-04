@@ -738,7 +738,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     else:
       res = zeroHashes[1]
   elif T is object|tuple:
-    when T.hasCustomPragma(sszStableContainer):
+    when T.isStableContainer:
       const N = T.getCustomPragmaVal(sszStableContainer)
       var
         fieldIndex = 0
@@ -762,7 +762,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
             addField zeroHashes[0]
           inc fieldIndex
       mergeBranches(res, hash_tree_root(activeFields), res)
-    elif T.hasCustomPragma(sszVariant):
+    elif T.isVariant:
       type S = T.getCustomPragmaVal(sszVariant)
       # Using `S` doesn't work: https://github.com/nim-lang/Nim/issues/23564
       const N = T.getCustomPragmaVal(sszVariant)
@@ -1000,10 +1000,10 @@ func hashTreeRootAux[T](
         i = j
       else: return unsupportedIndex
   elif T is object|tuple:
-    when T.hasCustomPragma(sszStableContainer):
+    when T.isStableContainer:
       const N = T.getCustomPragmaVal(sszStableContainer)
       unsupported T
-    elif T.hasCustomPragma(sszVariant):
+    elif T.isVariant:
       type S = T.getCustomPragmaVal(sszVariant)
       # Using `S` doesn't work: https://github.com/nim-lang/Nim/issues/23564
       const N = T.getCustomPragmaVal(sszVariant)
@@ -1485,7 +1485,6 @@ func hash_tree_root*(
     when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
       ResultType.ok([hash_tree_root(x)])
     else:
-      var roots {.noinit.}: array[indices.len, Digest]
       const
         loopOrder = merkleizationLoopOrder(indices)
         v = validateIndices(indices, loopOrder)
@@ -1493,6 +1492,7 @@ func hash_tree_root*(
         ResultType.err(v.error)
       else:
         const slice = 0 ..< loopOrder.len
+        var roots {.noinit.}: array[indices.len, Digest]
         let w = hash_tree_root_multi(x, indices, roots, loopOrder, slice)
         if w.isErr:
           ResultType.err(w.error)

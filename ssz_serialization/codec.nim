@@ -448,7 +448,7 @@ proc readSszValue*[T](
     copyMem(addr val.bytes[0], unsafeAddr input[0], input.len)
 
   elif val is object|tuple:
-    when T.hasCustomPragma(sszStableContainer):
+    when T.isStableContainer:
       const N = T.getCustomPragmaVal(sszStableContainer)
 
       let inputLen = uint32 input.len

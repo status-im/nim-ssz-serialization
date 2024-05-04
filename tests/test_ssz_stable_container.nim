@@ -6,6 +6,7 @@
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
 {.push raises: [].}
+{.used.}
 
 import
   std/sequtils,
@@ -15,20 +16,20 @@ import
 type
   # Defines the common merkleization format and a portable serialization format
   # across variants
-  Shape* {.sszStableContainer: 4.} = object
-    side*: Opt[uint16]
-    color*: uint8
-    radius*: Opt[uint16]
+  Shape {.sszStableContainer: 4.} = object
+    side: Opt[uint16]
+    color: uint8
+    radius: Opt[uint16]
 
   # Inherits merkleization format from `Shape`, but is serialized more compactly
-  Square* {.sszVariant: Shape.} = object
-    side*: uint16
-    color*: uint8
+  Square {.sszVariant: Shape.} = object
+    side: uint16
+    color: uint8
 
   # Inherits merkleization format from `Shape`, but is serialized more compactly
-  Circle* {.sszVariant: Shape.} = object
-    radius*: uint16
-    color*: uint8
+  Circle {.sszVariant: Shape.} = object
+    radius: uint16
+    color: uint8
 
   ShapeKind {.pure.} = enum
     Square
@@ -41,7 +42,7 @@ type
     of ShapeKind.Circle:
       circleData: Circle
 
-func selectVariant*(value: Shape, circleAllowed = false): Opt[ShapeKind] =
+func selectVariant(value: Shape, circleAllowed = false): Opt[ShapeKind] =
   if value.radius.isSome:
     if not circleAllowed:
       Opt.none ShapeKind
@@ -190,9 +191,19 @@ suite "SSZ StableContainer":
       SSZ.encode(shape) == shape_bytes
       SSZ.decode(shape_bytes, Shape) == shape
     expect SerializationError:
-      discard SSZ.decode(shape_bytes, Square)
+      var square: Square
+      let stream = unsafeMemoryInput(shape_bytes)
+      var reader = init(SszReader, stream)
+      reader.readValue(square)
+      if stream.readable:
+        raise (ref SerializationError)(msg: "Remaining bytes in the input")
     expect SerializationError:
-      discard SSZ.decode(shape_bytes, Circle)
+      var circle: Circle
+      let stream = unsafeMemoryInput(shape_bytes)
+      var reader = init(SszReader, stream)
+      reader.readValue(circle)
+      if stream.readable:
+        raise (ref SerializationError)(msg: "Remaining bytes in the input")
     check:
       Square.fromVariantBase(shape).isNone
       Circle.fromVariantBase(shape).isNone

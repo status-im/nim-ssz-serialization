@@ -169,7 +169,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       w.writeValue 1'u8
       w.writeValue value.get
   elif value is object|tuple:
-    when type(value).hasCustomPragma(sszStableContainer):
+    when type(value).isStableContainer:
       const N = type(value).getCustomPragmaVal(sszStableContainer)
       var
         fieldIndex = 0
@@ -289,7 +289,7 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
       0
 
   elif T is object|tuple:
-    when T.hasCustomPragma(sszStableContainer):
+    when T.isStableContainer:
       result = anonConst fixedPortionSize(T)
       enumerateSubFields(value, field):
         type F = type toSszType(field)

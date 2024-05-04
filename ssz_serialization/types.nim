@@ -43,6 +43,20 @@ template sszStableContainer*(n: int) {.pragma.}
 template sszVariant*(s: typedesc) {.pragma.}
 template sszOneOf*(s: typedesc) {.pragma.}
 
+# `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
+template isStableContainer*(T: untyped): bool =
+  when compiles(T.hasCustomPragma(sszStableContainer)):
+    T.hasCustomPragma(sszStableContainer)
+  else:
+    false
+
+# `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
+template isVariant*(T: untyped): bool =
+  when compiles(T.hasCustomPragma(sszVariant)):
+    T.hasCustomPragma(sszVariant)
+  else:
+    false
+
 func getVariantFields[V](
     v: typedesc[V]
 ): tuple[base: HashSet[string], variant: HashSet[string]] {.compileTime.} =
@@ -639,7 +653,7 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
   elif T is OptionalType:
     return false
   elif T is object|tuple:
-    when T.hasCustomPragma(sszStableContainer):
+    when T.isStableContainer:
       return false
     elif isCaseObject(T):
       return false
@@ -661,7 +675,7 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     else: int(len(T)) * offsetSize
   elif T is object|tuple:
     # This should be `T` not `T0`: https://github.com/nim-lang/Nim/issues/23564
-    when T0.hasCustomPragma(sszStableContainer):
+    when T0.isStableContainer:
       const N = T0.getCustomPragmaVal(sszStableContainer)
       fixedPortionSize(BitArray[N])
     else:
