@@ -539,7 +539,7 @@ proc readSszValue*[T](
             let isActive = activeFields[fieldIndex]
             if isActive:
               doAssert varSizedFieldOffsets.len > i + 1
-              if varSizedFieldOffsets[i] != offset:
+              if varSizedFieldOffsets[i] != offset - fixedSize:
                 raiseMalformedSszError(T, "field offset invalid")
               let fieldSize = varSizedFieldOffsets[i + 1] - offset
               when F is Opt:
