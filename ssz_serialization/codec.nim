@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2024 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -240,7 +240,7 @@ proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
   mixin fromSszBytes, toSszType, readSszValue
 
-  template readOffsetUnchecked(n: int): uint32 {.used.}=
+  template readOffsetUnchecked(n: int): uint32 {.used.} =
     fromSszBytes(uint32, input.toOpenArray(n, n + offsetSize - 1))
 
   template readOffset(n: int): int {.used.} =
@@ -448,7 +448,119 @@ proc readSszValue*[T](
     copyMem(addr val.bytes[0], unsafeAddr input[0], input.len)
 
   elif val is object|tuple:
-    when isCaseObject(T):
+    when T.hasCustomPragma(sszStableContainer):
+      const N = T.getCustomPragmaVal(sszStableContainer)
+
+      let inputLen = uint32 input.len
+      # `fixedPortionSize(T)`: https://github.com/nim-lang/Nim/issues/23564
+      const minimallyExpectedSize = uint32 fixedPortionSize(BitArray[N])
+      if inputLen < minimallyExpectedSize:
+        raiseMalformedSszError(T, "input of insufficient size")
+
+      let fixedSize = minimallyExpectedSize
+      var activeFields: BitArray[N]
+      readSszValue(input.toOpenArray(0, int(fixedSize - 1)), activeFields)
+      var fieldIndex = 0
+      enumInstanceSerializedFields(val, fieldName, field):
+        doAssert fieldIndex < N
+        type F = type toSszType(field)
+        when F isnot Opt:
+          let isActive = activeFields[fieldIndex]
+          if not isActive:
+            raiseMalformedSszError(T, "required " & fieldName & " missing")
+        else:
+          discard fieldName
+        inc fieldIndex
+
+      val.reset()
+      fieldIndex = 0
+      var
+        offset = fixedSize
+        varSizedFieldOffsets: seq[uint32]
+      enumerateSubFields(val, field):
+        doAssert fieldIndex < N
+        let isActive = activeFields[fieldIndex]
+        if isActive:
+          type F = type toSszType(field)
+          const fieldSize =
+            when F is Opt:
+              type E = type toSszType(declval ElemType(F))
+              when isFixedSize(E):
+                Opt.some uint32 fixedPortionSize(E)
+              else:
+                Opt.none uint32
+            else:
+              when isFixedSize(F):
+                Opt.some uint32 fixedPortionSize(F)
+              else:
+                Opt.none uint32
+          if fieldSize.isSome:
+            if inputLen - offset < fieldSize.unsafeGet:
+              raiseMalformedSszError(T, "input of insufficient size")
+            when F is Opt:
+              type E = type toSszType(declval ElemType(F))
+              field.ok(default(E))
+              readSszValue(
+                input.toOpenArray(
+                  int(offset), int(offset + fieldSize.unsafeGet - 1)),
+                field.unsafeGet)
+            else:
+              readSszValue(
+                input.toOpenArray(
+                  int(offset), int(offset + fieldSize.unsafeGet - 1)),
+                field)
+            offset += fieldSize.unsafeGet
+          else:
+            if inputLen - offset < offsetSize:
+              raiseMalformedSszError(T, "input of insufficient size")
+            varSizedFieldOffsets.add readOffsetUnchecked(int(offset))
+            if varSizedFieldOffsets[^1] > inputLen - fixedSize:
+              raiseMalformedSszError(T, "field offset past input end")
+            if varSizedFieldOffsets.len > 1 and
+                varSizedFieldOffsets[^1] < varSizedFieldOffsets[^2]:
+              raiseMalformedSszError(T, "field offset not past previous one")
+            offset += offsetSize
+        inc fieldIndex
+
+      if varSizedFieldOffsets.len > 0:
+        varSizedFieldOffsets.add inputLen - fixedSize
+        fieldIndex = 0
+        var i = 0
+        enumerateSubFields(val, field):
+          doAssert fieldIndex < N
+          type F = type toSszType(field)
+          const isFixedSized =
+            when F is Opt:
+              type E = type toSszType(declval ElemType(F))
+              isFixedSize(E)
+            else:
+              isFixedSize(F)
+          when not isFixedSized:
+            let isActive = activeFields[fieldIndex]
+            if isActive:
+              doAssert varSizedFieldOffsets.len > i + 1
+              if varSizedFieldOffsets[i] != offset:
+                raiseMalformedSszError(T, "field offset invalid")
+              let fieldSize = varSizedFieldOffsets[i + 1] - offset
+              when F is Opt:
+                type E = type toSszType(declval ElemType(F))
+                field.ok(default(E))
+                readSszValue(
+                  input.toOpenArray(
+                    int(offset), int(offset + fieldSize - 1)),
+                  field.unsafeGet)
+              else:
+                readSszValue(
+                  input.toOpenArray(
+                    int(offset), int(offset + fieldSize - 1)),
+                  field)
+              offset += fieldSize
+              inc i
+          inc fieldIndex
+        doAssert i == varSizedFieldOffsets.len
+      if offset != inputLen:
+        raiseMalformedSszError(T, "input has extra data")
+    elif isCaseObject(T):
       isUnion(type(val))
       val = initSszUnion(type(val), input)
     else:

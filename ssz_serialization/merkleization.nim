@@ -738,14 +738,77 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     else:
       res = zeroHashes[1]
   elif T is object|tuple:
-    # when T.isCaseObject():
+    when T.hasCustomPragma(sszStableContainer):
+      const N = T.getCustomPragmaVal(sszStableContainer)
+      var
+        fieldIndex = 0
+        activeFields: BitArray[N]
+      merkleizeFields(Limit N, res):
+        x.enumerateSubFields(f):
+          doAssert fieldIndex < N
+          type F = type toSszType(f)
+          let isActive =
+            when F is Opt:
+              f.isSome
+            else:
+              true
+          if isActive:
+            activeFields.setBit(fieldIndex)
+            when F is Opt:
+              addField f.unsafeGet
+            else:
+              addField f
+          else:
+            addField zeroHashes[0]
+          inc fieldIndex
+      mergeBranches(res, hash_tree_root(activeFields), res)
+    elif T.hasCustomPragma(sszVariant):
+      type S = T.getCustomPragmaVal(sszVariant)
+      # Using `S` doesn't work: https://github.com/nim-lang/Nim/issues/23564
+      const N = T.getCustomPragmaVal(sszVariant)
+        .getCustomPragmaVal(sszStableContainer)
+      macro fieldVal(name: static string): untyped =
+        let nameIdent = ident(name)
+        quote do:
+          x.`nameIdent`
+      var
+        fieldIndex = 0
+        activeFields: BitArray[N]
+      merkleizeFields(Limit N, res):
+        for name, f in fieldPairs(declval(S)):
+          doAssert fieldIndex < N
+          let isActive =
+            when not compiles(fieldVal(name)):
+              static: doAssert typeof(f) is Opt,
+                "Required " & $S & "." & name & " missing in " & $T
+              false
+            elif typeof(fieldVal(name)) is Opt:
+              static: doAssert typeof(f) is Opt,
+                "Required " & $S & "." & name & " missing in " & $T
+              fieldVal(name).isSome
+            else:
+              true
+          if isActive:
+            activeFields.setBit(fieldIndex)
+            when not compiles(fieldVal(name)):
+              raiseAssert "Unreachable, `isActive` should be `false`"
+            elif typeof(fieldVal(name)) is Opt:
+              addField fieldVal(name).unsafeGet
+            else:
+              addField fieldVal(name)
+          else:
+            addField zeroHashes[0]
+          inc fieldIndex
+      mergeBranches(res, hash_tree_root(activeFields), res)
+    # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
-    trs "MERKLEIZING FIELDS"
-    const totalChunks = totalSerializedFields(T)
-    merkleizeFields(Limit totalChunks, res):
-      x.enumerateSubFields(f):
-        addField f
+    else:
+      trs "MERKLEIZING FIELDS"
+      const totalChunks = totalSerializedFields(T)
+      merkleizeFields(Limit totalChunks, res):
+        x.enumerateSubFields(f):
+          addField f
   else:
     unsupported T
 
@@ -937,84 +1000,94 @@ func hashTreeRootAux[T](
         i = j
       else: return unsupportedIndex
   elif T is object|tuple:
-    # when T.isCaseObject():
+    when T.hasCustomPragma(sszStableContainer):
+      const N = T.getCustomPragmaVal(sszStableContainer)
+      unsupported T
+    elif T.hasCustomPragma(sszVariant):
+      type S = T.getCustomPragmaVal(sszVariant)
+      # Using `S` doesn't work: https://github.com/nim-lang/Nim/issues/23564
+      const N = T.getCustomPragmaVal(sszVariant)
+        .getCustomPragmaVal(sszStableContainer)
+      unsupported T
+    # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
-    trs "MERKLEIZING FIELDS"
-    const
-      totalChunks = totalSerializedFields(T)
-      treeHeight = binaryTreeHeight(totalChunks)
-      firstChunkIndex = nextPow2(totalChunks.uint64)
-      chunkLayer = log2trunc(firstChunkIndex)
-    var
-      i = slice.a
-      fieldIndex = 0.Limit
-      isActive = false
-      index {.noinit.}: GeneralizedIndex
-      indexLayer {.noinit.}: int
-      chunks {.noinit.}: Slice[Limit]
-      merkleizer {.noinit.}: SszMerkleizer2[treeHeight]
-      chunk {.noinit.}: Limit
-      nextField {.noinit.}: Limit
-    x.enumerateSubFields(f):
-      if i <= slice.b:
-        if not isActive:
-          index = indexAt(i)
-          indexLayer = log2trunc(index)
-          nextField =
+    else:
+      trs "MERKLEIZING FIELDS"
+      const
+        totalChunks = totalSerializedFields(T)
+        treeHeight = binaryTreeHeight(totalChunks)
+        firstChunkIndex = nextPow2(totalChunks.uint64)
+        chunkLayer = log2trunc(firstChunkIndex)
+      var
+        i = slice.a
+        fieldIndex = 0.Limit
+        isActive = false
+        index {.noinit.}: GeneralizedIndex
+        indexLayer {.noinit.}: int
+        chunks {.noinit.}: Slice[Limit]
+        merkleizer {.noinit.}: SszMerkleizer2[treeHeight]
+        chunk {.noinit.}: Limit
+        nextField {.noinit.}: Limit
+      x.enumerateSubFields(f):
+        if i <= slice.b:
+          if not isActive:
+            index = indexAt(i)
+            indexLayer = log2trunc(index)
+            nextField =
+              if indexLayer == chunkLayer:
+                chunkForIndex(index)
+              elif indexLayer < chunkLayer:
+                chunks = chunksForIndex(index)
+                merkleizer.topIndex = chunkLayer - indexLayer
+                merkleizer.totalChunks = 0
+                chunks.a
+              else:
+                chunk = chunkContainingIndex(index)
+                chunk
+            isActive = true
+          if fieldIndex >= nextField:
             if indexLayer == chunkLayer:
-              chunkForIndex(index)
-            elif indexLayer < chunkLayer:
-              chunks = chunksForIndex(index)
-              merkleizer.topIndex = chunkLayer - indexLayer
-              merkleizer.totalChunks = 0
-              chunks.a
-            else:
-              chunk = chunkContainingIndex(index)
-              chunk
-          isActive = true
-        if fieldIndex >= nextField:
-          if indexLayer == chunkLayer:
-            rootAt(i) = hash_tree_root(f)
-            inc i
-            isActive = false
-          elif indexLayer < chunkLayer:
-            addField f
-            if fieldIndex >= chunks.b:
-              rootAt(i) = getFinalHash(merkleizer)
+              rootAt(i) = hash_tree_root(f)
               inc i
               isActive = false
-          else:
-            var j = i + 1
-            while j <= slice.b:
-              let
-                index = indexAt(j)
-                indexLayer = log2trunc(index)
-              if indexLayer <= chunkLayer or
-                  chunkContainingIndex(index) != chunk:
-                break
-              inc j
-            ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
-                                   atLayer + chunkLayer)
-            i = j
-            isActive = false
-      inc fieldIndex
-    doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
-    while i <= slice.b:
-      index = indexAt(i)
-      indexLayer = log2trunc(index)
-      if indexLayer == chunkLayer:
-        rootAt(i) = static(Digest())
-        inc i
-        isActive = false
-      elif indexLayer < chunkLayer:
-        if not isActive:
-          merkleizer.topIndex = chunkLayer - indexLayer
-          merkleizer.totalChunks = 0
-        rootAt(i) = getFinalHash(merkleizer)
-        inc i
-        isActive = false
-      else: return unsupportedIndex
+            elif indexLayer < chunkLayer:
+              addField f
+              if fieldIndex >= chunks.b:
+                rootAt(i) = getFinalHash(merkleizer)
+                inc i
+                isActive = false
+            else:
+              var j = i + 1
+              while j <= slice.b:
+                let
+                  index = indexAt(j)
+                  indexLayer = log2trunc(index)
+                if indexLayer <= chunkLayer or
+                    chunkContainingIndex(index) != chunk:
+                  break
+                inc j
+              ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
+                                    atLayer + chunkLayer)
+              i = j
+              isActive = false
+        inc fieldIndex
+      doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
+      while i <= slice.b:
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+        if indexLayer == chunkLayer:
+          rootAt(i) = static(Digest())
+          inc i
+          isActive = false
+        elif indexLayer < chunkLayer:
+          if not isActive:
+            merkleizer.topIndex = chunkLayer - indexLayer
+            merkleizer.totalChunks = 0
+          rootAt(i) = getFinalHash(merkleizer)
+          inc i
+          isActive = false
+        else: return unsupportedIndex
   else:
     unsupported T
   ok()

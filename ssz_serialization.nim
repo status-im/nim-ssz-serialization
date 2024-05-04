@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2024 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -169,7 +169,49 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       w.writeValue 1'u8
       w.writeValue value.get
   elif value is object|tuple:
-    when isCaseObject(type(value)):
+    when type(value).hasCustomPragma(sszStableContainer):
+      const N = type(value).getCustomPragmaVal(sszStableContainer)
+      var
+        fieldIndex = 0
+        activeFields: BitArray[N]
+        fixedSize = 0
+      enumerateSubFields(value, field):
+        doAssert fieldIndex < N
+        type F = type toSszType(field)
+        let isActive =
+          when F is Opt:
+            field.isSome
+          else:
+            true
+        if isActive:
+          const size =
+            when F is Opt:
+              type E = ElemType(F)
+              when isFixedSize(E):
+                fixedPortionSize(E)
+              else:
+                offsetSize
+            else:
+              when isFixedSize(F):
+                fixedPortionSize(F)
+              else:
+                offsetSize
+          fixedSize += size
+          activeFields.setBit(fieldIndex)
+        inc fieldIndex
+      w.writeValue activeFields
+      var ctx = VarSizedWriterCtx(
+        offset: fixedSize,
+        fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
+      enumerateSubFields(value, field):
+        type F = type toSszType(field)
+        when F is Opt:
+          if field.isSome:
+            writeField w, ctx, astToStr(field), field.get
+        else:
+          writeField w, ctx, astToStr(field), field
+      endRecord w, ctx
+    elif isCaseObject(type(value)):
       isUnion(type(value))
 
       trs "WRITING SSZ Union"
@@ -247,7 +289,30 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
       0
 
   elif T is object|tuple:
-    when T.isCaseObject():
+    when T.hasCustomPragma(sszStableContainer):
+      result = anonConst fixedPortionSize(T)
+      enumerateSubFields(value, field):
+        type F = type toSszType(field)
+        let isActive =
+          when F is Opt:
+            field.isSome
+          else:
+            true
+        if isActive:
+          let size =
+            when F is Opt:
+              type E = ElemType(F)
+              when isFixedSize(E):
+                anonConst fixedPortionSize(E)
+              else:
+                offsetSize + sszSize(toSszType field.get)
+            else:
+              when isFixedSize(F):
+                anonConst fixedPortionSize(F)
+              else:
+                offsetSize + sszSize(toSszType field)
+          result += size
+    elif T.isCaseObject():
       isUnion(T)
       unionSize(value)
     else:

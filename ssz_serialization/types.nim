@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2024 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -8,7 +8,7 @@
 {.push raises: [].}
 
 import
-  std/[tables, typetraits, strformat],
+  std/[sets, tables, typetraits, strformat, strutils],
   stew/shims/macros, stew/[assign2, byteutils, bitops2, objects, results],
   stint,
   nimcrypto/hash,
@@ -18,7 +18,7 @@ import
 
 from nimcrypto/utils import fromHex  # needed to disambiguate properly
 
-export stint, bitseqs, json_serialization
+export macros, sets, stint, bitseqs, json_serialization
 
 const
   offsetSize* = 4
@@ -34,6 +34,118 @@ type
   Limit* = int64
 
   Digest* = MDigest[32 * 8]
+
+# These pragmas control `StableContainer` according to
+# https://eips.ethereum.org/EIPS/eip-7495
+# The EIP is still under review, functionality may change
+# or go away without deprecation.
+template sszStableContainer*(n: int) {.pragma.}
+template sszVariant*(s: typedesc) {.pragma.}
+template sszOneOf*(s: typedesc) {.pragma.}
+
+func getVariantFields[V](
+    v: typedesc[V]
+): tuple[base: HashSet[string], variant: HashSet[string]] {.compileTime.} =
+  type S = V.getCustomPragmaVal(sszVariant)
+
+  func getBaseFields(): HashSet[string] {.compileTime.} =
+    var res: HashSet[string]
+    for fieldName, _ in fieldPairs(declval(S)):
+      let name = fieldName.nimIdentNormalize()
+      doAssert not res.containsOrIncl name, $S & "." & name & " duplicated"
+    res
+  const baseFields = getBaseFields()
+
+  func getVariantFields(): HashSet[string] {.compileTime.} =
+    var res: HashSet[string]
+    for fieldName, _ in fieldPairs(declval(V)):
+      let name = fieldName.nimIdentNormalize()
+      doAssert name in baseFields, $V & "." & name & " missing in " & $S
+      doAssert not res.containsOrIncl name, $V & "." & name & " duplicated"
+    res
+  const variantFields = getVariantFields()
+
+  for fieldName, fieldValue in fieldPairs(declval(S)):
+    let name = fieldName.nimIdentNormalize()
+    if name notin variantFields:
+      doAssert typeof(fieldValue) is Opt,
+        "Required " & $S & "." & name & " missing in " & $V
+
+  (base: baseFields, variant: variantFields)
+
+func fromVariantBase*[V, S](v: typedesc[V], value: S): Opt[V] =
+  static: doAssert V.getCustomPragmaVal(sszVariant) is S
+  const fields = getVariantFields(V)
+
+  macro createVariant(): untyped =
+    var res = newStmtList()
+    for name in fields.base:
+      if name in fields.variant:
+        continue
+      let nameIdent = ident(name)
+      res.add quote do:
+        if value.`nameIdent`.isSome:
+          return Opt.none(V)
+
+    let resIdent = ident"res"
+    res.add quote do:
+      var `resIdent` = Opt.some(default(V))
+    for name in fields.variant:
+      let nameIdent = ident(name)
+      res.add quote do:
+        when value.`nameIdent` is Opt and
+            `resIdent`.unsafeGet.`nameIdent` isnot Opt:
+          `resIdent`.unsafeGet.`nameIdent` = value.`nameIdent`.valueOr:
+            return Opt.none(V)
+        else:
+          `resIdent`.unsafeGet.`nameIdent` = value.`nameIdent`
+    res.add quote do:
+      `resIdent`
+    res
+  createVariant()
+
+func toVariantBase*[V](value: V): auto =
+  type S = V.getCustomPragmaVal(sszVariant)
+  const fields = getVariantFields(V)
+
+  macro createBase(): untyped =
+    var res = newStmtList()
+    let resIdent = ident"res"
+    res.add quote do:
+      var `resIdent`: S
+    for name in fields.variant:
+      let nameIdent = ident(name)
+      res.add quote do:
+        when `resIdent`.`nameIdent` is Opt and
+            value.`nameIdent` isnot Opt:
+          `resIdent`.`nameIdent`.ok value.`nameIdent`
+        else:
+          `resIdent`.`nameIdent` = value.`nameIdent`
+    res.add quote do:
+      `resIdent`
+    res
+  createBase()
+
+func createOneOf[O, K, S](o: typedesc[O], kind: Opt[K], value: S): Opt[O] =
+  if kind.isNone:
+    return Opt.none(O)
+  var
+    res = Opt[O].some O(kind: kind.unsafeGet)
+    didSet = false
+  for fieldName, fieldValue in fieldPairs(res.unsafeGet):
+    doAssert not didSet, $O & " must only have 'kind' + 1 data member"
+    when fieldName != "kind":
+      fieldValue = typeof(fieldValue).fromVariantBase(value).valueOr:
+        return Opt.none(O)
+      didSet = true
+  doAssert didSet, $O & " must have 1 data member per 'kind'"
+  res
+
+template fromOneOfBase*[O, S](
+    o: typedesc[O], value: S, params: varargs[untyped]): Opt[O] =
+  block:
+    static: doAssert O.getCustomPragmaVal(sszOneOf) is S
+    o.createOneOf(selectVariant.unpackArgs([value, params]), value)
 
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
@@ -527,7 +639,9 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
   elif T is OptionalType:
     return false
   elif T is object|tuple:
-    when isCaseObject(T):
+    when T.hasCustomPragma(sszStableContainer):
+      return false
+    elif isCaseObject(T):
       return false
     else:
       enumAllSerializedFields(T):
@@ -546,11 +660,16 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
   elif T is object|tuple:
-    enumAllSerializedFields(T):
-      when isFixedSize(FieldType):
-        result += fixedPortionSize(FieldType)
-      else:
-        result += offsetSize
+    # This should be `T` not `T0`: https://github.com/nim-lang/Nim/issues/23564
+    when T0.hasCustomPragma(sszStableContainer):
+      const N = T0.getCustomPragmaVal(sszStableContainer)
+      fixedPortionSize(BitArray[N])
+    else:
+      enumAllSerializedFields(T):
+        when isFixedSize(FieldType):
+          result += fixedPortionSize(FieldType)
+        else:
+          result += offsetSize
   else:
     unsupported T0
 
