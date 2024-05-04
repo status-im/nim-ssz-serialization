@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2021-2023 Status Research & Development GmbH
+# Copyright (c) 2021-2024 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -97,8 +97,8 @@ let
     u: E(x: false, y: true),
     v: (a: false, b: true),
     w: (a: E(x: false, y: true), b: E(x: true, y: false), c: true),
-    x: HashArray[2, E](data: array[2, E](
-      [E(x: false, y: true), E(x: true, y: false)])),
+    x: HashArray[2, E](data:
+      [E(x: false, y: true), E(x: true, y: false)]),
     y: HashList[E, 2].init(
       @[E(x: false, y: true), E(x: true, y: false)]),
     z: HashList[E, 2].init(@[]))
