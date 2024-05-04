@@ -644,7 +644,8 @@ func supportsBulkCopy*(T: type): bool {.compileTime.} =
 func isFixedSize*(T0: type): bool {.compileTime.} =
   mixin toSszType, enumAllSerializedFields
 
-  type T = type toSszType(default T0)
+  # `T` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template T: untyped = typeof toSszType(default T0)
 
   when T is BasicType:
     return true
@@ -666,7 +667,8 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
 func fixedPortionSize*(T0: type): int {.compileTime.} =
   mixin enumAllSerializedFields, toSszType
 
-  type T = type toSszType(declval T0)
+  # `T` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template T: untyped = typeof toSszType(declval T0)
 
   when T is BasicType: sizeof(T)
   elif T is array|HashArray:
@@ -674,9 +676,8 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
   elif T is object|tuple:
-    # This should be `T` not `T0`: https://github.com/nim-lang/Nim/issues/23564
-    when T0.isStableContainer:
-      const N = T0.getCustomPragmaVal(sszStableContainer)
+    when T.isStableContainer:
+      const N = T.getCustomPragmaVal(sszStableContainer)
       fixedPortionSize(BitArray[N])
     else:
       enumAllSerializedFields(T):

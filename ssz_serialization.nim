@@ -88,8 +88,7 @@ func init*(T: type SszWriter, stream: OutputStream): T =
 
 proc writeVarSizeType(w: var SszWriter, value: auto) {.gcsafe, raises: [IOError].}
 
-func beginRecord*(w: var SszWriter, TT: type): auto  =
-  type T = TT
+func beginRecord*(w: var SszWriter, T: typedesc): auto  =
   when isFixedSize(T):
     FixedSizedWriterCtx()
   else:
@@ -106,7 +105,8 @@ template writeField*(w: var SszWriter,
   when ctx is FixedSizedWriterCtx:
     writeFixedSized(w.stream, toSszType(field))
   else:
-    type FieldType = type toSszType(field)
+    # `FieldType` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+    template FieldType: untyped = typeof toSszType(field)
 
     when isFixedSize(FieldType):
       writeFixedSized(ctx.fixedParts, toSszType(field))

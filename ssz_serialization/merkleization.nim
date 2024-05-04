@@ -763,10 +763,9 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
           inc fieldIndex
       mergeBranches(res, hash_tree_root(activeFields), res)
     elif T.isVariant:
-      type S = T.getCustomPragmaVal(sszVariant)
-      # Using `S` doesn't work: https://github.com/nim-lang/Nim/issues/23564
-      const N = T.getCustomPragmaVal(sszVariant)
-        .getCustomPragmaVal(sszStableContainer)
+      # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+      template S: untyped = T.getCustomPragmaVal(sszVariant)
+      const N = S.getCustomPragmaVal(sszStableContainer)
       macro fieldVal(name: static string): untyped =
         let nameIdent = ident(name)
         quote do:
@@ -1004,10 +1003,9 @@ func hashTreeRootAux[T](
       const N = T.getCustomPragmaVal(sszStableContainer)
       unsupported T
     elif T.isVariant:
-      type S = T.getCustomPragmaVal(sszVariant)
-      # Using `S` doesn't work: https://github.com/nim-lang/Nim/issues/23564
-      const N = T.getCustomPragmaVal(sszVariant)
-        .getCustomPragmaVal(sszStableContainer)
+      # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+      template S: untyped = T.getCustomPragmaVal(sszVariant)
+      const N = S.getCustomPragmaVal(sszStableContainer)
       unsupported T
     # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
