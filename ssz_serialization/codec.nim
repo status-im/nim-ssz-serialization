@@ -471,6 +471,11 @@ proc readSszValue*[T](
         else:
           discard fieldName
         inc fieldIndex
+      while fieldIndex < N:
+        let isActive = activeFields[fieldIndex]
+        if isActive:
+          raiseMalformedSszError(T, "unknown active field " & $fieldIndex)
+        inc fieldIndex
 
       val.reset()
       fieldIndex = 0
