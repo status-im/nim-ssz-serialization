@@ -19,7 +19,8 @@ import nimcrypto/[hash, sha2], stew/ptrops, ./types
 # the faster backends will be used where they are supported
 
 const PREFER_BLST_SHA256* {.booldefine.} = true
-const PREFER_HASHTREE_SHA256* {.booldefine.} = true
+# TODO https://github.com/prysmaticlabs/hashtree/issues/28
+const PREFER_HASHTREE_SHA256* {.booldefine.} = not defined(arm64)
 
 when PREFER_BLST_SHA256:
   import blscurve
