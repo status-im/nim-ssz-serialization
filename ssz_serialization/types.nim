@@ -88,7 +88,8 @@ func getVariantFields[V](
   (base: baseFields, variant: variantFields)
 
 func fromVariantBase*[V, S](v: typedesc[V], value: S): Opt[V] =
-  static: doAssert V.getCustomPragmaVal(sszVariant) is S
+  static: doAssert V.getCustomPragmaVal(sszVariant) is S,
+    $V & " is not {.sszVariant: " & $S & ".}"
   const fields = getVariantFields(V)
 
   macro createVariant(): untyped =
@@ -107,38 +108,60 @@ func fromVariantBase*[V, S](v: typedesc[V], value: S): Opt[V] =
     for name in fields.variant:
       let nameIdent = ident(name)
       res.add quote do:
-        when value.`nameIdent` is Opt and
-            `resIdent`.unsafeGet.`nameIdent` isnot Opt:
-          `resIdent`.unsafeGet.`nameIdent` = value.`nameIdent`.valueOr:
-            return Opt.none(V)
-        else:
-          `resIdent`.unsafeGet.`nameIdent` = value.`nameIdent`
+        block:
+          template dst: untyped = `resIdent`.unsafeGet.`nameIdent`
+          template src: untyped =
+            when value.`nameIdent` is Opt and dst isnot Opt:
+              value.`nameIdent`.valueOr:
+                return Opt.none(V)
+            else:
+              value.`nameIdent`
+          when typeof(dst).isVariant:
+            when typeof(src) is typeof(dst).getCustomPragmaVal(sszVariant):
+              dst = typeof(dst).fromVariantBase(src).valueOr:
+                return Opt.none(V)
+            else:
+              dst = src
+          else:
+            dst = src
     res.add quote do:
       `resIdent`
     res
   createVariant()
 
-func toVariantBase*[V](value: V): auto =
-  type S = V.getCustomPragmaVal(sszVariant)
-  const fields = getVariantFields(V)
-
-  macro createBase(): untyped =
-    var res = newStmtList()
-    let resIdent = ident"res"
+macro createBase(
+    value: untyped,
+    fields: static[
+      tuple[base: HashSet[string], variant: HashSet[string]]]): untyped =
+  var res = newStmtList()
+  let resIdent = ident"res"
+  res.add quote do:
+    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszVariant)
+  for name in fields.variant:
+    let nameIdent = ident(name)
     res.add quote do:
-      var `resIdent`: S
-    for name in fields.variant:
-      let nameIdent = ident(name)
-      res.add quote do:
-        when `resIdent`.`nameIdent` is Opt and
-            value.`nameIdent` isnot Opt:
-          `resIdent`.`nameIdent`.ok value.`nameIdent`
+      block:
+        template src: untyped = `value`.`nameIdent`
+        when `resIdent`.`nameIdent` is Opt and src isnot Opt:
+          template dstType: untyped = typeof(`resIdent`.`nameIdent`).T
+          template setDst(val: untyped): untyped = `resIdent`.`nameIdent`.ok val
         else:
-          `resIdent`.`nameIdent` = value.`nameIdent`
-    res.add quote do:
-      `resIdent`
-    res
-  createBase()
+          template dstType: untyped = typeof(`resIdent`.`nameIdent`)
+          template setDst(val: untyped): untyped = `resIdent`.`nameIdent` = val
+        when typeof(src).isVariant:
+          when typeof(src).getCustomPragmaVal(sszVariant) is dstType():
+            setDst block: createBase(src(), getVariantFields(typeof(src)))
+          else:
+            setDst src
+        else:
+          setDst src
+  res.add quote do:
+    `resIdent`
+  res
+
+func toVariantBase*[V](value: V): auto =
+  static: doAssert V.hasCustomPragma(sszVariant), $V & " is not {.sszVariant.}"
+  createBase(value, getVariantFields(V))
 
 func createOneOf[O, K, S](o: typedesc[O], kind: Opt[K], value: S): Opt[O] =
   if kind.isNone:
@@ -158,8 +181,22 @@ func createOneOf[O, K, S](o: typedesc[O], kind: Opt[K], value: S): Opt[O] =
 template fromOneOfBase*[O, S](
     o: typedesc[O], value: S, params: varargs[untyped]): Opt[O] =
   block:
-    static: doAssert O.getCustomPragmaVal(sszOneOf) is S
+    static: doAssert O.getCustomPragmaVal(sszOneOf) is S,
+      $O & " is not {.sszOneOf: " & $S & ".}"
     o.createOneOf(selectVariant.unpackArgs([value, params]), value)
+
+func toOneOfBase*[O](value: O): auto =
+  static: doAssert O.hasCustomPragma(sszOneOf), $O & " is not {.sszOneOf.}"
+  var
+    res: O.getCustomPragmaVal(sszOneOf)
+    didSet = false
+  for fieldName, fieldValue in fieldPairs(value):
+    doAssert not didSet, $O & " must only have 'kind' + 1 data member"
+    when fieldName != "kind":
+      res = fieldValue.toVariantBase()
+      didSet = true
+  doAssert didSet, $O & " must have 1 data member per 'kind'"
+  res
 
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
