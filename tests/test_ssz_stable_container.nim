@@ -15,7 +15,6 @@ import
 
 type
   # Defines the common merkleization format and a portable serialization format
-  # across variants
   Shape {.sszStableContainer: 4.} = object
     side: Opt[uint16]
     color: uint8
@@ -53,6 +52,25 @@ func selectVariant(value: Shape, circleAllowed = false): Opt[ShapeKind] =
   else:
     Opt.none ShapeKind
 
+type
+  # Defines a container with immutable scheme
+  # that contains two `StableContainer`
+  ShapePair = object
+    shape_1: Shape
+    shape_2: Shape
+
+  # Inherits merkleization format from `ShapePair`,
+  # and serializes more compactly
+  SquarePair {.sszVariant: ShapePair.} = object
+    shape_1: Square
+    shape_2: Square
+
+  # Inherits merkleization format from `ShapePair`,
+  # and reorders fields
+  CirclePair {.sszVariant: ShapePair.} = object
+    shape_2: Circle
+    shape_1: Circle
+
 # Helper containers for merkleization testing
 type
   ShapePayload = object
@@ -62,6 +80,25 @@ type
   ShapeRepr = object
     value: ShapePayload
     active_fields: BitArray[4]
+
+  ShapePairRepr = object
+    shape_1: ShapeRepr
+    shape_2: ShapeRepr
+
+  AnyShapePair {.sszOneOf: ShapePair.} = object
+    case kind: ShapeKind
+    of ShapeKind.Square:
+      squareData: SquarePair
+    of ShapeKind.Circle:
+      circleData: CirclePair
+
+func selectVariant(value: ShapePair, circleAllowed = false): Opt[ShapeKind] =
+  let
+    typ_1 = ? value.shape_1.selectVariant(circleAllowed)
+    typ_2 = ? value.shape_2.selectVariant(circleAllowed)
+  if typ_1 != typ_2:
+    return Opt.none ShapeKind
+  Opt.some typ_1
 
 # https://github.com/ethereum/EIPs/blob/master/assets/eip-7495/tests.py
 suite "SSZ StableContainer":
@@ -165,6 +202,88 @@ suite "SSZ StableContainer":
       shapes.allIt Square.fromVariantBase(it).isNone
       circles.allIt Square.fromVariantBase(it.toVariantBase()).isNone
       AnyShape.fromOneOfBase(SSZ.decode(circle_bytes_stable, Shape)).isNone
+
+  test "SquarePair":
+    let
+      square_pair_bytes_stable =
+        hexToSeqByte("080000000c0000000342000103690001")
+      square_pair_bytes_variant = hexToSeqByte("420001690001")
+      square_pair_root = ShapePairRepr(
+        shape_1: ShapeRepr(
+          value: ShapePayload(side: 0x42, color: 1, radius: 0),
+          active_fields: BitArray[4](bytes: [0b0011'u8])),
+        shape_2: ShapeRepr(
+          value: ShapePayload(side: 0x69, color: 1, radius: 0),
+          active_fields: BitArray[4](bytes: [0b0011'u8]))).hash_tree_root()
+    var
+      shape_pairs = @[ShapePair(
+        shape_1: Shape(side: Opt.some 0x42'u16, color: 1),
+        shape_2: Shape(side: Opt.some 0x69'u16, color: 1))]
+      square_pairs = @[SquarePair(
+        shape_1: Square(side: 0x42, color: 1),
+        shape_2: Square(side: 0x69, color: 1))]
+    square_pairs.add shape_pairs.mapIt SquarePair.fromVariantBase(it).get
+    shape_pairs.add shape_pairs.mapIt(
+      ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
+    shape_pairs.add square_pairs.mapIt it.toVariantBase()
+    square_pairs.add square_pairs.mapIt(
+      SquarePair(shape_1: it.shape_1, shape_2: it.shape_2))
+    check:
+      shape_pairs.toHashSet().card == 1
+      square_pairs.toHashSet().card == 1
+      shape_pairs.allIt SSZ.encode(it) == square_pair_bytes_stable
+      square_pairs.allIt SSZ.encode(it) == square_pair_bytes_variant
+      [
+        SquarePair.fromVariantBase(
+          SSZ.decode(square_pair_bytes_stable, ShapePair)).get,
+        SSZ.decode(square_pair_bytes_variant, SquarePair),
+        AnyShapePair.fromOneOfBase(
+          SSZ.decode(square_pair_bytes_stable, ShapePair)).get.squareData,
+        AnyShapePair.fromOneOfBase(
+          SSZ.decode(square_pair_bytes_stable, ShapePair),
+          circleAllowed = true).get.squareData].toHashSet().card == 1
+      shape_pairs.allIt it.hash_tree_root() == square_pair_root
+      square_pairs.allIt it.hash_tree_root() == square_pair_root
+
+  test "CirclePair":
+    let
+      circle_pair_bytes_stable =
+        hexToSeqByte("080000000c0000000601420006016900")
+      circle_pair_bytes_variant = hexToSeqByte("690001420001")
+      circle_pair_root = ShapePairRepr(
+        shape_1: ShapeRepr(
+          value: ShapePayload(side: 0, color: 1, radius: 0x42),
+          active_fields: BitArray[4](bytes: [0b0110'u8])),
+        shape_2: ShapeRepr(
+          value: ShapePayload(side: 0, color: 1, radius: 0x69),
+          active_fields: BitArray[4](bytes: [0b0110'u8]))).hash_tree_root()
+    var
+      shape_pairs = @[ShapePair(
+        shape_1: Shape(color: 1, radius: Opt.some 0x42'u16),
+        shape_2: Shape(color: 1, radius: Opt.some 0x69'u16))]
+      circle_pairs = @[CirclePair(
+        shape_1: Circle(radius: 0x42, color: 1),
+        shape_2: Circle(radius: 0x69, color: 1))]
+    circle_pairs.add shape_pairs.mapIt CirclePair.fromVariantBase(it).get
+    shape_pairs.add shape_pairs.mapIt(
+      ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
+    shape_pairs.add circle_pairs.mapIt it.toVariantBase()
+    circle_pairs.add circle_pairs.mapIt(
+      CirclePair(shape_1: it.shape_1, shape_2: it.shape_2))
+    check:
+      shape_pairs.toHashSet().card == 1
+      circle_pairs.toHashSet().card == 1
+      shape_pairs.allIt SSZ.encode(it) == circle_pair_bytes_stable
+      circle_pairs.allIt SSZ.encode(it) == circle_pair_bytes_variant
+      [
+        CirclePair.fromVariantBase(
+          SSZ.decode(circle_pair_bytes_stable, ShapePair)).get,
+        SSZ.decode(circle_pair_bytes_variant, CirclePair),
+        AnyShapePair.fromOneOfBase(
+          SSZ.decode(circle_pair_bytes_stable, ShapePair),
+          circleAllowed = true).get.circleData].toHashSet().card == 1
+      shape_pairs.allIt it.hash_tree_root() == circle_pair_root
+      circle_pairs.allIt it.hash_tree_root() == circle_pair_root
 
   test "Unsupported (1)":
     let

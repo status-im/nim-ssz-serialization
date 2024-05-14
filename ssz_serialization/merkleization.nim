@@ -765,7 +765,11 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     elif T.isVariant:
       # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
       template S: untyped = T.getCustomPragmaVal(sszVariant)
-      const N = S.getCustomPragmaVal(sszStableContainer)
+      const N =
+        when S.isStableContainer:
+          S.getCustomPragmaVal(sszStableContainer)
+        else:
+          S.totalSerializedFields()
       macro fieldVal(name: static string): untyped =
         let nameIdent = ident(name)
         quote do:
@@ -798,7 +802,8 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
           else:
             addField zeroHashes[0]
           inc fieldIndex
-      mergeBranches(res, hash_tree_root(activeFields), res)
+      when S.isStableContainer:
+        mergeBranches(res, hash_tree_root(activeFields), res)
     # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
