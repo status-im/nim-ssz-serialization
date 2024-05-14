@@ -40,7 +40,7 @@ type
 # The EIP is still under review, functionality may change
 # or go away without deprecation.
 template sszStableContainer*(n: int) {.pragma.}
-template sszVariant*(s: typedesc) {.pragma.}
+template sszMerkleizeAs*(s: typedesc) {.pragma.}
 template sszOneOf*(s: typedesc) {.pragma.}
 
 # `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
@@ -51,51 +51,51 @@ template isStableContainer*(T: untyped): bool =
     false
 
 # `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
-template isVariant*(T: untyped): bool =
-  when compiles(T.hasCustomPragma(sszVariant)):
-    T.hasCustomPragma(sszVariant)
+template isMerkleizeAs*(T: untyped): bool =
+  when compiles(T.hasCustomPragma(sszMerkleizeAs)):
+    T.hasCustomPragma(sszMerkleizeAs)
   else:
     false
 
-func getVariantFields[V](
+func getMerkleizeAsFields[V](
     v: typedesc[V]
-): tuple[base: HashSet[string], variant: HashSet[string]] {.compileTime.} =
-  type S = V.getCustomPragmaVal(sszVariant)
+): tuple[base: HashSet[string], merkleizeAs: HashSet[string]] {.compileTime.} =
+  type B = V.getCustomPragmaVal(sszMerkleizeAs)
 
   func getBaseFields(): HashSet[string] {.compileTime.} =
     var res: HashSet[string]
-    for fieldName, _ in fieldPairs(declval(S)):
+    for fieldName, _ in fieldPairs(declval(B)):
       let name = fieldName.nimIdentNormalize()
-      doAssert not res.containsOrIncl name, $S & "." & name & " duplicated"
+      doAssert not res.containsOrIncl name, $B & "." & name & " duplicated"
     res
   const baseFields = getBaseFields()
 
-  func getVariantFields(): HashSet[string] {.compileTime.} =
+  func getMerkleizeAsFields(): HashSet[string] {.compileTime.} =
     var res: HashSet[string]
     for fieldName, _ in fieldPairs(declval(V)):
       let name = fieldName.nimIdentNormalize()
-      doAssert name in baseFields, $V & "." & name & " missing in " & $S
+      doAssert name in baseFields, $V & "." & name & " missing in " & $B
       doAssert not res.containsOrIncl name, $V & "." & name & " duplicated"
     res
-  const variantFields = getVariantFields()
+  const merkleizeAsFields = getMerkleizeAsFields()
 
-  for fieldName, fieldValue in fieldPairs(declval(S)):
+  for fieldName, fieldValue in fieldPairs(declval(B)):
     let name = fieldName.nimIdentNormalize()
-    if name notin variantFields:
+    if name notin merkleizeAsFields:
       doAssert typeof(fieldValue) is Opt,
-        "Required " & $S & "." & name & " missing in " & $V
+        "Required " & $B & "." & name & " missing in " & $V
 
-  (base: baseFields, variant: variantFields)
+  (base: baseFields, merkleizeAs: merkleizeAsFields)
 
-func fromVariantBase*[V, S](v: typedesc[V], value: S): Opt[V] =
-  static: doAssert V.getCustomPragmaVal(sszVariant) is S,
-    $V & " is not {.sszVariant: " & $S & ".}"
-  const fields = getVariantFields(V)
+func fromMerkleizeAsBase*[V, B](v: typedesc[V], value: B): Opt[V] =
+  static: doAssert V.getCustomPragmaVal(sszMerkleizeAs) is B,
+    $V & " is not {.sszMerkleizeAs: " & $B & ".}"
+  const fields = getMerkleizeAsFields(V)
 
-  macro createVariant(): untyped =
+  macro createMerkleizeAs(): untyped =
     var res = newStmtList()
     for name in fields.base:
-      if name in fields.variant:
+      if name in fields.merkleizeAs:
         continue
       let nameIdent = ident(name)
       res.add quote do:
@@ -105,7 +105,7 @@ func fromVariantBase*[V, S](v: typedesc[V], value: S): Opt[V] =
     let resIdent = ident"res"
     res.add quote do:
       var `resIdent` = Opt.some(default(V))
-    for name in fields.variant:
+    for name in fields.merkleizeAs:
       let nameIdent = ident(name)
       res.add quote do:
         block:
@@ -116,9 +116,9 @@ func fromVariantBase*[V, S](v: typedesc[V], value: S): Opt[V] =
                 return Opt.none(V)
             else:
               value.`nameIdent`
-          when typeof(dst).isVariant:
-            when typeof(src) is typeof(dst).getCustomPragmaVal(sszVariant):
-              dst = typeof(dst).fromVariantBase(src).valueOr:
+          when typeof(dst).isMerkleizeAs:
+            when typeof(src) is typeof(dst).getCustomPragmaVal(sszMerkleizeAs):
+              dst = typeof(dst).fromMerkleizeAsBase(src).valueOr:
                 return Opt.none(V)
             else:
               dst = src
@@ -127,17 +127,17 @@ func fromVariantBase*[V, S](v: typedesc[V], value: S): Opt[V] =
     res.add quote do:
       `resIdent`
     res
-  createVariant()
+  createMerkleizeAs()
 
 macro createBase(
     value: untyped,
     fields: static[
-      tuple[base: HashSet[string], variant: HashSet[string]]]): untyped =
+      tuple[base: HashSet[string], merkleizeAs: HashSet[string]]]): untyped =
   var res = newStmtList()
   let resIdent = ident"res"
   res.add quote do:
-    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszVariant)
-  for name in fields.variant:
+    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszMErkleizeAs)
+  for name in fields.merkleizeAs:
     let nameIdent = ident(name)
     res.add quote do:
       block:
@@ -148,9 +148,9 @@ macro createBase(
         else:
           template dstType: untyped = typeof(`resIdent`.`nameIdent`)
           template setDst(val: untyped): untyped = `resIdent`.`nameIdent` = val
-        when typeof(src).isVariant:
-          when typeof(src).getCustomPragmaVal(sszVariant) is dstType():
-            setDst block: createBase(src(), getVariantFields(typeof(src)))
+        when typeof(src).isMerkleizeAs:
+          when typeof(src).getCustomPragmaVal(sszMerkleizeAs) is dstType():
+            setDst block: createBase(src(), getMerkleizeAsFields(typeof(src)))
           else:
             setDst src
         else:
@@ -159,11 +159,12 @@ macro createBase(
     `resIdent`
   res
 
-func toVariantBase*[V](value: V): auto =
-  static: doAssert V.hasCustomPragma(sszVariant), $V & " is not {.sszVariant.}"
-  createBase(value, getVariantFields(V))
+func toMerkleizeAsBase*[V](value: V): auto =
+  static: doAssert V.hasCustomPragma(sszMErkleizeAs),
+    $V & " is not {.sszMerkleizeAs.}"
+  createBase(value, getMerkleizeAsFields(V))
 
-func createOneOf[O, K, S](o: typedesc[O], kind: Opt[K], value: S): Opt[O] =
+func createOneOf[O, K, B](o: typedesc[O], kind: Opt[K], value: B): Opt[O] =
   if kind.isNone:
     return Opt.none(O)
   var
@@ -172,18 +173,18 @@ func createOneOf[O, K, S](o: typedesc[O], kind: Opt[K], value: S): Opt[O] =
   for fieldName, fieldValue in fieldPairs(res.unsafeGet):
     doAssert not didSet, $O & " must only have 'kind' + 1 data member"
     when fieldName != "kind":
-      fieldValue = typeof(fieldValue).fromVariantBase(value).valueOr:
+      fieldValue = typeof(fieldValue).fromMerkleizeAsBase(value).valueOr:
         return Opt.none(O)
       didSet = true
   doAssert didSet, $O & " must have 1 data member per 'kind'"
   res
 
-template fromOneOfBase*[O, S](
-    o: typedesc[O], value: S, params: varargs[untyped]): Opt[O] =
+template fromOneOfBase*[O, B](
+    o: typedesc[O], value: B, params: varargs[untyped]): Opt[O] =
   block:
-    static: doAssert O.getCustomPragmaVal(sszOneOf) is S,
-      $O & " is not {.sszOneOf: " & $S & ".}"
-    o.createOneOf(selectVariant.unpackArgs([value, params]), value)
+    static: doAssert O.getCustomPragmaVal(sszOneOf) is B,
+      $O & " is not {.sszOneOf: " & $B & ".}"
+    o.createOneOf(selectFromBase.unpackArgs([value, params]), value)
 
 func toOneOfBase*[O](value: O): auto =
   static: doAssert O.hasCustomPragma(sszOneOf), $O & " is not {.sszOneOf.}"
@@ -193,7 +194,7 @@ func toOneOfBase*[O](value: O): auto =
   for fieldName, fieldValue in fieldPairs(value):
     doAssert not didSet, $O & " must only have 'kind' + 1 data member"
     when fieldName != "kind":
-      res = fieldValue.toVariantBase()
+      res = fieldValue.toMerkleizeAsBase()
       didSet = true
   doAssert didSet, $O & " must have 1 data member per 'kind'"
   res

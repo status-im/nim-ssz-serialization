@@ -762,14 +762,14 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
             addField zeroHashes[0]
           inc fieldIndex
       mergeBranches(res, hash_tree_root(activeFields), res)
-    elif T.isVariant:
+    elif T.isMerkleizeAs:
       # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template S: untyped = T.getCustomPragmaVal(sszVariant)
+      template B: untyped = T.getCustomPragmaVal(sszMerkleizeAs)
       const N =
-        when S.isStableContainer:
-          S.getCustomPragmaVal(sszStableContainer)
+        when B.isStableContainer:
+          B.getCustomPragmaVal(sszStableContainer)
         else:
-          S.totalSerializedFields()
+          B.totalSerializedFields()
       macro fieldVal(name: static string): untyped =
         let nameIdent = ident(name)
         quote do:
@@ -778,16 +778,16 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
         fieldIndex = 0
         activeFields: BitArray[N]
       merkleizeFields(Limit N, res):
-        for name, f in fieldPairs(declval(S)):
+        for name, f in fieldPairs(declval(B)):
           doAssert fieldIndex < N
           let isActive =
             when not compiles(fieldVal(name)):
               static: doAssert typeof(f) is Opt,
-                "Required " & $S & "." & name & " missing in " & $T
+                "Required " & $B & "." & name & " missing in " & $T
               false
             elif typeof(fieldVal(name)) is Opt:
               static: doAssert typeof(f) is Opt,
-                "Required " & $S & "." & name & " missing in " & $T
+                "Required " & $B & "." & name & " missing in " & $T
               fieldVal(name).isSome
             else:
               true
@@ -802,7 +802,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
           else:
             addField zeroHashes[0]
           inc fieldIndex
-      when S.isStableContainer:
+      when B.isStableContainer:
         mergeBranches(res, hash_tree_root(activeFields), res)
     # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
@@ -1007,10 +1007,10 @@ func hashTreeRootAux[T](
     when T.isStableContainer:
       const N = T.getCustomPragmaVal(sszStableContainer)
       unsupported T
-    elif T.isVariant:
-      # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template S: untyped = T.getCustomPragmaVal(sszVariant)
-      const N = S.getCustomPragmaVal(sszStableContainer)
+    elif T.isMerkleizeAs:
+      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+      template B: untyped = T.getCustomPragmaVal(sszMerkleizeAs)
+      const N = B.getCustomPragmaVal(sszStableContainer)
       unsupported T
     # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
