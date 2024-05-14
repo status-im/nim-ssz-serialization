@@ -136,7 +136,7 @@ macro createBase(
   var res = newStmtList()
   let resIdent = ident"res"
   res.add quote do:
-    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszMErkleizeAs)
+    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszMerkleizeAs)
   for name in fields.merkleizeAs:
     let nameIdent = ident(name)
     res.add quote do:
@@ -160,7 +160,7 @@ macro createBase(
   res
 
 func toMerkleizeAsBase*[V](value: V): auto =
-  static: doAssert V.hasCustomPragma(sszMErkleizeAs),
+  static: doAssert V.hasCustomPragma(sszMerkleizeAs),
     $V & " is not {.sszMerkleizeAs.}"
   createBase(value, getMerkleizeAsFields(V))
 
