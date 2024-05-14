@@ -546,7 +546,7 @@ proc readSszValue*[T](
               doAssert varSizedFieldOffsets.len > i + 1
               if varSizedFieldOffsets[i] != offset - fixedSize:
                 raiseMalformedSszError(T, "field offset invalid")
-              let fieldSize = varSizedFieldOffsets[i + 1] - offset
+              let fieldSize = varSizedFieldOffsets[i + 1] - (offset - fixedSize)
               when F is Opt:
                 type E = type toSszType(declval ElemType(F))
                 field.ok(default(E))
@@ -562,7 +562,7 @@ proc readSszValue*[T](
               offset += fieldSize
               inc i
           inc fieldIndex
-        doAssert i == varSizedFieldOffsets.len
+        doAssert i == (varSizedFieldOffsets.len - 1)
       if offset != inputLen:
         raiseMalformedSszError(T, "input has extra data")
     elif isCaseObject(T):
