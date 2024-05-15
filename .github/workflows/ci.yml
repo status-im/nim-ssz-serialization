@@ -22,6 +22,8 @@ jobs:
             cpu: i386
           - os: macos
             cpu: amd64
+          - os: macos
+            cpu: arm64
           - os: windows
             cpu: amd64
           #- os: windows
@@ -34,7 +36,14 @@ jobs:
             shell: bash
           - target:
               os: macos
+              cpu: amd64
             builder: macos-12
+            shell: bash
+          - target:
+              os: macos
+              cpu: arm64
+            # On macos-latest, we get an arm cpu
+            builder: macos-latest
             shell: bash
           - target:
               os: windows

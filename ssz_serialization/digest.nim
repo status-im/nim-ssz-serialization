@@ -41,7 +41,8 @@ else:
 when PREFER_HASHTREE_SHA256 and
     (defined(arm64) or defined(amd64)) and (
       ((defined(linux) or defined(windows)) and defined(gcc)) or
-      ((defined(linux) or defined(macosx)) and defined(clang))):
+      (defined(linux) and defined(clang)) or
+      (defined(macosx) and defined(clang) and defined(arm64))):
   {.hint: "Hashtree SHA256 backend enabled".}
   const USE_HASHTREE_SHA256 = true
 
