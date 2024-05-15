@@ -40,8 +40,8 @@ type
 # The EIP is still under review, functionality may change
 # or go away without deprecation.
 template sszStableContainer*(n: int) {.pragma.}
-template sszMerkleizeAs*(s: typedesc) {.pragma.}
-template sszOneOf*(s: typedesc) {.pragma.}
+template sszMerkleizeAs*(b: typedesc) {.pragma.}
+template sszOneOf*(b: typedesc) {.pragma.}
 
 # `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
 template isStableContainer*(T: untyped): bool =
