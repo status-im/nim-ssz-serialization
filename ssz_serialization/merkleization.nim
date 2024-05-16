@@ -762,9 +762,9 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
             addField zeroHashes[0]
           inc fieldIndex
       mergeBranches(res, hash_tree_root(activeFields), res)
-    elif T.isMerkleizeAs:
+    elif T.isProfile:
       # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template B: untyped = T.getCustomPragmaVal(sszMerkleizeAs)
+      template B: untyped = T.getCustomPragmaVal(sszProfile)
       const N =
         when B.isStableContainer:
           B.getCustomPragmaVal(sszStableContainer)
@@ -1007,9 +1007,9 @@ func hashTreeRootAux[T](
     when T.isStableContainer:
       const N = T.getCustomPragmaVal(sszStableContainer)
       unsupported T
-    elif T.isMerkleizeAs:
+    elif T.isProfile:
       # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template B: untyped = T.getCustomPragmaVal(sszMerkleizeAs)
+      template B: untyped = T.getCustomPragmaVal(sszProfile)
       const N = B.getCustomPragmaVal(sszStableContainer)
       unsupported T
     # elif T.isCaseObject():

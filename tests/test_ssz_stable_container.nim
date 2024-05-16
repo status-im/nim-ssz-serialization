@@ -21,12 +21,12 @@ type
     radius: Opt[uint16]
 
   # Inherits merkleization format from `Shape`, but is serialized more compactly
-  Square {.sszMerkleizeAs: Shape.} = object
+  Square {.sszProfile: Shape.} = object
     side: uint16
     color: uint8
 
   # Inherits merkleization format from `Shape`, but is serialized more compactly
-  Circle {.sszMerkleizeAs: Shape.} = object
+  Circle {.sszProfile: Shape.} = object
     radius: uint16
     color: uint8
 
@@ -61,13 +61,13 @@ type
 
   # Inherits merkleization format from `ShapePair`,
   # and serializes more compactly
-  SquarePair {.sszMerkleizeAs: ShapePair.} = object
+  SquarePair {.sszProfile: ShapePair.} = object
     shape_1: Square
     shape_2: Square
 
   # Inherits merkleization format from `ShapePair`,
   # and reorders fields
-  CirclePair {.sszMerkleizeAs: ShapePair.} = object
+  CirclePair {.sszProfile: ShapePair.} = object
     shape_2: Circle
     shape_1: Circle
 
@@ -105,25 +105,25 @@ suite "SSZ StableContainer":
   test "Square":
     var
       square_bytes_stable = hexToSeqByte("03420001")
-      square_bytes_merkleizeas = hexToSeqByte("420001")
+      square_bytes_profile = hexToSeqByte("420001")
       square_root = ShapeRepr(
         value: ShapePayload(side: 0x42, color: 1, radius: 0),
         active_fields: BitArray[4](bytes: [0b0011'u8])).hash_tree_root()
       shapes = @[Shape(side: Opt.some 0x42'u16, color: 1)]
       squares = @[Square(side: 0x42, color: 1)]
-    squares.add shapes.mapIt Square.fromMerkleizeAsBase(it).get
+    squares.add shapes.mapIt Square.fromProfileBase(it).get
     shapes.add shapes.mapIt Shape(
       side: it.side, color: it.color, radius: it.radius)
-    shapes.add squares.mapIt it.toMerkleizeAsBase()
+    shapes.add squares.mapIt it.toProfileBase()
     squares.add squares.mapIt Square(side: it.side, color: it.color)
     check:
       shapes.toHashSet().card == 1
       squares.toHashSet().card == 1
       shapes.allIt SSZ.encode(it) == square_bytes_stable
-      squares.allIt SSZ.encode(it) == square_bytes_merkleizeas
+      squares.allIt SSZ.encode(it) == square_bytes_profile
       [
-        Square.fromMerkleizeAsBase(SSZ.decode(square_bytes_stable, Shape)).get,
-        SSZ.decode(square_bytes_merkleizeas, Square),
+        Square.fromProfileBase(SSZ.decode(square_bytes_stable, Shape)).get,
+        SSZ.decode(square_bytes_profile, Square),
         AnyShape.fromOneOfBase(
           SSZ.decode(square_bytes_stable, Shape)).get.squareData,
         AnyShape.fromOneOfBase(
@@ -133,14 +133,14 @@ suite "SSZ StableContainer":
       squares.allIt it.hash_tree_root() == square_root
     static: doAssert not compiles(Circle(side: 0x42, color: 1))
     check:
-      shapes.allIt Circle.fromMerkleizeAsBase(it).isNone
-      squares.allIt Circle.fromMerkleizeAsBase(it.toMerkleizeAsBase()).isNone
+      shapes.allIt Circle.fromProfileBase(it).isNone
+      squares.allIt Circle.fromProfileBase(it.toProfileBase()).isNone
     for shape in shapes.mitems():
       shape.side.ok 0x1337'u16
     for square in squares.mitems():
       square.side = 0x1337
     square_bytes_stable = hexToSeqByte("03371301")
-    square_bytes_merkleizeas = hexToSeqByte("371301")
+    square_bytes_profile = hexToSeqByte("371301")
     square_root = ShapeRepr(
       value: ShapePayload(side: 0x1337, color: 1, radius: 0),
       active_fields: BitArray[4](bytes: [0b0011'u8])).hash_tree_root()
@@ -148,10 +148,10 @@ suite "SSZ StableContainer":
       shapes.toHashSet().card == 1
       squares.toHashSet().card == 1
       shapes.allIt SSZ.encode(it) == square_bytes_stable
-      squares.allIt SSZ.encode(it) == square_bytes_merkleizeas
+      squares.allIt SSZ.encode(it) == square_bytes_profile
       [
-        Square.fromMerkleizeAsBase(SSZ.decode(square_bytes_stable, Shape)).get,
-        SSZ.decode(square_bytes_merkleizeas, Square),
+        Square.fromProfileBase(SSZ.decode(square_bytes_stable, Shape)).get,
+        SSZ.decode(square_bytes_profile, Square),
         AnyShape.fromOneOfBase(
           SSZ.decode(square_bytes_stable, Shape)).get.squareData,
         AnyShape.fromOneOfBase(
@@ -167,7 +167,7 @@ suite "SSZ StableContainer":
   test "Circle":
     let
       circle_bytes_stable = hexToSeqByte("06014200")
-      circle_bytes_merkleizeas = hexToSeqByte("420001")
+      circle_bytes_profile = hexToSeqByte("420001")
       circle_root = ShapeRepr(
         value: ShapePayload(side: 0, color: 1, radius: 0x42),
         active_fields: BitArray[4](bytes: [0b0110'u8])).hash_tree_root()
@@ -179,19 +179,19 @@ suite "SSZ StableContainer":
     var
       shapes = @[Shape(color: 1, radius: Opt.some 0x42'u16), modified_shape]
       circles = @[Circle(radius: 0x42, color: 1)]
-    circles.add shapes.mapIt Circle.fromMerkleizeAsBase(it).get
+    circles.add shapes.mapIt Circle.fromProfileBase(it).get
     shapes.add shapes.mapIt Shape(
       side: it.side, color: it.color, radius: it.radius)
-    shapes.add circles.mapIt it.toMerkleizeAsBase()
+    shapes.add circles.mapIt it.toProfileBase()
     circles.add circles.mapIt Circle(radius: it.radius, color: it.color)
     check:
       shapes.toHashSet().card == 1
       circles.toHashSet().card == 1
       shapes.allIt SSZ.encode(it) == circle_bytes_stable
-      circles.allIt SSZ.encode(it) == circle_bytes_merkleizeas
+      circles.allIt SSZ.encode(it) == circle_bytes_profile
       [
-        Circle.fromMerkleizeAsBase(SSZ.decode(circle_bytes_stable, Shape)).get,
-        SSZ.decode(circle_bytes_merkleizeas, Circle),
+        Circle.fromProfileBase(SSZ.decode(circle_bytes_stable, Shape)).get,
+        SSZ.decode(circle_bytes_profile, Circle),
         AnyShape.fromOneOfBase(
           SSZ.decode(circle_bytes_stable, Shape),
           circleAllowed = true).get.circleData].toHashSet().card == 1
@@ -199,15 +199,15 @@ suite "SSZ StableContainer":
       circles.allIt it.hash_tree_root() == circle_root
     static: doAssert not compiles(Square(radius: 0x42, color: 1))
     check:
-      shapes.allIt Square.fromMerkleizeAsBase(it).isNone
-      circles.allIt Square.fromMerkleizeAsBase(it.toMerkleizeAsBase()).isNone
+      shapes.allIt Square.fromProfileBase(it).isNone
+      circles.allIt Square.fromProfileBase(it.toProfileBase()).isNone
       AnyShape.fromOneOfBase(SSZ.decode(circle_bytes_stable, Shape)).isNone
 
   test "SquarePair":
     let
       square_pair_bytes_stable =
         hexToSeqByte("080000000c0000000342000103690001")
-      square_pair_bytes_merkleizeas = hexToSeqByte("420001690001")
+      square_pair_bytes_profile = hexToSeqByte("420001690001")
       square_pair_root = ShapePairRepr(
         shape_1: ShapeRepr(
           value: ShapePayload(side: 0x42, color: 1, radius: 0),
@@ -222,21 +222,21 @@ suite "SSZ StableContainer":
       square_pairs = @[SquarePair(
         shape_1: Square(side: 0x42, color: 1),
         shape_2: Square(side: 0x69, color: 1))]
-    square_pairs.add shape_pairs.mapIt SquarePair.fromMerkleizeAsBase(it).get
+    square_pairs.add shape_pairs.mapIt SquarePair.fromProfileBase(it).get
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
-    shape_pairs.add square_pairs.mapIt it.toMerkleizeAsBase()
+    shape_pairs.add square_pairs.mapIt it.toProfileBase()
     square_pairs.add square_pairs.mapIt(
       SquarePair(shape_1: it.shape_1, shape_2: it.shape_2))
     check:
       shape_pairs.toHashSet().card == 1
       square_pairs.toHashSet().card == 1
       shape_pairs.allIt SSZ.encode(it) == square_pair_bytes_stable
-      square_pairs.allIt SSZ.encode(it) == square_pair_bytes_merkleizeas
+      square_pairs.allIt SSZ.encode(it) == square_pair_bytes_profile
       [
-        SquarePair.fromMerkleizeAsBase(
+        SquarePair.fromProfileBase(
           SSZ.decode(square_pair_bytes_stable, ShapePair)).get,
-        SSZ.decode(square_pair_bytes_merkleizeas, SquarePair),
+        SSZ.decode(square_pair_bytes_profile, SquarePair),
         AnyShapePair.fromOneOfBase(
           SSZ.decode(square_pair_bytes_stable, ShapePair)).get.squareData,
         AnyShapePair.fromOneOfBase(
@@ -249,7 +249,7 @@ suite "SSZ StableContainer":
     let
       circle_pair_bytes_stable =
         hexToSeqByte("080000000c0000000601420006016900")
-      circle_pair_bytes_merkleizeas = hexToSeqByte("690001420001")
+      circle_pair_bytes_profile = hexToSeqByte("690001420001")
       circle_pair_root = ShapePairRepr(
         shape_1: ShapeRepr(
           value: ShapePayload(side: 0, color: 1, radius: 0x42),
@@ -264,21 +264,21 @@ suite "SSZ StableContainer":
       circle_pairs = @[CirclePair(
         shape_1: Circle(radius: 0x42, color: 1),
         shape_2: Circle(radius: 0x69, color: 1))]
-    circle_pairs.add shape_pairs.mapIt CirclePair.fromMerkleizeAsBase(it).get
+    circle_pairs.add shape_pairs.mapIt CirclePair.fromProfileBase(it).get
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
-    shape_pairs.add circle_pairs.mapIt it.toMerkleizeAsBase()
+    shape_pairs.add circle_pairs.mapIt it.toProfileBase()
     circle_pairs.add circle_pairs.mapIt(
       CirclePair(shape_1: it.shape_1, shape_2: it.shape_2))
     check:
       shape_pairs.toHashSet().card == 1
       circle_pairs.toHashSet().card == 1
       shape_pairs.allIt SSZ.encode(it) == circle_pair_bytes_stable
-      circle_pairs.allIt SSZ.encode(it) == circle_pair_bytes_merkleizeas
+      circle_pairs.allIt SSZ.encode(it) == circle_pair_bytes_profile
       [
-        CirclePair.fromMerkleizeAsBase(
+        CirclePair.fromProfileBase(
           SSZ.decode(circle_pair_bytes_stable, ShapePair)).get,
-        SSZ.decode(circle_pair_bytes_merkleizeas, CirclePair),
+        SSZ.decode(circle_pair_bytes_profile, CirclePair),
         AnyShapePair.fromOneOfBase(
           SSZ.decode(circle_pair_bytes_stable, ShapePair),
           circleAllowed = true).get.circleData].toHashSet().card == 1
@@ -297,8 +297,8 @@ suite "SSZ StableContainer":
     expect SerializationError:
       discard SSZ.decode(shape_bytes, Circle)
     check:
-      Square.fromMerkleizeAsBase(shape).isNone
-      Circle.fromMerkleizeAsBase(shape).isNone
+      Square.fromProfileBase(shape).isNone
+      Circle.fromProfileBase(shape).isNone
       AnyShape.fromOneOfBase(shape).isNone
 
   test "Unsupported (2)":
@@ -324,8 +324,8 @@ suite "SSZ StableContainer":
       if stream.readable:
         raise (ref SerializationError)(msg: "Remaining bytes in the input")
     check:
-      Square.fromMerkleizeAsBase(shape).isNone
-      Circle.fromMerkleizeAsBase(shape).isNone
+      Square.fromProfileBase(shape).isNone
+      Circle.fromProfileBase(shape).isNone
       AnyShape.fromOneOfBase(shape).isNone
 
   test "Unsupported (3)":

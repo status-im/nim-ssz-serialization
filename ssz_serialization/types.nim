@@ -40,7 +40,7 @@ type
 # The EIP is still under review, functionality may change
 # or go away without deprecation.
 template sszStableContainer*(n: int) {.pragma.}
-template sszMerkleizeAs*(b: typedesc) {.pragma.}
+template sszProfile*(b: typedesc) {.pragma.}
 template sszOneOf*(b: typedesc) {.pragma.}
 
 # `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
@@ -51,16 +51,16 @@ template isStableContainer*(T: untyped): bool =
     false
 
 # `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
-template isMerkleizeAs*(T: untyped): bool =
-  when compiles(T.hasCustomPragma(sszMerkleizeAs)):
-    T.hasCustomPragma(sszMerkleizeAs)
+template isProfile*(T: untyped): bool =
+  when compiles(T.hasCustomPragma(sszProfile)):
+    T.hasCustomPragma(sszProfile)
   else:
     false
 
-func getMerkleizeAsFields[V](
+func getProfileFields[V](
     v: typedesc[V]
-): tuple[base: HashSet[string], merkleizeAs: HashSet[string]] {.compileTime.} =
-  type B = V.getCustomPragmaVal(sszMerkleizeAs)
+): tuple[base: HashSet[string], profile: HashSet[string]] {.compileTime.} =
+  type B = V.getCustomPragmaVal(sszProfile)
 
   func getBaseFields(): HashSet[string] {.compileTime.} =
     var res: HashSet[string]
@@ -70,32 +70,32 @@ func getMerkleizeAsFields[V](
     res
   const baseFields = getBaseFields()
 
-  func getMerkleizeAsFields(): HashSet[string] {.compileTime.} =
+  func getProfileFields(): HashSet[string] {.compileTime.} =
     var res: HashSet[string]
     for fieldName, _ in fieldPairs(declval(V)):
       let name = fieldName.nimIdentNormalize()
       doAssert name in baseFields, $V & "." & name & " missing in " & $B
       doAssert not res.containsOrIncl name, $V & "." & name & " duplicated"
     res
-  const merkleizeAsFields = getMerkleizeAsFields()
+  const profileFields = getProfileFields()
 
   for fieldName, fieldValue in fieldPairs(declval(B)):
     let name = fieldName.nimIdentNormalize()
-    if name notin merkleizeAsFields:
+    if name notin profileFields:
       doAssert typeof(fieldValue) is Opt,
         "Required " & $B & "." & name & " missing in " & $V
 
-  (base: baseFields, merkleizeAs: merkleizeAsFields)
+  (base: baseFields, profile: profileFields)
 
-func fromMerkleizeAsBase*[V, B](v: typedesc[V], value: B): Opt[V] =
-  static: doAssert V.getCustomPragmaVal(sszMerkleizeAs) is B,
-    $V & " is not {.sszMerkleizeAs: " & $B & ".}"
-  const fields = getMerkleizeAsFields(V)
+func fromProfileBase*[V, B](v: typedesc[V], value: B): Opt[V] =
+  static: doAssert V.getCustomPragmaVal(sszProfile) is B,
+    $V & " is not {.sszProfile: " & $B & ".}"
+  const fields = getProfileFields(V)
 
-  macro createMerkleizeAs(): untyped =
+  macro createProfile(): untyped =
     var res = newStmtList()
     for name in fields.base:
-      if name in fields.merkleizeAs:
+      if name in fields.profile:
         continue
       let nameIdent = ident(name)
       res.add quote do:
@@ -105,7 +105,7 @@ func fromMerkleizeAsBase*[V, B](v: typedesc[V], value: B): Opt[V] =
     let resIdent = ident"res"
     res.add quote do:
       var `resIdent` = Opt.some(default(V))
-    for name in fields.merkleizeAs:
+    for name in fields.profile:
       let nameIdent = ident(name)
       res.add quote do:
         block:
@@ -116,9 +116,9 @@ func fromMerkleizeAsBase*[V, B](v: typedesc[V], value: B): Opt[V] =
                 return Opt.none(V)
             else:
               value.`nameIdent`
-          when typeof(dst).isMerkleizeAs:
-            when typeof(src) is typeof(dst).getCustomPragmaVal(sszMerkleizeAs):
-              dst = typeof(dst).fromMerkleizeAsBase(src).valueOr:
+          when typeof(dst).isProfile:
+            when typeof(src) is typeof(dst).getCustomPragmaVal(sszProfile):
+              dst = typeof(dst).fromProfileBase(src).valueOr:
                 return Opt.none(V)
             else:
               dst = src
@@ -127,17 +127,17 @@ func fromMerkleizeAsBase*[V, B](v: typedesc[V], value: B): Opt[V] =
     res.add quote do:
       `resIdent`
     res
-  createMerkleizeAs()
+  createProfile()
 
 macro createBase(
     value: untyped,
     fields: static[
-      tuple[base: HashSet[string], merkleizeAs: HashSet[string]]]): untyped =
+      tuple[base: HashSet[string], profile: HashSet[string]]]): untyped =
   var res = newStmtList()
   let resIdent = ident"res"
   res.add quote do:
-    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszMerkleizeAs)
-  for name in fields.merkleizeAs:
+    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszProfile)
+  for name in fields.profile:
     let nameIdent = ident(name)
     res.add quote do:
       block:
@@ -148,9 +148,9 @@ macro createBase(
         else:
           template dstType: untyped = typeof(`resIdent`.`nameIdent`)
           template setDst(val: untyped): untyped = `resIdent`.`nameIdent` = val
-        when typeof(src).isMerkleizeAs:
-          when typeof(src).getCustomPragmaVal(sszMerkleizeAs) is dstType():
-            setDst block: createBase(src(), getMerkleizeAsFields(typeof(src)))
+        when typeof(src).isProfile:
+          when typeof(src).getCustomPragmaVal(sszProfile) is dstType():
+            setDst block: createBase(src(), getProfileFields(typeof(src)))
           else:
             setDst src
         else:
@@ -159,10 +159,10 @@ macro createBase(
     `resIdent`
   res
 
-func toMerkleizeAsBase*[V](value: V): auto =
-  static: doAssert V.hasCustomPragma(sszMerkleizeAs),
-    $V & " is not {.sszMerkleizeAs.}"
-  createBase(value, getMerkleizeAsFields(V))
+func toProfileBase*[V](value: V): auto =
+  static: doAssert V.hasCustomPragma(sszProfile),
+    $V & " is not {.sszProfile.}"
+  createBase(value, getProfileFields(V))
 
 func createOneOf[O, K, B](o: typedesc[O], kind: Opt[K], value: B): Opt[O] =
   if kind.isNone:
@@ -173,7 +173,7 @@ func createOneOf[O, K, B](o: typedesc[O], kind: Opt[K], value: B): Opt[O] =
   for fieldName, fieldValue in fieldPairs(res.unsafeGet):
     doAssert not didSet, $O & " must only have 'kind' + 1 data member"
     when fieldName != "kind":
-      fieldValue = typeof(fieldValue).fromMerkleizeAsBase(value).valueOr:
+      fieldValue = typeof(fieldValue).fromProfileBase(value).valueOr:
         return Opt.none(O)
       didSet = true
   doAssert didSet, $O & " must have 1 data member per 'kind'"
@@ -194,7 +194,7 @@ func toOneOfBase*[O](value: O): auto =
   for fieldName, fieldValue in fieldPairs(value):
     doAssert not didSet, $O & " must only have 'kind' + 1 data member"
     when fieldName != "kind":
-      res = fieldValue.toMerkleizeAsBase()
+      res = fieldValue.toProfileBase()
       didSet = true
   doAssert didSet, $O & " must have 1 data member per 'kind'"
   res
