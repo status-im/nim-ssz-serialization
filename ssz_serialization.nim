@@ -154,6 +154,7 @@ proc writeElements[T](w: var SszWriter, value: openArray[T])
 proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
   trs "STARTING VAR SIZE TYPE"
 
+  mixin toSszType
   when value is HashArray|HashList:
     writeVarSizeType(w, value.data)
   elif value is array:
@@ -200,6 +201,58 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
           activeFields.setBit(fieldIndex)
         inc fieldIndex
       w.writeValue activeFields
+      var ctx = VarSizedWriterCtx(
+        offset: fixedSize,
+        fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
+      enumerateSubFields(value, field):
+        type F = type toSszType(field)
+        when F is Opt:
+          if field.isSome:
+            writeField w, ctx, astToStr(field), field.get
+        else:
+          writeField w, ctx, astToStr(field), field
+      endRecord w, ctx
+    elif type(value).isProfile:
+      const O = (func(): int =
+        var o = 0
+        default(typeof(value)).enumerateSubFields(f):
+          when typeof(toSszType(f)) is Opt:
+            o += 1
+        o)()
+      when O > 0:
+        var activeFields: BitArray[O]
+      var
+        optIndex = 0
+        fixedSize = 0
+      enumerateSubFields(value, field):
+        type F = type toSszType(field)
+        let isActive =
+          when F is Opt:
+            field.isSome
+          else:
+            true
+        if isActive:
+          const size =
+            when F is Opt:
+              type E = ElemType(F)
+              when isFixedSize(E):
+                fixedPortionSize(E)
+              else:
+                offsetSize
+            else:
+              when isFixedSize(F):
+                fixedPortionSize(F)
+              else:
+                offsetSize
+          fixedSize += size
+          when F is Opt:
+            doAssert optIndex < O
+            activeFields.setBit(optIndex)
+        when F is Opt:
+          inc optIndex
+      doAssert optIndex == O
+      when O > 0:
+        w.writeValue activeFields
       var ctx = VarSizedWriterCtx(
         offset: fixedSize,
         fixedParts: w.stream.delayFixedSizeWrite(fixedSize))

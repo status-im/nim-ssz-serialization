@@ -566,11 +566,9 @@ proc readSszValue*[T](
       if offset != inputLen:
         raiseMalformedSszError(T, "input has extra data")
     elif T.isProfile:
-      # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template B: untyped = T.getCustomPragmaVal(sszProfile)
       const O = (func(): int =
         var o = 0
-        default(T).enumerateSubfields(f):
+        default(T).enumerateSubFields(f):
           when typeof(toSszType(f)) is Opt:
             o += 1
         o)()
@@ -596,12 +594,10 @@ proc readSszValue*[T](
         offset = fixedSize
         varSizedFieldOffsets: seq[uint32]
       enumerateSubFields(val, field):
-        doAssert optIndex < O
         type F = type toSszType(field)
         let isActive =
-          when O == 0:
-            true
-          elif F is Opt:
+          when F is Opt:
+            doAssert optIndex < O
             activeFields[optIndex]
           else:
             true
@@ -653,7 +649,6 @@ proc readSszValue*[T](
         optIndex = 0
         var i = 0
         enumerateSubFields(val, field):
-          doAssert optIndex < O
           type F = type toSszType(field)
           const isFixedSized =
             when F is Opt:
@@ -663,9 +658,8 @@ proc readSszValue*[T](
               isFixedSize(F)
           when not isFixedSized:
             let isActive =
-              when O == 0:
-                true
-              elif F is Opt:
+              when F is Opt:
+                doAssert optIndex < O
                 activeFields[optIndex]
               else:
                 true
@@ -689,7 +683,7 @@ proc readSszValue*[T](
               offset += fieldSize
               inc i
           when F is Opt:
-            inc fieldIndex
+            inc optIndex
         doAssert i == (varSizedFieldOffsets.len - 1)
         doAssert optIndex == O
       if offset != inputLen:
