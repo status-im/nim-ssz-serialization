@@ -577,13 +577,18 @@ proc readSszValue*[T](
 
       let inputLen = uint32 input.len
       # `fixedPortionSize(T)`: https://github.com/nim-lang/Nim/issues/23564
-      const minimallyExpectedSize = uint32 fixedPortionSize(BitArray[O])
+      const minimallyExpectedSize =
+        when O > 0:
+          uint32 fixedPortionSize(BitArray[O])
+        else:
+          0'u32
       if inputLen < minimallyExpectedSize:
         raiseMalformedSszError(T, "input of insufficient size")
 
       let fixedSize = minimallyExpectedSize
-      var activeFields: BitArray[O]
-      readSszValue(input.toOpenArray(0, int(fixedSize - 1)), activeFields)
+      when O > 0:
+        var activeFields: BitArray[O]
+        readSszValue(input.toOpenArray(0, int(fixedSize - 1)), activeFields)
 
       val.reset()
       var
@@ -594,7 +599,9 @@ proc readSszValue*[T](
         doAssert optIndex < O
         type F = type toSszType(field)
         let isActive =
-          when F is Opt:
+          when O == 0:
+            true
+          elif F is Opt:
             activeFields[optIndex]
           else:
             true
@@ -639,6 +646,7 @@ proc readSszValue*[T](
             offset += offsetSize
         when F is Opt:
           inc optIndex
+      doAssert optIndex == O
 
       if varSizedFieldOffsets.len > 0:
         varSizedFieldOffsets.add inputLen - fixedSize
@@ -655,7 +663,9 @@ proc readSszValue*[T](
               isFixedSize(F)
           when not isFixedSized:
             let isActive =
-              when F is Opt:
+              when O == 0:
+                true
+              elif F is Opt:
                 activeFields[optIndex]
               else:
                 true
@@ -681,6 +691,7 @@ proc readSszValue*[T](
           when F is Opt:
             inc fieldIndex
         doAssert i == (varSizedFieldOffsets.len - 1)
+        doAssert optIndex == O
       if offset != inputLen:
         raiseMalformedSszError(T, "input has extra data")
     elif isCaseObject(T):
