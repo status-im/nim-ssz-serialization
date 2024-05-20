@@ -717,6 +717,22 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     when T.isStableContainer:
       const N = T.getCustomPragmaVal(sszStableContainer)
       fixedPortionSize(BitArray[N])
+    elif T.isProfile:
+      const O = (func(): int =
+        var o = 0
+        enumAllSerializedFields(T):
+          when toSszType(default FieldType) is Opt:
+            o += 1
+        o)()
+      when O > 0:
+        result += fixedPortionSize(BitArray[O])
+      enumAllSerializedFields(T):
+        when toSszType(default FieldType) is Opt:
+          discard
+        elif isFixedSize(FieldType):
+          result += fixedPortionSize(FieldType)
+        else:
+          result += offsetSize
     else:
       enumAllSerializedFields(T):
         when isFixedSize(FieldType):
