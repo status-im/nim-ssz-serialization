@@ -269,24 +269,24 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
 
       trs "WRITING SSZ Union"
 
-      # toSszType for enum is kept local here as we don't want enums to
-      # serialize in general, only for object variants.
-      # TODO: This is not sufficiant as it will still allow to parse enum
-      # fields in the object variant itself. Will probably need some macro
-      # which enumerates the fields instead to take specific action on the
-      # discriminator.
-      template toSszType[E: enum](x: E): uint8 =
-        uint8(x)
-
       # TODO: At this point, the assumption is a correct `isUnion` as described
       # above.
       enumerateSubFields(value, field):
-        type T = type toSszType(field)
-
-        when isFixedSize(T):
-          w.stream.writeFixedSized toSszType(field)
+        when typeof(field) is enum:
+          # toSszType for enum is kept local here as we don't want enums to
+          # serialize in general, only for object variants.
+          # TODO: This is not sufficiant as it will still allow to parse enum
+          # fields in the object variant itself. Will probably need some macro
+          # which enumerates the fields instead to take specific action on the
+          # discriminator.
+          w.stream.writeFixedSized uint8(field)
         else:
-          w.writeVarSizeType toSszType(field)
+          type T = type toSszType(field)
+
+          when isFixedSize(T):
+            w.stream.writeFixedSized toSszType(field)
+          else:
+            w.writeVarSizeType toSszType(field)
     else:
       trs "WRITING OBJECT"
       var ctx = beginRecord(w, type value)
