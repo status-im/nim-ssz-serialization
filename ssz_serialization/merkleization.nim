@@ -679,10 +679,13 @@ template indexAt(i: int): GeneralizedIndex =
   block:
     let v = indices[loopOrder[i]]
     if atLayer != 0:
-      let
-        n = leadingZeros(v) + 1 + atLayer
-        x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
-      rotateRight(x, n)
+      let n = leadingZeros(v) + 1 + atLayer
+      if n < 64:
+        let x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
+        rotateRight(x, n)
+      else:  # `v shl 64` doesn't shift and silently becomes a noop
+        doAssert n == 64
+        1.GeneralizedIndex
     else:
       v
 
@@ -826,7 +829,8 @@ func hashTreeRootAux[T](
   mixin hash_tree_root, toSszType
   when T is BasicType:
     for i in slice:
-      if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
+      if indexAt(i) != 1.GeneralizedIndex:
+        return unsupportedIndex
       hashTreeRootAux(x, rootAt(i))
   elif T is BitArray:
     ? hashTreeRootAux(x.bytes, indices, roots, loopOrder, slice, atLayer)
@@ -1004,93 +1008,249 @@ func hashTreeRootAux[T](
         i = j
       else: return unsupportedIndex
   elif T is object|tuple:
-    when T.isStableContainer:
-      const N = T.getCustomPragmaVal(sszStableContainer)
-      unsupported T
-    elif T.isProfile:
-      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template B: untyped = T.getCustomPragmaVal(sszProfile)
-      const N = B.getCustomPragmaVal(sszStableContainer)
-      unsupported T
-    # elif T.isCaseObject():
+    when false: discard
+    # when T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
     else:
       trs "MERKLEIZING FIELDS"
       const
-        totalChunks = totalSerializedFields(T)
+        isStableContainer =
+          when T.isStableContainer:
+            true
+          elif T.isProfile:
+            # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+            template B: untyped = T.getCustomPragmaVal(sszProfile)
+            B.isStableContainer
+          else:
+            false
+        totalChunks =
+          when T.isStableContainer:
+            T.getCustomPragmaVal(sszStableContainer)
+          elif T.isProfile:
+            # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+            template B: untyped = T.getCustomPragmaVal(sszProfile)
+            when B.isStableContainer:
+              B.getCustomPragmaVal(sszStableContainer)
+            else:
+              B.totalSerializedFields()
+          else:
+            T.totalSerializedFields()
         treeHeight = binaryTreeHeight(totalChunks)
         firstChunkIndex = nextPow2(totalChunks.uint64)
         chunkLayer = log2trunc(firstChunkIndex)
+      when isStableContainer and T.isProfile:
+        # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+        template B: untyped = T.getCustomPragmaVal(sszProfile)
+        macro fieldVal(name: static string): untyped =
+          let nameIdent = ident(name)
+          quote do:
+            x.`nameIdent`
+        template forAllFields(fieldVar, body: untyped): untyped =
+          for name, f in fieldPairs(declval(B)):
+            template fieldVar: untyped {.used, inject.} =
+              when compiles(fieldVal(name)):
+                fieldVal(name)
+              else:
+                static: doAssert typeof(f) is Opt,
+                  "Required " & $B & "." & name & " missing in " & $T
+                typeof(f).err()
+            body
+      else:
+        template forAllFields(fieldVar, body: untyped): untyped =
+          x.enumerateSubFields(fieldVar):
+            body
+      when isStableContainer:
+        var activeFields: BitArray[totalChunks]
+      type IndexKind {.pure.} = enum
+        Unknown,
+        Data,
+        MixIn,
+        Root
       var
         i = slice.a
+        atLayer = atLayer
         fieldIndex = 0.Limit
-        isActive = false
+        indexKind: IndexKind
         index {.noinit.}: GeneralizedIndex
         indexLayer {.noinit.}: int
         chunks {.noinit.}: Slice[Limit]
         merkleizer {.noinit.}: SszMerkleizer2[treeHeight]
         chunk {.noinit.}: Limit
         nextField {.noinit.}: Limit
-      x.enumerateSubFields(f):
+      forAllFields(f):
         if i <= slice.b:
-          if not isActive:
+          if indexKind == IndexKind.Unknown:
             index = indexAt(i)
             indexLayer = log2trunc(index)
-            nextField =
-              if indexLayer == chunkLayer:
-                chunkForIndex(index)
-              elif indexLayer < chunkLayer:
-                chunks = chunksForIndex(index)
-                merkleizer.topIndex = chunkLayer - indexLayer
-                merkleizer.totalChunks = 0
-                chunks.a
+            when isStableContainer:
+              if index == 1.GeneralizedIndex:
+                indexKind = IndexKind.Root
+              elif (index shr (indexLayer - 1)) == 3.GeneralizedIndex:
+                indexKind = IndexKind.MixIn
+                atLayer = atLayer + 1
+                index = indexAt(i)
+                indexLayer = log2trunc(index)
               else:
-                chunk = chunkContainingIndex(index)
-                chunk
-            isActive = true
-          if fieldIndex >= nextField:
-            if indexLayer == chunkLayer:
-              rootAt(i) = hash_tree_root(f)
-              inc i
-              isActive = false
-            elif indexLayer < chunkLayer:
-              addField f
-              if fieldIndex >= chunks.b:
-                rootAt(i) = getFinalHash(merkleizer)
-                inc i
-                isActive = false
+                indexKind = IndexKind.Data
+                atLayer = atLayer + 1
+                index = indexAt(i)
+                indexLayer = log2trunc(index)
             else:
-              var j = i + 1
-              while j <= slice.b:
-                let
-                  index = indexAt(j)
-                  indexLayer = log2trunc(index)
-                if indexLayer <= chunkLayer or
-                    chunkContainingIndex(index) != chunk:
-                  break
-                inc j
-              ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
-                                    atLayer + chunkLayer)
-              i = j
-              isActive = false
+              indexKind = IndexKind.Data
+            if indexKind == IndexKind.Data:
+              nextField =
+                if indexLayer == chunkLayer:
+                  chunkForIndex(index)
+                elif indexLayer < chunkLayer:
+                  chunks = chunksForIndex(index)
+                  merkleizer.topIndex = chunkLayer - indexLayer
+                  merkleizer.totalChunks = 0
+                  chunks.a
+                else:
+                  chunk = chunkContainingIndex(index)
+                  chunk
+          let isActive =
+            when isStableContainer and typeof(f) is Opt:
+              f.isSome
+            else:
+              true
+          when isStableContainer:
+            if isActive:
+              activeFields.setBit(fieldIndex)
+          if indexKind == IndexKind.Root:
+            if isActive:
+              when isStableContainer and typeof(f) is Opt:
+                addField f.unsafeGet
+              else:
+                addField f
+            else:
+              addField zeroHashes[0]
+          elif indexKind == IndexKind.Data:
+            if fieldIndex >= nextField:
+              if indexLayer == chunkLayer:
+                if isActive:
+                  when isStableContainer and typeof(f) is Opt:
+                    rootAt(i) = hash_tree_root(f.unsafeGet)
+                  else:
+                    rootAt(i) = hash_tree_root(f)
+                else:
+                  rootAt(i) = zeroHashes[0]
+                inc i
+                when isStableContainer:
+                  atLayer = atLayer - 1
+                indexKind.reset()
+              elif indexLayer < chunkLayer:
+                if isActive:
+                  when isStableContainer and typeof(f) is Opt:
+                    addField f.unsafeGet
+                  else:
+                    addField f
+                else:
+                  addField zeroHashes[0]
+                if fieldIndex >= chunks.b:
+                  rootAt(i) = getFinalHash(merkleizer)
+                  inc i
+                  when isStableContainer:
+                    atLayer = atLayer - 1
+                  indexKind.reset()
+              else:
+                var j = i + 1
+                while j <= slice.b:
+                  when isStableContainer:
+                    atLayer = atLayer - 1
+                  var
+                    index = indexAt(j)
+                    indexLayer = log2trunc(index)
+                  when isStableContainer:
+                    atLayer = atLayer + 1
+                    if index == 1.GeneralizedIndex or
+                        (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
+                      break
+                    index = indexAt(j)
+                    indexLayer = log2trunc(index)
+                  if indexLayer <= chunkLayer or
+                      chunkContainingIndex(index) != chunk:
+                    break
+                  inc j
+                if isActive:
+                  when isStableContainer and typeof(f) is Opt:
+                    ? f.unsafeGet.hash_tree_root_multi(
+                      indices, roots, loopOrder, i ..< j, atLayer + chunkLayer)
+                  else:
+                    var atLayer = atLayer + chunkLayer
+                    atLayer = atLayer - chunkLayer
+                    ? f.hash_tree_root_multi(
+                      indices, roots, loopOrder, i ..< j, atLayer + chunkLayer)
+                else:
+                  return unsupportedIndex
+                i = j
+                when isStableContainer:
+                  atLayer = atLayer - 1
+                indexKind.reset()
+          else:
+            doAssert indexKind == IndexKind.MixIn
         inc fieldIndex
-      doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
+      when isStableContainer:
+        doAssert log2trunc(fieldIndex.uint64) <= log2trunc(totalChunks.uint64)
+      else:
+        doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
       while i <= slice.b:
-        index = indexAt(i)
-        indexLayer = log2trunc(index)
-        if indexLayer == chunkLayer:
-          rootAt(i) = static(Digest())
-          inc i
-          isActive = false
-        elif indexLayer < chunkLayer:
-          if not isActive:
-            merkleizer.topIndex = chunkLayer - indexLayer
-            merkleizer.totalChunks = 0
-          rootAt(i) = getFinalHash(merkleizer)
-          inc i
-          isActive = false
-        else: return unsupportedIndex
+        if indexKind == IndexKind.Unknown:
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+          when isStableContainer:
+            if index == 1.GeneralizedIndex:
+              indexKind = IndexKind.Root
+            elif (index shr (indexLayer - 1)) == 3.GeneralizedIndex:
+              indexKind = IndexKind.MixIn
+              atLayer = atLayer + 1
+              index = indexAt(i)
+              indexLayer = log2trunc(index)
+            else:
+              indexKind = IndexKind.Data
+              atLayer = atLayer + 1
+              index = indexAt(i)
+              indexLayer = log2trunc(index)
+          else:
+            indexKind = IndexKind.Data
+          if indexKind == IndexKind.Data:
+            if indexLayer < chunkLayer:
+              merkleizer.topIndex = chunkLayer - indexLayer
+              merkleizer.totalChunks = 0
+        if indexKind == IndexKind.Root:
+          when isStableContainer:
+            mergeBranches(
+              getFinalHash(merkleizer),
+              hash_tree_root(activeFields),
+              rootAt(i))
+            inc i
+            indexKind.reset()
+          else:
+            raiseAssert "IndexKind.Root requires isStableContainer"
+        elif indexKind == IndexKind.Data:
+          if indexLayer == chunkLayer:
+            rootAt(i) = zeroHashes[0]
+            inc i
+            when isStableContainer:
+              atLayer = atLayer - 1
+            indexKind.reset()
+          elif indexLayer < chunkLayer:
+            rootAt(i) = getFinalHash(merkleizer)
+            inc i
+            when isStableContainer:
+              atLayer = atLayer - 1
+            indexKind.reset()
+          else:
+            return unsupportedIndex
+        else:
+          doAssert indexKind == IndexKind.MixIn
+          when isStableContainer:
+            ? activeFields.hash_tree_root_multi(
+              indices, roots, loopOrder, i .. slice.b, atLayer)
+            i = slice.b + 1
+          else:
+            raiseAssert "IndexKind.MixIn requires isStableContainer"
   else:
     unsupported T
   ok()

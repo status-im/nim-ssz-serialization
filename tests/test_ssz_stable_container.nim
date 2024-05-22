@@ -468,3 +468,46 @@ suite "SSZ StableContainer":
         radius: Opt.some 0x42'u16),
       serialized = "060600000042000102",
       root = "00fc0cecc200a415a07372d5d5b8bc7ce49f52504ed3da0336f80a26d811c7bf")
+
+  test "Merkleization":
+    type
+      StableFields {.sszStableContainer: 8.} = object
+        foo: Opt[uint32]
+        bar: Opt[uint64]
+        quix: Opt[uint64]
+        more: Opt[uint32]
+
+      FooFields {.sszProfile: StableFields.} = object
+        foo: uint32
+        more: Opt[uint32]
+
+      BarFields {.sszProfile: StableFields.} = object
+        bar: uint64
+        quix: uint64
+        more: Opt[uint32]
+
+    const
+      foo_profile = FooFields(foo: 42, more: Opt.some 69'u32)
+      foo_stable = foo_profile.toProfileBase()
+      bar_profile = BarFields(bar: 2, quix: 3, more: Opt.some 69'u32)
+      bar_stable = bar_profile.toProfileBase()
+      i = [3.GeneralizedIndex, 16, 17, 18, 19, 20]
+
+    check:
+      foo_profile.hash_tree_root(i) == foo_stable.hash_tree_root(i)
+      foo_profile.hash_tree_root(i) == Result[array[6, Digest], string].ok [
+        BitArray[8](bytes: [0b1001'u8]).hash_tree_root(),
+        42'u32.hash_tree_root(),
+        zeroHashes[0],
+        zeroHashes[0],
+        69'u32.hash_tree_root(),
+        zeroHashes[0]]
+
+      bar_profile.hash_tree_root(i) == bar_stable.hash_tree_root(i)
+      bar_profile.hash_tree_root(i) == Result[array[6, Digest], string].ok [
+        BitArray[8](bytes: [0b1110'u8]).hash_tree_root(),
+        zeroHashes[0],
+        2'u64.hash_tree_root(),
+        3'u64.hash_tree_root(),
+        69'u32.hash_tree_root(),
+        zeroHashes[0]]
