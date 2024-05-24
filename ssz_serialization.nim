@@ -316,7 +316,9 @@ func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
 
 func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   mixin toSszType
-  type T = type toSszType(value)
+
+  # `T` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template T: untyped = typeof toSszType(value)
 
   when isFixedSize(T):
     anonConst fixedPortionSize(T)
@@ -342,7 +344,7 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
       0
 
   elif T is object|tuple:
-    when T.isStableContainer:
+    when T.isStableContainer or T.isProfile:
       result = anonConst fixedPortionSize(T)
       enumerateSubFields(value, field):
         type F = type toSszType(field)
@@ -361,9 +363,9 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
                 offsetSize + sszSize(toSszType field.get)
             else:
               when isFixedSize(F):
-                anonConst fixedPortionSize(F)
+                0  # Already included in base `fixedPortionSize(T)`
               else:
-                offsetSize + sszSize(toSszType field)
+                sszSize(toSszType field)  # Offset already included
           result += size
     elif T.isCaseObject():
       isUnion(T)
