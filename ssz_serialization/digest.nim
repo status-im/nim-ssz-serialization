@@ -147,7 +147,21 @@ when USE_HASHTREE_SHA256:
   func digest64(
       output: pointer, input: pointer, count: uint64
   ) {.cdecl, gcsafe, raises: [].} =
-    digest(
+    template fallback(a: openArray[byte], res: var Digest) =
+      when USE_BLST_SHA256:
+        # BLST has a fast assembly optimized SHA256
+        res.data.bls_sha256_digest(a)
+      else:
+        res = block:
+          # We use the init-update-finish interface to avoid
+          # the expensive burning/clearing memory (20~30% perf)
+          var h {.noinit.}: DigestCtx
+          h.init()
+          h.update(a)
+          h.finish()
+
+    doAssert count == 1, "extend to multi-chunk when we start using it"
+    fallback(
       cast[ptr UncheckedArray[byte]](input).toOpenArray(0, 63),
       cast[ptr Digest](output)[],
     )
