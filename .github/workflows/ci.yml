@@ -22,6 +22,8 @@ jobs:
             cpu: i386
           - os: macos
             cpu: amd64
+          - os: macos
+            cpu: arm64
           - os: windows
             cpu: amd64
           #- os: windows
@@ -34,7 +36,14 @@ jobs:
             shell: bash
           - target:
               os: macos
+              cpu: amd64
             builder: macos-12
+            shell: bash
+          - target:
+              os: macos
+              cpu: arm64
+            # On macos-14, we get an M1 cpu
+            builder: macos-14
             shell: bash
           - target:
               os: windows
@@ -122,6 +131,8 @@ jobs:
         run: |
           if [[ '${{ matrix.target.cpu }}' == 'amd64' ]]; then
             PLATFORM=x64
+          elif [[ '${{ matrix.target.cpu }}' == 'arm64' ]]; then
+            PLATFORM=arm64
           else
             PLATFORM=x86
           fi
@@ -148,7 +159,7 @@ jobs:
       - name: Build Nim and Nimble
         run: |
           curl -O -L -s -S https://raw.githubusercontent.com/status-im/nimbus-build-system/master/scripts/build_nim.sh
-          env MAKE="${MAKE_CMD} -j${ncpu}" ARCH_OVERRIDE=${PLATFORM} NIM_COMMIT=${{ matrix.branch }} \
+          env MAKE="${MAKE_CMD} -j${ncpu}" V=1 ARCH_OVERRIDE=${PLATFORM} NIM_COMMIT=${{ matrix.branch }} \
             QUICK_AND_DIRTY_COMPILER=1 QUICK_AND_DIRTY_NIMBLE=1 CC=gcc \
             bash build_nim.sh nim csources dist/nimble NimBinaries
           echo '${{ github.workspace }}/nim/bin' >> $GITHUB_PATH

@@ -20,7 +20,7 @@ import nimcrypto/[hash, sha2], stew/ptrops, ./types
 
 const PREFER_BLST_SHA256* {.booldefine.} = true
 # TODO https://github.com/prysmaticlabs/hashtree/issues/28
-const PREFER_HASHTREE_SHA256* {.booldefine.} = not defined(arm64)
+const PREFER_HASHTREE_SHA256* {.booldefine.} = true
 
 when PREFER_BLST_SHA256:
   import blscurve
@@ -38,10 +38,11 @@ else:
   {.hint: "nimcrypto SHA256 backend enabled".}
   type DigestCtx* = sha2.sha256
 
-when PREFER_HASHTREE_SHA256 and
-    (defined(arm64) or defined(amd64)) and
-    ((defined(gcc) and (defined(linux) or defined(windows))) or
-      (defined(clang) and defined(linux))):
+when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
+  ((defined(linux) or defined(windows)) and defined(gcc)) or
+  (defined(linux) and defined(clang)) or
+  (defined(macosx) and defined(clang) and defined(arm64))
+):
   {.hint: "Hashtree SHA256 backend enabled".}
   const USE_HASHTREE_SHA256 = true
 
