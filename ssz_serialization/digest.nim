@@ -147,6 +147,11 @@ when USE_HASHTREE_SHA256:
   func digest64(
       output: pointer, input: pointer, count: uint64
   ) {.cdecl, gcsafe, raises: [].} =
+    # digest `count` 64-byte `input` blocks into `output`
+    let
+      input = cast[ptr byte](input)
+      output = cast[ptr byte](output)
+
     template fallback(a: openArray[byte], res: var Digest) =
       when USE_BLST_SHA256:
         # BLST has a fast assembly optimized SHA256
@@ -160,11 +165,11 @@ when USE_HASHTREE_SHA256:
           h.update(a)
           h.finish()
 
-    doAssert count == 1, "extend to multi-chunk when we start using it"
-    fallback(
-      cast[ptr UncheckedArray[byte]](input).toOpenArray(0, 63),
-      cast[ptr Digest](output)[],
-    )
+    for i in 0 ..< count:
+      fallback(
+        input.offset(int(i * 64)).makeOpenArray(64),
+        cast[ptr Digest](output.offset(int(i * 32)))[],
+      )
 
   if hashtree_init(nil) == 0:
     discard hashtree_init(digest64)
