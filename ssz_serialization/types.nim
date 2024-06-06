@@ -41,7 +41,6 @@ type
 # or go away without deprecation.
 template sszStableContainer*(n: int) {.pragma.}
 template sszProfile*(b: typedesc) {.pragma.}
-template sszOneOf*(b: typedesc) {.pragma.}
 
 # `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
 template isStableContainer*(T: untyped): bool =
@@ -183,41 +182,6 @@ func toProfileBase*[V](value: V): auto =
   static: doAssert V.hasCustomPragma(sszProfile),
     $V & " is not {.sszProfile.}"
   createBase(value, getProfileFields(V))
-
-func createOneOf[O, K, B](o: typedesc[O], kind: Opt[K], value: B): Opt[O] =
-  if kind.isNone:
-    return Opt.none(O)
-  var
-    res = Opt[O].some O(kind: kind.unsafeGet)
-    didSet = false
-  for fieldName, fieldValue in fieldPairs(res.unsafeGet):
-    doAssert not didSet, $O & " must only have 'kind' + 1 data member"
-    when fieldName != "kind":
-      fieldValue = typeof(fieldValue).fromProfileBase(value).valueOr:
-        return Opt.none(O)
-      didSet = true
-  doAssert didSet, $O & " must have 1 data member per 'kind'"
-  res
-
-template fromOneOfBase*[O, B](
-    o: typedesc[O], value: B, params: varargs[untyped]): Opt[O] =
-  block:
-    static: doAssert O.getCustomPragmaVal(sszOneOf) is B,
-      $O & " is not {.sszOneOf: " & $B & ".}"
-    o.createOneOf(selectFromBase.unpackArgs([value, params]), value)
-
-func toOneOfBase*[O](value: O): auto =
-  static: doAssert O.hasCustomPragma(sszOneOf), $O & " is not {.sszOneOf.}"
-  var
-    res: O.getCustomPragmaVal(sszOneOf)
-    didSet = false
-  for fieldName, fieldValue in fieldPairs(value):
-    doAssert not didSet, $O & " must only have 'kind' + 1 data member"
-    when fieldName != "kind":
-      res = fieldValue.toProfileBase()
-      didSet = true
-  doAssert didSet, $O & " must have 1 data member per 'kind'"
-  res
 
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection

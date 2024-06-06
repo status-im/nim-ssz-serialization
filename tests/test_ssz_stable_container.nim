@@ -14,69 +14,37 @@ import
   ../ssz_serialization, ../ssz_serialization/merkleization
 
 type
-  # Defines the common merkleization format and a portable serialization format
   Shape {.sszStableContainer: 4.} = object
     side: Opt[uint16]
     color: Opt[uint8]
     radius: Opt[uint16]
 
-  # Inherits merkleization format from `Shape`, but is serialized more compactly
   Square {.sszProfile: Shape.} = object
     side: uint16
     color: uint8
 
-  # Inherits merkleization format from `Shape`, but is serialized more compactly
   Circle {.sszProfile: Shape.} = object
     radius: uint16
     color: uint8
 
-  ShapeKind {.pure.} = enum
-    Square
-    Circle
-
-  AnyShape {.sszOneOf: Shape.} = object
-    case kind: ShapeKind
-    of ShapeKind.Square:
-      squareData: Square
-    of ShapeKind.Circle:
-      circleData: Circle
-
-func selectFromBase(value: Shape, circleAllowed = false): Opt[ShapeKind] =
-  if value.radius.isSome:
-    if not circleAllowed:
-      Opt.none ShapeKind
-    else:
-      Opt.some ShapeKind.Circle
-  elif value.side.isSome:
-    Opt.some ShapeKind.Square
-  else:
-    Opt.none ShapeKind
-
-type
-  # Defines a container with immutable scheme
-  # that contains two `StableContainer`
   ShapePair = object
     shape_1: Shape
     shape_2: Shape
 
-  # Inherits merkleization format from `ShapePair`,
-  # and serializes more compactly
   SquarePair {.sszProfile: ShapePair.} = object
     shape_1: Square
     shape_2: Square
 
-  # Inherits merkleization format from `ShapePair`,
-  # and reorders fields
   CirclePair {.sszProfile: ShapePair.} = object
     shape_2: Circle
     shape_1: Circle
 
-# Helper containers for merkleization testing
-type
+  # Helper containers for merkleization testing
   ShapePayload = object
     side: uint16
     color: uint8
     radius: uint16
+
   ShapeRepr = object
     value: ShapePayload
     active_fields: BitArray[4]
@@ -84,21 +52,6 @@ type
   ShapePairRepr = object
     shape_1: ShapeRepr
     shape_2: ShapeRepr
-
-  AnyShapePair {.sszOneOf: ShapePair.} = object
-    case kind: ShapeKind
-    of ShapeKind.Square:
-      squareData: SquarePair
-    of ShapeKind.Circle:
-      circleData: CirclePair
-
-func selectFromBase(value: ShapePair, circleAllowed = false): Opt[ShapeKind] =
-  let
-    typ_1 = ? value.shape_1.selectFromBase(circleAllowed)
-    typ_2 = ? value.shape_2.selectFromBase(circleAllowed)
-  if typ_1 != typ_2:
-    return Opt.none ShapeKind
-  Opt.some typ_1
 
 # https://github.com/ethereum/EIPs/blob/master/assets/eip-7495/tests.py
 suite "SSZ StableContainer":
@@ -123,12 +76,8 @@ suite "SSZ StableContainer":
       squares.allIt SSZ.encode(it) == square_bytes_profile
       [
         Square.fromProfileBase(SSZ.decode(square_bytes_stable, Shape)).get,
-        SSZ.decode(square_bytes_profile, Square),
-        AnyShape.fromOneOfBase(
-          SSZ.decode(square_bytes_stable, Shape)).get.squareData,
-        AnyShape.fromOneOfBase(
-          SSZ.decode(square_bytes_stable, Shape),
-          circleAllowed = true).get.squareData].toHashSet().card == 1
+        SSZ.decode(square_bytes_profile, Square)
+      ].toHashSet().card == 1
       shapes.allIt it.hash_tree_root() == square_root
       squares.allIt it.hash_tree_root() == square_root
     static: doAssert not compiles(Circle(side: 0x42, color: 1))
@@ -151,12 +100,7 @@ suite "SSZ StableContainer":
       squares.allIt SSZ.encode(it) == square_bytes_profile
       [
         Square.fromProfileBase(SSZ.decode(square_bytes_stable, Shape)).get,
-        SSZ.decode(square_bytes_profile, Square),
-        AnyShape.fromOneOfBase(
-          SSZ.decode(square_bytes_stable, Shape)).get.squareData,
-        AnyShape.fromOneOfBase(
-          SSZ.decode(square_bytes_stable, Shape),
-          circleAllowed = true).get.squareData,
+        SSZ.decode(square_bytes_profile, Square)
       ].toHashSet().card == 1
       shapes.allIt it.hash_tree_root() == square_root
       squares.allIt it.hash_tree_root() == square_root
@@ -192,17 +136,14 @@ suite "SSZ StableContainer":
       circles.allIt SSZ.encode(it) == circle_bytes_profile
       [
         Circle.fromProfileBase(SSZ.decode(circle_bytes_stable, Shape)).get,
-        SSZ.decode(circle_bytes_profile, Circle),
-        AnyShape.fromOneOfBase(
-          SSZ.decode(circle_bytes_stable, Shape),
-          circleAllowed = true).get.circleData].toHashSet().card == 1
+        SSZ.decode(circle_bytes_profile, Circle)
+      ].toHashSet().card == 1
       shapes.allIt it.hash_tree_root() == circle_root
       circles.allIt it.hash_tree_root() == circle_root
     static: doAssert not compiles(Square(radius: 0x42, color: 1))
     check:
       shapes.allIt Square.fromProfileBase(it).isNone
       circles.allIt Square.fromProfileBase(it.toProfileBase()).isNone
-      AnyShape.fromOneOfBase(SSZ.decode(circle_bytes_stable, Shape)).isNone
 
   test "SquarePair":
     let
@@ -237,12 +178,8 @@ suite "SSZ StableContainer":
       [
         SquarePair.fromProfileBase(
           SSZ.decode(square_pair_bytes_stable, ShapePair)).get,
-        SSZ.decode(square_pair_bytes_profile, SquarePair),
-        AnyShapePair.fromOneOfBase(
-          SSZ.decode(square_pair_bytes_stable, ShapePair)).get.squareData,
-        AnyShapePair.fromOneOfBase(
-          SSZ.decode(square_pair_bytes_stable, ShapePair),
-          circleAllowed = true).get.squareData].toHashSet().card == 1
+        SSZ.decode(square_pair_bytes_profile, SquarePair)
+      ].toHashSet().card == 1
       shape_pairs.allIt it.hash_tree_root() == square_pair_root
       square_pairs.allIt it.hash_tree_root() == square_pair_root
 
@@ -280,9 +217,7 @@ suite "SSZ StableContainer":
         CirclePair.fromProfileBase(
           SSZ.decode(circle_pair_bytes_stable, ShapePair)).get,
         SSZ.decode(circle_pair_bytes_profile, CirclePair),
-        AnyShapePair.fromOneOfBase(
-          SSZ.decode(circle_pair_bytes_stable, ShapePair),
-          circleAllowed = true).get.circleData].toHashSet().card == 1
+      ].toHashSet().card == 1
       shape_pairs.allIt it.hash_tree_root() == circle_pair_root
       circle_pairs.allIt it.hash_tree_root() == circle_pair_root
 
@@ -300,7 +235,6 @@ suite "SSZ StableContainer":
     check:
       Square.fromProfileBase(shape).isNone
       Circle.fromProfileBase(shape).isNone
-      AnyShape.fromOneOfBase(shape).isNone
 
   test "Unsupported (2)":
     let
@@ -329,7 +263,6 @@ suite "SSZ StableContainer":
     check:
       Square.fromProfileBase(shape).isNone
       Circle.fromProfileBase(shape).isNone
-      AnyShape.fromOneOfBase(shape).isNone
 
   test "Unsupported (3)":
     expect SerializationError:
