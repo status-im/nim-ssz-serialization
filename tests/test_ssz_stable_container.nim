@@ -24,20 +24,20 @@ type
     color: uint8
 
   Circle {.sszProfile: Shape.} = object
-    radius: uint16
     color: uint8
+    radius: uint16
 
   ShapePair = object
     shape_1: Shape
     shape_2: Shape
 
-  SquarePair {.sszProfile: ShapePair.} = object
+  SquarePair = object
     shape_1: Square
     shape_2: Square
 
-  CirclePair {.sszProfile: ShapePair.} = object
-    shape_2: Circle
+  CirclePair = object
     shape_1: Circle
+    shape_2: Circle
 
   # Helper containers for merkleization testing
   ShapePayload = object
@@ -111,7 +111,7 @@ suite "SSZ StableContainer":
   test "Circle":
     let
       circle_bytes_stable = hexToSeqByte("06014200")
-      circle_bytes_profile = hexToSeqByte("420001")
+      circle_bytes_profile = hexToSeqByte("014200")
       circle_root = ShapeRepr(
         value: ShapePayload(side: 0, color: 1, radius: 0x42),
         active_fields: BitArray[4](bytes: [0b0110'u8])).hash_tree_root()
@@ -164,10 +164,14 @@ suite "SSZ StableContainer":
       square_pairs = @[SquarePair(
         shape_1: Square(side: 0x42, color: 1),
         shape_2: Square(side: 0x69, color: 1))]
-    square_pairs.add shape_pairs.mapIt SquarePair.fromProfileBase(it).get
+    square_pairs.add shape_pairs.mapIt SquarePair(
+      shape_1: Square.fromProfileBase(it.shape_1).get,
+      shape_2: Square.fromProfileBase(it.shape_2).get)
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
-    shape_pairs.add square_pairs.mapIt it.toProfileBase()
+    shape_pairs.add square_pairs.mapIt ShapePair(
+      shape_1: it.shape_1.toProfileBase(),
+      shape_2: it.shape_2.toProfileBase())
     square_pairs.add square_pairs.mapIt(
       SquarePair(shape_1: it.shape_1, shape_2: it.shape_2))
     check:
@@ -176,8 +180,11 @@ suite "SSZ StableContainer":
       shape_pairs.allIt SSZ.encode(it) == square_pair_bytes_stable
       square_pairs.allIt SSZ.encode(it) == square_pair_bytes_profile
       [
-        SquarePair.fromProfileBase(
-          SSZ.decode(square_pair_bytes_stable, ShapePair)).get,
+        SquarePair(
+          shape_1: Square.fromProfileBase(
+            SSZ.decode(square_pair_bytes_stable, ShapePair).shape_1).get,
+          shape_2: Square.fromProfileBase(
+            SSZ.decode(square_pair_bytes_stable, ShapePair).shape_2).get),
         SSZ.decode(square_pair_bytes_profile, SquarePair)
       ].toHashSet().card == 1
       shape_pairs.allIt it.hash_tree_root() == square_pair_root
@@ -187,7 +194,7 @@ suite "SSZ StableContainer":
     let
       circle_pair_bytes_stable =
         hexToSeqByte("080000000c0000000601420006016900")
-      circle_pair_bytes_profile = hexToSeqByte("690001420001")
+      circle_pair_bytes_profile = hexToSeqByte("014200016900")
       circle_pair_root = ShapePairRepr(
         shape_1: ShapeRepr(
           value: ShapePayload(side: 0, color: 1, radius: 0x42),
@@ -202,10 +209,14 @@ suite "SSZ StableContainer":
       circle_pairs = @[CirclePair(
         shape_1: Circle(radius: 0x42, color: 1),
         shape_2: Circle(radius: 0x69, color: 1))]
-    circle_pairs.add shape_pairs.mapIt CirclePair.fromProfileBase(it).get
+    circle_pairs.add shape_pairs.mapIt CirclePair(
+      shape_1: Circle.fromProfileBase(it.shape_1).get,
+      shape_2: Circle.fromProfileBase(it.shape_2).get)
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
-    shape_pairs.add circle_pairs.mapIt it.toProfileBase()
+    shape_pairs.add circle_pairs.mapIt ShapePair(
+      shape_1: it.shape_1.toProfileBase(),
+      shape_2: it.shape_2.toProfileBase())
     circle_pairs.add circle_pairs.mapIt(
       CirclePair(shape_1: it.shape_1, shape_2: it.shape_2))
     check:
@@ -214,9 +225,12 @@ suite "SSZ StableContainer":
       shape_pairs.allIt SSZ.encode(it) == circle_pair_bytes_stable
       circle_pairs.allIt SSZ.encode(it) == circle_pair_bytes_profile
       [
-        CirclePair.fromProfileBase(
-          SSZ.decode(circle_pair_bytes_stable, ShapePair)).get,
-        SSZ.decode(circle_pair_bytes_profile, CirclePair),
+        CirclePair(
+          shape_1: Circle.fromProfileBase(
+            SSZ.decode(circle_pair_bytes_stable, ShapePair).shape_1).get,
+          shape_2: Circle.fromProfileBase(
+            SSZ.decode(circle_pair_bytes_stable, ShapePair).shape_2).get),
+        SSZ.decode(circle_pair_bytes_profile, CirclePair)
       ].toHashSet().card == 1
       shape_pairs.allIt it.hash_tree_root() == circle_pair_root
       circle_pairs.allIt it.hash_tree_root() == circle_pair_root
@@ -291,7 +305,7 @@ suite "SSZ StableContainer":
           radius: Opt.some 0x42'u16),
         square: Square(side: 0x42, color: 1),
         circle: Circle(radius: 0x42, color: 1))
-      container_bytes = hexToSeqByte("0a000000420001420001074200014200")
+      container_bytes = hexToSeqByte("0a000000420001014200074200014200")
     check:
       SSZ.encode(container) == container_bytes
       SSZ.decode(container_bytes, ShapeContainer) == container

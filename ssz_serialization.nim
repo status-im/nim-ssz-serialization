@@ -179,9 +179,9 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
         fixedSize = 0
       value.enumInstanceSerializedFields(_ {.used.}, field):
         if field.isSome:
-          template FieldType: untyped = typeof(field).T
-          when FieldType.isFixedSize:
-            fixedSize += static(FieldType.fixedPortionSize)
+          template F: untyped = typeof(field).T
+          when F.isFixedSize:
+            fixedSize += static(F.fixedPortionSize)
           else:
             fixedSize += offsetSize
           activeFields.setBit(fieldIndex)
@@ -334,9 +334,9 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
       var total = static(BitArray[N].fixedPortionSize)
       value.enumInstanceSerializedFields(_ {.used.}, field):
         if field.isSome:
-          template FieldType: untyped = typeof(field).T
-          when FieldType.isFixedSize:
-            total += static(FieldType.fixedPortionSize)
+          template F: untyped = typeof(field).T
+          when F.isFixedSize:
+            total += static(F.fixedPortionSize)
           else:
             total += offsetSize + field.sszSize
       total

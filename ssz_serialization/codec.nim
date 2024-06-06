@@ -236,6 +236,14 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
 func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
   initSszUnionImpl(T, input)
 
+func read(F: typedesc, input: openArray[byte]): F {.raises: [SszError].} =
+  when compiles(F.fromSszBytes(input)):
+    F.fromSszBytes(input)
+  else:
+    var f: F
+    readSszValue(input, f)
+    f
+
 proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
   mixin fromSszBytes, toSszType, readSszValue
@@ -453,14 +461,12 @@ proc readSszValue*[T](
       const N = T.getCustomPragmaVal(sszStableContainer)
 
       let inputLen = input.len
-      # `fixedPortionSize(T)`: https://github.com/nim-lang/Nim/issues/23564
       const numPrefixBytes = BitArray[N].fixedPortionSize
       if inputLen < numPrefixBytes:
         raiseMalformedSszError(T, "Scope too small for " &
           "`{.sszStableContainer: " & $N & ".}` active fields")
-      var activeFields: BitArray[N]
-      readSszValue(input.toOpenArray(0, int(numPrefixBytes - 1)), activeFields)
-      var offset = numPrefixBytes
+      let activeFields = BitArray[N].read(
+        input.toOpenArray(0, numPrefixBytes - 1))
 
       for fieldIndex in T.totalSerializedFields ..< N:
         if activeFields[fieldIndex]:
@@ -469,17 +475,18 @@ proc readSszValue*[T](
       val.reset()
       var
         fieldIndex = 0
+        offset = numPrefixBytes
         dynFieldOffsets: seq[int]
       val.enumInstanceSerializedFields(fieldName, field):
         if activeFields[fieldIndex]:
-          template FieldType: untyped = typeof(field).T
-          when FieldType.isFixedSize:
-            const fieldSize = FieldType.fixedPortionSize
+          template F: untyped = typeof(field).T
+          when F.isFixedSize:
+            const fieldSize = F.fixedPortionSize
             if inputLen - offset < fieldSize:
               raiseMalformedSszError(T, "Scope too small for " &
-                "`" & fieldName & "` of type `" & $FieldType & "`")
-            field.ok FieldType
-              .fromSszBytes input.toOpenArray(offset, offset + fieldSize - 1)
+                "`" & fieldName & "` of type `" & $F & "`")
+            field.ok F.read(
+              input.toOpenArray(offset, offset + fieldSize - 1))
             offset += fieldSize
           else:
             if inputLen - offset < offsetSize:
@@ -498,14 +505,14 @@ proc readSszValue*[T](
         fieldIndex = 0
         var i = 0
         val.enumInstanceSerializedFields(_ {.used.}, field):
-          template FieldType: untyped = typeof(field).T
-          when not FieldType.isFixedSize:
+          template F: untyped = typeof(field).T
+          when not F.isFixedSize:
             if activeFields[fieldIndex]:
               if dynFieldOffsets[i] != offset - numPrefixBytes:
                 raiseMalformedSszError(T, "Field offset invalid")
               let fieldSize = dynFieldOffsets[i + 1] - dynFieldOffsets[i]
-              field.ok FieldType
-                .fromSszBytes input.toOpenArray(offset, offset + fieldSize - 1)
+              field.ok F.read(
+                input.toOpenArray(offset, offset + fieldSize - 1))
               offset += fieldSize
               inc i
           inc fieldIndex
@@ -513,128 +520,88 @@ proc readSszValue*[T](
       if offset != inputLen:
         raiseMalformedSszError(T, "Unexpected extra data after object")
     elif T.isProfile:
-      const O = (func(): int =
-        var o = 0
-        default(T).enumerateSubFields(f):
-          when typeof(toSszType(f)) is Opt:
-            o += 1
-        o)()
+      static: T.ensureIsValidProfile()
+      const O = T.numOptionalFields
+      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+      template B: untyped = T.getCustomPragmaVal(sszProfile)
 
-      let inputLen = uint32 input.len
-      # `fixedPortionSize(T)`: https://github.com/nim-lang/Nim/issues/23564
-      const minimallyExpectedSize =
-        when O > 0:
-          uint32 fixedPortionSize(BitArray[O])
-        else:
-          0'u32
-      if inputLen < minimallyExpectedSize:
-        raiseMalformedSszError(T, "input of insufficient size")
-
-      let fixedSize = minimallyExpectedSize
+      let inputLen = input.len
       when O > 0:
-        var activeFields: BitArray[O]
-        readSszValue(input.toOpenArray(0, int(fixedSize - 1)), activeFields)
+        const numPrefixBytes = BitArray[O].fixedPortionSize
+        if inputLen < numPrefixBytes:
+          raiseMalformedSszError(T, "Scope too small for " &
+            "`{.sszProfile: " & $B & ".}` optional fields")
+        let optionalFields = BitArray[O].read(
+          input.toOpenArray(0, numPrefixBytes - 1))
+      else:
+        const numPrefixBytes = 0
 
       val.reset()
       var
         optIndex = 0
-        offset = fixedSize
-        varSizedFieldOffsets: seq[uint32]
-      enumerateSubFields(val, field):
-        type F = type toSszType(field)
-        let isActive =
-          when F is Opt:
-            doAssert optIndex < O
-            activeFields[optIndex]
-          else:
-            true
-        if isActive:
-          const fieldSize =
-            when F is Opt:
-              type E = type toSszType(declval ElemType(F))
-              when isFixedSize(E):
-                Opt.some uint32 fixedPortionSize(E)
-              else:
-                Opt.none uint32
-            else:
-              when isFixedSize(F):
-                Opt.some uint32 fixedPortionSize(F)
-              else:
-                Opt.none uint32
-          if fieldSize.isSome:
-            if inputLen - offset < fieldSize.unsafeGet:
-              raiseMalformedSszError(T, "input of insufficient size")
-            when F is Opt:
-              type E = type toSszType(declval ElemType(F))
-              field.ok(default(E))
-              readSszValue(
-                input.toOpenArray(
-                  int(offset), int(offset + fieldSize.unsafeGet - 1)),
-                field.unsafeGet)
+        offset = numPrefixBytes
+        dynFieldOffsets: seq[int]
+      val.enumInstanceSerializedFields(fieldName, field):
+        when typeof(field) is Opt:
+          let hasField = optionalFields[optIndex]
+          inc optIndex
+          template F: untyped = typeof(field).T
+        else:
+          const hasField = true
+          template F: untyped = typeof(field)
+        if hasField:
+          when F.isFixedSize:
+            const fieldSize = F.fixedPortionSize
+            if inputLen - offset < fieldSize:
+              raiseMalformedSszError(T, "Scope too small for " &
+                "`" & fieldName & "` of type `" & $F & "`")
+            when typeof(field) is Opt:
+              field.ok F.read(
+                input.toOpenArray(offset, offset + fieldSize - 1))
             else:
               readSszValue(
-                input.toOpenArray(
-                  int(offset), int(offset + fieldSize.unsafeGet - 1)),
-                field)
-            offset += fieldSize.unsafeGet
+                input.toOpenArray(offset, offset + fieldSize - 1), field)
+            offset += fieldSize
           else:
             if inputLen - offset < offsetSize:
-              raiseMalformedSszError(T, "input of insufficient size")
-            varSizedFieldOffsets.add readOffsetUnchecked(int(offset))
-            if varSizedFieldOffsets[^1] > inputLen - fixedSize:
-              raiseMalformedSszError(T, "field offset past input end")
-            if varSizedFieldOffsets.len > 1 and
-                varSizedFieldOffsets[^1] < varSizedFieldOffsets[^2]:
-              raiseMalformedSszError(T, "field offset not past previous one")
+              raiseMalformedSszError(T, "Scope too small for " &
+                "`" & fieldName & "` offset")
+            dynFieldOffsets.add readOffsetUnchecked(offset)
+            if dynFieldOffsets[^1] > inputLen - fixedSize:
+              raiseMalformedSszError(T, "Field offset past end")
+            if dynFieldOffsets.len > 1 and
+                dynFieldOffsets[^1] < dynFieldOffsets[^2]:
+              raiseMalformedSszError(T, "Field offset not larger than previous")
             offset += offsetSize
-        when F is Opt:
-          inc optIndex
       doAssert optIndex == O
-
-      if varSizedFieldOffsets.len > 0:
-        varSizedFieldOffsets.add inputLen - fixedSize
+      if dynFieldOffsets.len > 0:
+        dynFieldOffsets.add inputLen - numPrefixBytes
         optIndex = 0
         var i = 0
-        enumerateSubFields(val, field):
-          type F = type toSszType(field)
-          const isFixedSized =
-            when F is Opt:
-              type E = type toSszType(declval ElemType(F))
-              isFixedSize(E)
-            else:
-              isFixedSize(F)
-          when not isFixedSized:
-            let isActive =
-              when F is Opt:
-                doAssert optIndex < O
-                activeFields[optIndex]
-              else:
-                true
-            if isActive:
-              doAssert varSizedFieldOffsets.len > i + 1
-              if varSizedFieldOffsets[i] != offset - fixedSize:
-                raiseMalformedSszError(T, "field offset invalid")
-              let fieldSize = varSizedFieldOffsets[i + 1] - (offset - fixedSize)
-              when F is Opt:
-                type E = type toSszType(declval ElemType(F))
-                field.ok(default(E))
-                readSszValue(
-                  input.toOpenArray(
-                    int(offset), int(offset + fieldSize - 1)),
-                  field.unsafeGet)
+        val.enumInstanceSerializedFields(_ {.used.}, field):
+          when typeof(field) is Opt:
+            let hasField = optionalFields[optIndex]
+            inc optIndex
+            template F: untyped = typeof(field).T
+          else:
+            const hasField = true
+            template F: untyped = typeof(field)
+          if hasField:
+            when not F.isFixedSize:
+              if dynFieldOffsets[i] != offset - numPrefixBytes:
+                raiseMalformedSszError(T, "Field offset invalid")
+              let fieldSize = dynFieldOffsets[i + 1] - dynFieldOffsets[i]
+              when typeof(field) is Opt:
+                field.ok F.read(
+                  input.toOpenArray(offset, offset + fieldSize - 1))
               else:
                 readSszValue(
-                  input.toOpenArray(
-                    int(offset), int(offset + fieldSize - 1)),
-                  field)
+                  input.toOpenArray(offset, offset + fieldSize - 1), field)
               offset += fieldSize
               inc i
-          when F is Opt:
-            inc optIndex
-        doAssert i == (varSizedFieldOffsets.len - 1)
-        doAssert optIndex == O
+        doAssert i == (dynFieldOffsets.len - 1)
       if offset != inputLen:
-        raiseMalformedSszError(T, "input has extra data")
+        raiseMalformedSszError(T, "Unexpected extra data after object")
     elif isCaseObject(T):
       isUnion(type(val))
       val = initSszUnion(type(val), input)

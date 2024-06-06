@@ -57,6 +57,7 @@ template isProfile*(T: untyped): bool =
     false
 
 func ensureIsValidStableContainer*(T: typedesc) {.compileTime.} =
+  static: doAssert T.isStableContainer
   const N = T.getCustomPragmaVal(sszStableContainer)
   doAssert N >= 0, "Unsupported capacity: " &
     "`" & $T & " {.sszStableContainer: " & $N & ".}`"
@@ -73,6 +74,61 @@ func ensureIsValidStableContainer*(T: typedesc) {.compileTime.} =
     inc n
   doAssert n <= N, "`" & $T & "` is `{.sszStableContainer: " & $N & ".}` " &
     "but contains " & $n & " fields"
+
+func numOptionalFields*(T: typedesc): int {.compileTime.} =
+  static: doAssert T.isProfile
+  var o = 0
+  T.enumAllSerializedFields:
+    when FieldType is Opt:
+      inc o
+  o
+
+func hasCompatibleMerkleization(
+    T: typedesc, B: typedesc): bool {.compileTime.} =
+  when T is B and B is T:
+    true
+  else:
+    false
+
+func ensureIsValidProfile*(T: typedesc) {.compileTime.} =
+  static: doAssert T.isProfile
+  # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template B: untyped = T.getCustomPragmaVal(sszProfile)
+  static: doAssert B.isStableContainer, "Invalid base type: " &
+    "`" & $T & " {.sszProfile: " & $B & ".}`"
+  static: B.ensureIsValidStableContainer()
+
+  var fieldNames: seq[string]
+  B.enumAllSerializedFields:
+    fieldNames.add realFieldName.nimIdentNormalize()
+
+  macro baseType(name: static string): untyped =
+    let nameIdent = ident(name)
+    quote do:
+      typeof default(B).`nameIdent`
+
+  var lastFieldIndex = -1
+  T.enumAllSerializedFields:
+    doAssert fieldCaseDiscriminator == "",
+      "`Profile` types must not be case objects but " &
+      "`" & $T & "." & realFieldName & "` requires " &
+      "`" & fieldCaseDiscriminator & "`"
+    let fieldIndex = fieldNames.find(realFieldName.nimIdentNormalize())
+    doAssert fieldIndex >= 0,
+      "`" & $T & "` fields must exist in the base type but " &
+      "`" & realFieldName & "` is not defined in `" & $B & "`"
+    doAssert fieldIndex > lastFieldIndex,
+      "`" & $T & "` fields must have the same order as in the base type but " &
+      "`" & realFieldName & "` is defined earlier than in `" & $B & "`"
+    lastFieldIndex = fieldIndex
+    when FieldType is Opt:
+      template F: untyped = FieldType.T
+    else:
+      template F: untyped = FieldType
+    doAssert F.hasCompatibleMerkleization(baseType(realFieldName).T),
+      "`" & $T & "." & realFieldName & "` has type `" & $F & "`, " &
+      "incompatible with base field `" & $B & "." & realFieldName & "` " &
+      "of type " & $realFieldName.baseType.T
 
 func getProfileFields[V](
     v: typedesc[V]
