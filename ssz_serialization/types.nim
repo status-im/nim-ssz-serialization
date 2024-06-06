@@ -161,12 +161,14 @@ macro createBase(
       block:
         template src: untyped = `value`.`nameIdent`
         when `resIdent`.`nameIdent` is Opt and src isnot Opt:
-          template dstType: untyped = typeof(`resIdent`.`nameIdent`).T
           template setDst(val: untyped): untyped = `resIdent`.`nameIdent`.ok val
         else:
-          template dstType: untyped = typeof(`resIdent`.`nameIdent`)
           template setDst(val: untyped): untyped = `resIdent`.`nameIdent` = val
         when typeof(src).isProfile:
+          when `resIdent`.`nameIdent` is Opt and src isnot Opt:
+            template dstType: untyped = typeof(`resIdent`.`nameIdent`).T
+          else:
+            template dstType: untyped = typeof(`resIdent`.`nameIdent`)
           when typeof(src).getCustomPragmaVal(sszProfile) is dstType():
             setDst block: createBase(src(), getProfileFields(typeof(src)))
           else:
