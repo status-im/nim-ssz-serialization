@@ -57,6 +57,24 @@ template isProfile*(T: untyped): bool =
   else:
     false
 
+func ensureIsValidStableContainer*(T: typedesc) {.compileTime.} =
+  const N = T.getCustomPragmaVal(sszStableContainer)
+  doAssert N >= 0, "Unsupported capacity: " &
+    "`" & $T & " {.sszStableContainer: " & $N & ".}`"
+
+  var n = 0
+  T.enumAllSerializedFields:
+    doAssert fieldCaseDiscriminator == "",
+      "`StableContainer` types must not be case objects but " &
+      "`" & $T & "." & realFieldName & "` requires " &
+      "`" & fieldCaseDiscriminator & "`"
+    doAssert FieldType is Opt,
+      "`StableContainer` fields must be `Opt[T]` but " &
+      "`" & $T & "." & realFieldName & "` has type `" & $FieldType & "`"
+    inc n
+  doAssert n <= N, "`" & $T & "` is `{.sszStableContainer: " & $N & ".}` " &
+    "but contains " & $n & " fields"
+
 func getProfileFields[V](
     v: typedesc[V]
 ): tuple[base: HashSet[string], profile: HashSet[string]] {.compileTime.} =

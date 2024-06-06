@@ -449,6 +449,7 @@ proc readSszValue*[T](
 
   elif val is object|tuple:
     when T.isStableContainer:
+      static: T.ensureIsValidStableContainer()
       const N = T.getCustomPragmaVal(sszStableContainer)
 
       let inputLen = uint32 input.len

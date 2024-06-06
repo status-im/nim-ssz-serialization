@@ -17,7 +17,7 @@ type
   # Defines the common merkleization format and a portable serialization format
   Shape {.sszStableContainer: 4.} = object
     side: Opt[uint16]
-    color: uint8
+    color: Opt[uint8]
     radius: Opt[uint16]
 
   # Inherits merkleization format from `Shape`, but is serialized more compactly
@@ -109,7 +109,7 @@ suite "SSZ StableContainer":
       square_root = ShapeRepr(
         value: ShapePayload(side: 0x42, color: 1, radius: 0),
         active_fields: BitArray[4](bytes: [0b0011'u8])).hash_tree_root()
-      shapes = @[Shape(side: Opt.some 0x42'u16, color: 1)]
+      shapes = @[Shape(side: Opt.some 0x42'u16, color: Opt.some 1'u8)]
       squares = @[Square(side: 0x42, color: 1)]
     squares.add shapes.mapIt Square.fromProfileBase(it).get
     shapes.add shapes.mapIt Shape(
@@ -172,12 +172,13 @@ suite "SSZ StableContainer":
         value: ShapePayload(side: 0, color: 1, radius: 0x42),
         active_fields: BitArray[4](bytes: [0b0110'u8])).hash_tree_root()
       modified_shape = block:
-        var shape = Shape(side: Opt.some 0x42'u16, color: 1)
+        var shape = Shape(side: Opt.some 0x42'u16, color: Opt.some 1'u8)
         shape.side.err()
         shape.radius.ok 0x42'u16
         shape
     var
-      shapes = @[Shape(color: 1, radius: Opt.some 0x42'u16), modified_shape]
+      shapes = @[
+        Shape(color: Opt.some 1'u8, radius: Opt.some 0x42'u16), modified_shape]
       circles = @[Circle(radius: 0x42, color: 1)]
     circles.add shapes.mapIt Circle.fromProfileBase(it).get
     shapes.add shapes.mapIt Shape(
@@ -217,8 +218,8 @@ suite "SSZ StableContainer":
           active_fields: BitArray[4](bytes: [0b0011'u8]))).hash_tree_root()
     var
       shape_pairs = @[ShapePair(
-        shape_1: Shape(side: Opt.some 0x42'u16, color: 1),
-        shape_2: Shape(side: Opt.some 0x69'u16, color: 1))]
+        shape_1: Shape(side: Opt.some 0x42'u16, color: Opt.some 1'u8),
+        shape_2: Shape(side: Opt.some 0x69'u16, color: Opt.some 1'u8))]
       square_pairs = @[SquarePair(
         shape_1: Square(side: 0x42, color: 1),
         shape_2: Square(side: 0x69, color: 1))]
@@ -259,8 +260,8 @@ suite "SSZ StableContainer":
           active_fields: BitArray[4](bytes: [0b0110'u8]))).hash_tree_root()
     var
       shape_pairs = @[ShapePair(
-        shape_1: Shape(color: 1, radius: Opt.some 0x42'u16),
-        shape_2: Shape(color: 1, radius: Opt.some 0x69'u16))]
+        shape_1: Shape(color: Opt.some 1'u8, radius: Opt.some 0x42'u16),
+        shape_2: Shape(color: Opt.some 1'u8, radius: Opt.some 0x69'u16))]
       circle_pairs = @[CirclePair(
         shape_1: Circle(radius: 0x42, color: 1),
         shape_2: Circle(radius: 0x69, color: 1))]
@@ -287,7 +288,7 @@ suite "SSZ StableContainer":
 
   test "Unsupported (1)":
     let
-      shape = Shape(color: 1)
+      shape = Shape(color: Opt.some 1'u8)
       shape_bytes = hexToSeqByte("0201")
     check:
       SSZ.encode(shape) == shape_bytes
@@ -304,7 +305,9 @@ suite "SSZ StableContainer":
   test "Unsupported (2)":
     let
       shape = Shape(
-        side: Opt.some 0x42'u16, color: 1, radius: Opt.some 0x42'u16)
+        side: Opt.some 0x42'u16,
+        color: Opt.some 1'u8,
+        radius: Opt.some 0x42'u16)
       shape_bytes = hexToSeqByte("074200014200")
     check:
       SSZ.encode(shape) == shape_bytes
@@ -350,7 +353,9 @@ suite "SSZ StableContainer":
     let
       container = ShapeContainer(
         shape: Shape(
-          side: Opt.some 0x42'u16, color: 1, radius: Opt.some 0x42'u16),
+          side: Opt.some 0x42'u16,
+          color: Opt.some 1'u8,
+          radius: Opt.some 0x42'u16),
         square: Square(side: 0x42, color: 1),
         circle: Circle(radius: 0x42, color: 1))
       container_bytes = hexToSeqByte("0a000000420001420001074200014200")
