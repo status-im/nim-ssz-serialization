@@ -757,7 +757,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
           inc fieldIndex
       mergeBranches(res, hash_tree_root(activeFields), res)
     elif T.isProfile:
-      # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
       template B: untyped = T.getCustomPragmaVal(sszProfile)
       const N =
         when B.isStableContainer:
@@ -1009,7 +1009,7 @@ func hashTreeRootAux[T](
           T.ensureIsValidStableContainer()
           true
         elif T.isProfile:
-          # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+          # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
           template B: untyped = T.getCustomPragmaVal(sszProfile)
           B.isStableContainer
         else:
@@ -1018,7 +1018,7 @@ func hashTreeRootAux[T](
         when T.isStableContainer:
           T.getCustomPragmaVal(sszStableContainer)
         elif T.isProfile:
-          # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+          # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
           template B: untyped = T.getCustomPragmaVal(sszProfile)
           when B.isStableContainer:
             B.getCustomPragmaVal(sszStableContainer)
@@ -1030,7 +1030,7 @@ func hashTreeRootAux[T](
       firstChunkIndex = nextPow2(totalChunks.uint64)
       chunkLayer = log2trunc(firstChunkIndex)
     when isStableContainer and T.isProfile:
-      # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
       template B: untyped = T.getCustomPragmaVal(sszProfile)
       macro fieldVal(name: static string): untyped =
         let nameIdent = ident(name)
