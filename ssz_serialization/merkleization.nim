@@ -742,25 +742,16 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
       res = zeroHashes[1]
   elif T is object|tuple:
     when T.isStableContainer:
+      static: T.ensureIsValidStableContainer()
       const N = T.getCustomPragmaVal(sszStableContainer)
       var
-        fieldIndex = 0
         activeFields: BitArray[N]
+        fieldIndex = 0
       merkleizeFields(Limit N, res):
         x.enumerateSubFields(f):
-          doAssert fieldIndex < N
-          type F = type toSszType(f)
-          let isActive =
-            when F is Opt:
-              f.isSome
-            else:
-              true
-          if isActive:
+          if f.isSome:
             activeFields.setBit(fieldIndex)
-            when F is Opt:
-              addField f.unsafeGet
-            else:
-              addField f
+            addField f.unsafeGet
           else:
             addField zeroHashes[0]
           inc fieldIndex
@@ -1015,6 +1006,7 @@ func hashTreeRootAux[T](
     const
       isStableContainer =
         when T.isStableContainer:
+          T.ensureIsValidStableContainer()
           true
         elif T.isProfile:
           # `S` should be `type`: https://github.com/nim-lang/Nim/issues/23564
