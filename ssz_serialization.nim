@@ -170,48 +170,32 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       w.writeValue 1'u8
       w.writeValue value.get
   elif value is object|tuple:
-    when type(value).isStableContainer:
-      const N = type(value).getCustomPragmaVal(sszStableContainer)
+    when typeof(value).isStableContainer:
+      static: typeof(value).ensureIsValidStableContainer()
+      const N = typeof(value).getCustomPragmaVal(sszStableContainer)
       var
-        fieldIndex = 0
         activeFields: BitArray[N]
+        fieldIndex = 0
         fixedSize = 0
-      enumerateSubFields(value, field):
-        doAssert fieldIndex < N
-        type F = type toSszType(field)
-        let isActive =
-          when F is Opt:
-            field.isSome
+      value.enumInstanceSerializedFields(_ {.used.}, field):
+        if field.isSome:
+          template FieldType: untyped = typeof(field).T
+          when FieldType.isFixedSize:
+            fixedSize += static(FieldType.fixedPortionSize)
           else:
-            true
-        if isActive:
-          const size =
-            when F is Opt:
-              type E = ElemType(F)
-              when isFixedSize(E):
-                fixedPortionSize(E)
-              else:
-                offsetSize
-            else:
-              when isFixedSize(F):
-                fixedPortionSize(F)
-              else:
-                offsetSize
-          fixedSize += size
+            fixedSize += offsetSize
           activeFields.setBit(fieldIndex)
         inc fieldIndex
+
       w.writeValue activeFields
-      var ctx = VarSizedWriterCtx(
-        offset: fixedSize,
-        fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
-      enumerateSubFields(value, field):
-        type F = type toSszType(field)
-        when F is Opt:
+      block:
+        var ctx = VarSizedWriterCtx(
+          offset: fixedSize,
+          fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
+        value.enumInstanceSerializedFields(_ {.used.}, field):
           if field.isSome:
-            writeField w, ctx, astToStr(field), field.get
-        else:
-          writeField w, ctx, astToStr(field), field
-      endRecord w, ctx
+            w.writeField ctx, astToStr(field), field.get
+        w.endRecord ctx
     elif type(value).isProfile:
       const O = (func(): int =
         var o = 0
