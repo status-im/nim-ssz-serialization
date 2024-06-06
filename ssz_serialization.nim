@@ -344,7 +344,19 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
       0
 
   elif T is object|tuple:
-    when T.isStableContainer or T.isProfile:
+    when T.isStableContainer:
+      static: T.ensureIsValidStableContainer()
+      const N = T.getCustomPragmaVal(sszStableContainer)
+      var total = static(BitArray[N].fixedPortionSize)
+      value.enumInstanceSerializedFields(_ {.used.}, field):
+        if field.isSome:
+          template FieldType: untyped = typeof(field).T
+          when FieldType.isFixedSize:
+            total += static(FieldType.fixedPortionSize)
+          else:
+            total += offsetSize + field.sszSize
+      total
+    elif T.isProfile:
       result = anonConst fixedPortionSize(T)
       enumerateSubFields(value, field):
         type F = type toSszType(field)

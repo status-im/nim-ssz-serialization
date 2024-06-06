@@ -735,8 +735,9 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     else: int(len(T)) * offsetSize
   elif T is object|tuple:
     when T.isStableContainer:
+      static: T.ensureIsValidStableContainer()
       const N = T.getCustomPragmaVal(sszStableContainer)
-      fixedPortionSize(BitArray[N])
+      BitArray[N].fixedPortionSize
     elif T.isProfile:
       const O = (func(): int =
         var o = 0

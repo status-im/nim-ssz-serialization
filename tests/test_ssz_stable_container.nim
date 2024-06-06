@@ -377,12 +377,12 @@ suite "SSZ StableContainer":
     type
       Shape1 {.sszStableContainer: 4.} = object
         side: Opt[uint16]
-        color: uint8
+        color: Opt[uint8]
         radius: Opt[uint16]
 
       Shape2 {.sszStableContainer: 8.} = object
         side: Opt[uint16]
-        color: uint8
+        color: Opt[uint8]
         radius: Opt[uint16]
 
       Shape3 {.sszStableContainer: 8.} = object
@@ -400,42 +400,57 @@ suite "SSZ StableContainer":
 
     runTest(
       value = Shape1(
-        side: Opt.some 0x42'u16, color: 1, radius: Opt.some 0x42'u16),
+        side: Opt.some 0x42'u16,
+        color: Opt.some 1'u8,
+        radius: Opt.some 0x42'u16),
       serialized = "074200014200",
       root = "37b28eab19bc3e246e55d2e2b2027479454c27ee006d92d4847c84893a162e6d")
     runTest(
       value = Shape1(
-        side: Opt.some 0x42'u16, color: 1, radius: Opt.none uint16),
+        side: Opt.some 0x42'u16,
+        color: Opt.some 1'u8, radius: Opt.none uint16),
       serialized = "03420001",
       root = "bfdb6fda9d02805e640c0f5767b8d1bb9ff4211498a5e2d7c0f36e1b88ce57ff")
     runTest(
       value = Shape1(
-        side: Opt.none uint16, color: 1, radius: Opt.none uint16),
+        side: Opt.none uint16,
+        color: Opt.some 1'u8,
+        radius: Opt.none uint16),
       serialized = "0201",
       root = "522edd7309c0041b8eb6a218d756af558e9cf4c816441ec7e6eef42dfa47bb98")
     runTest(
       value = Shape1(
-        side: Opt.none uint16, color: 1, radius: Opt.some 0x42'u16),
+        side: Opt.none uint16,
+        color: Opt.some 1'u8,
+        radius: Opt.some 0x42'u16),
       serialized = "06014200",
       root = "f66d2c38c8d2afbd409e86c529dff728e9a4208215ca20ee44e49c3d11e145d8")
     runTest(
       value = Shape2(
-        side: Opt.some 0x42'u16, color: 1, radius: Opt.some 0x42'u16),
+        side: Opt.some 0x42'u16,
+        color: Opt.some 1'u8,
+        radius: Opt.some 0x42'u16),
       serialized = "074200014200",
       root = "0792fb509377ee2ff3b953dd9a88eee11ac7566a8df41c6c67a85bc0b53efa4e")
     runTest(
       value = Shape2(
-        side: Opt.some 0x42'u16, color: 1, radius: Opt.none uint16),
+        side: Opt.some 0x42'u16,
+        color: Opt.some 1'u8,
+        radius: Opt.none uint16),
       serialized = "03420001",
       root = "ddc7acd38ae9d6d6788c14bd7635aeb1d7694768d7e00e1795bb6d328ec14f28")
     runTest(
       value = Shape2(
-        side: Opt.none uint16, color: 1, radius: Opt.none uint16),
+        side: Opt.none uint16,
+        color: Opt.some 1'u8,
+        radius: Opt.none uint16),
       serialized = "0201",
       root = "9893ecf9b68030ff23c667a5f2e4a76538a8e2ab48fd060a524888a66fb938c9")
     runTest(
       value = Shape2(
-        side: Opt.none uint16, color: 1, radius: Opt.some 0x42'u16),
+        side: Opt.none uint16,
+        color: Opt.some 1'u8,
+        radius: Opt.some 0x42'u16),
       serialized = "06014200",
       root = "e823471310312d52aa1135d971a3ed72ba041ade3ec5b5077c17a39d73ab17c5")
     runTest(
