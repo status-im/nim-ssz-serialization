@@ -20,7 +20,7 @@ import nimcrypto/[hash, sha2], stew/ptrops, ./types
 
 const PREFER_BLST_SHA256* {.booldefine.} = true
 # TODO https://github.com/prysmaticlabs/hashtree/issues/28
-const PREFER_HASHTREE_SHA256* {.booldefine.} = not defined(arm64)
+const PREFER_HASHTREE_SHA256* {.booldefine.} = true
 
 when PREFER_BLST_SHA256:
   import blscurve
@@ -38,10 +38,11 @@ else:
   {.hint: "nimcrypto SHA256 backend enabled".}
   type DigestCtx* = sha2.sha256
 
-when PREFER_HASHTREE_SHA256 and
-    (defined(arm64) or defined(amd64)) and
-    ((defined(gcc) and (defined(linux) or defined(windows))) or
-      (defined(clang) and defined(linux))):
+when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
+  ((defined(linux) or defined(windows)) and defined(gcc)) or
+  (defined(linux) and defined(clang)) or
+  (defined(macosx) and defined(clang) and defined(arm64))
+):
   {.hint: "Hashtree SHA256 backend enabled".}
   const USE_HASHTREE_SHA256 = true
 
@@ -147,10 +148,29 @@ when USE_HASHTREE_SHA256:
   func digest64(
       output: pointer, input: pointer, count: uint64
   ) {.cdecl, gcsafe, raises: [].} =
-    digest(
-      cast[ptr UncheckedArray[byte]](input).toOpenArray(0, 63),
-      cast[ptr Digest](output)[],
-    )
+    # digest `count` 64-byte `input` blocks into `output`
+    let
+      input = cast[ptr byte](input)
+      output = cast[ptr byte](output)
+
+    template fallback(a: openArray[byte], res: var Digest) =
+      when USE_BLST_SHA256:
+        # BLST has a fast assembly optimized SHA256
+        res.data.bls_sha256_digest(a)
+      else:
+        res = block:
+          # We use the init-update-finish interface to avoid
+          # the expensive burning/clearing memory (20~30% perf)
+          var h {.noinit.}: DigestCtx
+          h.init()
+          h.update(a)
+          h.finish()
+
+    for i in 0 ..< count:
+      fallback(
+        input.offset(int(i * 64)).makeOpenArray(64),
+        cast[ptr Digest](output.offset(int(i * 32)))[],
+      )
 
   if hashtree_init(nil) == 0:
     discard hashtree_init(digest64)
