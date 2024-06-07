@@ -325,28 +325,24 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
             total += offsetSize + field.sszSize
       total
     elif T.isProfile:
-      result = anonConst fixedPortionSize(T)
-      enumerateSubFields(value, field):
-        type F = type toSszType(field)
-        let isActive =
-          when F is Opt:
-            field.isSome
+      static: typeof(value).ensureIsValidProfile()
+      const O = T.numOptionalFields
+      var total = 0
+      when O > 0:
+        total = static(BitArray[O].fixedPortionSize)
+      value.enumInstanceSerializedFields(_ {.used.}, field):
+        when typeof(field) is Opt:
+          let hasField = field.isSome
+          template F: untyped = typeof(field).T
+        else:
+          const hasField = true
+          template F: untyped = typeof(field)
+        if hasField:
+          when F.isFixedSize:
+            total += static(F.fixedPortionSize)
           else:
-            true
-        if isActive:
-          let size =
-            when F is Opt:
-              type E = ElemType(F)
-              when isFixedSize(E):
-                anonConst fixedPortionSize(E)
-              else:
-                offsetSize + sszSize(toSszType field.get)
-            else:
-              when isFixedSize(F):
-                0  # Already included in base `fixedPortionSize(T)`
-              else:
-                sszSize(toSszType field)  # Offset already included
-          result += size
+            total += offsetSize + field.sszSize
+      total
     elif T.isCaseObject():
       isUnion(T)
       unionSize(value)
