@@ -88,7 +88,7 @@ func init*(T: type SszWriter, stream: OutputStream): T =
 
 proc writeVarSizeType(w: var SszWriter, value: auto) {.gcsafe, raises: [IOError].}
 
-func beginRecord*(w: var SszWriter, T: typedesc): auto  =
+func beginRecord*(w: var SszWriter, T: typedesc): auto =
   when isFixedSize(T):
     FixedSizedWriterCtx()
   else:
