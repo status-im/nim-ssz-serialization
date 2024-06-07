@@ -194,60 +194,44 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
           fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
         value.enumInstanceSerializedFields(_ {.used.}, field):
           if field.isSome:
-            w.writeField ctx, astToStr(field), field.get
+            w.writeField ctx, astToStr(field), field.unsafeGet
         w.endRecord ctx
-    elif type(value).isProfile:
-      const O = (func(): int =
-        var o = 0
-        default(typeof(value)).enumerateSubFields(f):
-          when typeof(toSszType(f)) is Opt:
-            o += 1
-        o)()
+    elif typeof(value).isProfile:
+      static: typeof(value).ensureIsValidProfile()
+      const O = T.numOptionalFields
       when O > 0:
-        var activeFields: BitArray[O]
-      var
-        optIndex = 0
-        fixedSize = 0
-      enumerateSubFields(value, field):
-        type F = type toSszType(field)
-        let isActive =
-          when F is Opt:
-            field.isSome
-          else:
-            true
-        if isActive:
-          const size =
-            when F is Opt:
-              type E = ElemType(F)
-              when isFixedSize(E):
-                fixedPortionSize(E)
-              else:
-                offsetSize
-            else:
-              when isFixedSize(F):
-                fixedPortionSize(F)
-              else:
-                offsetSize
-          fixedSize += size
-          when F is Opt:
-            doAssert optIndex < O
-            activeFields.setBit(optIndex)
-        when F is Opt:
+        var
+          optionalFields: BitArray[O]
+          optIndex = 0
+      var fixedSize = 0
+      value.enumInstanceSerializedFields(_ {.used.}, field):
+        when typeof(field) is Opt:
+          let hasField = field.isSome
+          if hasField:
+            optionalFields.setBit(optIndex)
           inc optIndex
-      doAssert optIndex == O
-      when O > 0:
-        w.writeValue activeFields
-      var ctx = VarSizedWriterCtx(
-        offset: fixedSize,
-        fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
-      enumerateSubFields(value, field):
-        type F = type toSszType(field)
-        when F is Opt:
-          if field.isSome:
-            writeField w, ctx, astToStr(field), field.get
+          template F: untyped = typeof(field).T
         else:
-          writeField w, ctx, astToStr(field), field
-      endRecord w, ctx
+          const hasField = true
+          template F: untyped = typeof(field)
+        if hasField:
+          when F.isFixedSize:
+            fixedSize += static(F.fixedPortionSize)
+          else:
+            fixedSize += offsetSize
+
+        w.writeValue optionalFields
+        block:
+          var ctx = VarSizedWriterCtx(
+            offset: fixedSize,
+            fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
+          value.enumInstanceSerializedFields(_ {.used.}, field):
+            when typeof(field) is Opt:
+              if field.isSome:
+                w.writeField ctx, astToStr(field), field.unsafeGet
+            else:
+              w.writeField ctx, astToStr(field), field
+          w.endRecord ctx
     elif isCaseObject(type(value)):
       isUnion(type(value))
 
