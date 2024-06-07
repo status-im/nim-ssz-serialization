@@ -734,6 +734,13 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
   elif T is object|tuple:
     when T.isStableContainer:
       return false
+    elif T.isProfile:
+      T.enumAllSerializedFields:
+        when FieldType is Opt:
+          return false
+        elif not FieldType.isFixedSize:
+          return false
+      return true
     elif isCaseObject(T):
       return false
     else:
@@ -759,21 +766,18 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
       const N = T.getCustomPragmaVal(sszStableContainer)
       BitArray[N].fixedPortionSize
     elif T.isProfile:
-      const O = (func(): int =
-        var o = 0
-        enumAllSerializedFields(T):
-          when toSszType(default FieldType) is Opt:
-            o += 1
-        o)()
+      static: T.ensureIsValidProfile()
+      const O = T.numOptionalFields
+      var total = 0
       when O > 0:
-        result += fixedPortionSize(BitArray[O])
-      enumAllSerializedFields(T):
-        when toSszType(default FieldType) is Opt:
-          discard
-        elif isFixedSize(FieldType):
-          result += fixedPortionSize(FieldType)
-        else:
-          result += offsetSize
+        total = static(BitArray[O].fixedPortionSize)
+      T.enumAllSerializedFields:
+        when FieldType isnot Opt:
+          when FieldType.isFixedSize:
+            total += static(FieldType.fixedPortionSize)
+          else:
+            total += offsetSize
+      total
     else:
       enumAllSerializedFields(T):
         when isFixedSize(FieldType):

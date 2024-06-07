@@ -314,34 +314,30 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   elif T is object|tuple:
     when T.isStableContainer:
       static: T.ensureIsValidStableContainer()
-      const N = T.getCustomPragmaVal(sszStableContainer)
-      var total = static(BitArray[N].fixedPortionSize)
+      var total = static(T.fixedPortionSize)
       value.enumInstanceSerializedFields(_ {.used.}, field):
         if field.isSome:
           template F: untyped = typeof(field).T
           when F.isFixedSize:
             total += static(F.fixedPortionSize)
           else:
-            total += offsetSize + field.sszSize
+            total += offsetSize + field.unsafeGet.sszSize
       total
     elif T.isProfile:
       static: typeof(value).ensureIsValidProfile()
-      const O = T.numOptionalFields
-      var total = 0
-      when O > 0:
-        total = static(BitArray[O].fixedPortionSize)
-      value.enumInstanceSerializedFields(_ {.used.}, field):
-        when typeof(field) is Opt:
-          let hasField = field.isSome
-          template F: untyped = typeof(field).T
-        else:
-          const hasField = true
-          template F: untyped = typeof(field)
-        if hasField:
-          when F.isFixedSize:
-            total += static(F.fixedPortionSize)
+      var total = static(T.fixedPortionSize)
+      when not T.isFixedSize:
+        value.enumInstanceSerializedFields(_ {.used.}, field):
+          when typeof(field) is Opt:
+            if field.isSome:
+              template F: untyped = typeof(field).T
+              when F.isFixedSize:
+                total += static(F.fixedPortionSize)
+              else:
+                total += offsetSize + field.unsafeGet.sszSize
           else:
-            total += offsetSize + field.sszSize
+            when not typeof(field).isFixedSize:
+              total += field.sszSize
       total
     elif T.isCaseObject():
       isUnion(T)
