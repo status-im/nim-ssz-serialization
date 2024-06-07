@@ -757,47 +757,37 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
           inc fieldIndex
       mergeBranches(res, hash_tree_root(activeFields), res)
     elif T.isProfile:
+      static: T.ensureIsValidProfile()
       # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
       template B: untyped = T.getCustomPragmaVal(sszProfile)
-      const N =
-        when B.isStableContainer:
-          B.getCustomPragmaVal(sszStableContainer)
-        else:
-          B.totalSerializedFields()
-      macro fieldVal(name: static string): untyped =
+      static: B.ensureIsValidStableContainer()
+      const N = B.getCustomPragmaVal(sszStableContainer)
+
+      macro fieldValue(name: static string): untyped =
         let nameIdent = ident(name)
         quote do:
           x.`nameIdent`
+
       var
-        fieldIndex = 0
         activeFields: BitArray[N]
+        fieldIndex = 0
       merkleizeFields(Limit N, res):
-        for name, f in fieldPairs(declval(B)):
-          doAssert fieldIndex < N
-          let isActive =
-            when not compiles(fieldVal(name)):
-              static: doAssert typeof(f) is Opt,
-                "Required " & $B & "." & name & " missing in " & $T
-              false
-            elif typeof(fieldVal(name)) is Opt:
-              static: doAssert typeof(f) is Opt,
-                "Required " & $B & "." & name & " missing in " & $T
-              fieldVal(name).isSome
+        B.enumAllSerializedFields:
+          when compiles(realFieldName.fieldValue):
+            template field: untyped = realFieldName.fieldValue
+            when typeof(field) is Opt:
+              if field.isSome:
+                activeFields.setBit(fieldIndex)
+                addField field.unsafeGet
+              else:
+                addField zeroHashes[0]
             else:
-              true
-          if isActive:
-            activeFields.setBit(fieldIndex)
-            when not compiles(fieldVal(name)):
-              raiseAssert "Unreachable, `isActive` should be `false`"
-            elif typeof(fieldVal(name)) is Opt:
-              addField fieldVal(name).unsafeGet
-            else:
-              addField fieldVal(name)
+              activeFields.setBit(fieldIndex)
+              addField field
           else:
             addField zeroHashes[0]
           inc fieldIndex
-      when B.isStableContainer:
-        mergeBranches(res, hash_tree_root(activeFields), res)
+      mergeBranches(res, hash_tree_root(activeFields), res)
     # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
@@ -1003,55 +993,59 @@ func hashTreeRootAux[T](
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
     trs "MERKLEIZING FIELDS"
-    const
-      isStableContainer =
-        when T.isStableContainer:
-          T.ensureIsValidStableContainer()
-          true
-        elif T.isProfile:
-          # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-          template B: untyped = T.getCustomPragmaVal(sszProfile)
-          B.isStableContainer
-        else:
-          false
-      totalChunks =
-        when T.isStableContainer:
-          T.getCustomPragmaVal(sszStableContainer)
-        elif T.isProfile:
-          # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-          template B: untyped = T.getCustomPragmaVal(sszProfile)
-          when B.isStableContainer:
-            B.getCustomPragmaVal(sszStableContainer)
+    when T.isStableContainer:
+      static: T.ensureIsValidStableContainer()
+      const N = T.getCustomPragmaVal(sszStableContainer)
+
+      template forAllFields(fieldVar, body: untyped): untyped =
+        x.enumerateSubFields(fv):
+          template hasField: untyped {.used, inject.} = fv.isSome
+          template fieldVar: untyped {.used, inject.} = fv.unsafeGet
+          body
+    elif T.isProfile:
+      static: T.ensureIsValidProfile()
+      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+      template B: untyped = T.getCustomPragmaVal(sszProfile)
+      static: B.ensureIsValidStableContainer()
+      const N = B.getCustomPragmaVal(sszStableContainer)
+
+      macro fieldValue(name: static string): untyped =
+        let nameIdent = ident(name)
+        quote do:
+          x.`nameIdent`
+
+      template forAllFields(fieldVar, body: untyped): untyped =
+        B.enumAllSerializedFields:
+          when compiles(realFieldName.fieldValue):
+            template fv: untyped {.used, inject.} = realFieldName.fieldValue
+            when typeof(fv) is Opt:
+              template hasField: untyped {.used, inject.} = fv.isSome
+              template fieldVar: untyped {.used, inject.} = fv.unsafeGet
+            else:
+              template hasField: untyped {.used, inject.} = static(true)
+              template fieldVar: untyped {.used, inject.} = fv
           else:
-            B.totalSerializedFields()
+            template hasField: untyped {.used, inject.} = static(false)
+            template fieldVar: untyped {.used, inject.} = zeroHashes[0]
+          body
+    else:
+      template forAllFields(fieldVar, body: untyped): untyped =
+        x.enumerateSubFields(fieldVar):
+          template hasField: untyped {.used, inject.} = true
+          body
+
+    const
+      totalChunks =
+        when T.isStableContainer or T.isProfile:
+          N
         else:
           T.totalSerializedFields()
       treeHeight = binaryTreeHeight(totalChunks)
       firstChunkIndex = nextPow2(totalChunks.uint64)
       chunkLayer = log2trunc(firstChunkIndex)
-    when isStableContainer and T.isProfile:
-      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template B: untyped = T.getCustomPragmaVal(sszProfile)
-      macro fieldVal(name: static string): untyped =
-        let nameIdent = ident(name)
-        quote do:
-          x.`nameIdent`
-      template forAllFields(fieldVar, body: untyped): untyped =
-        for name, f in fieldPairs(declval(B)):
-          template fieldVar: untyped {.used, inject.} =
-            when compiles(fieldVal(name)):
-              fieldVal(name)
-            else:
-              static: doAssert typeof(f) is Opt,
-                "Required " & $B & "." & name & " missing in " & $T
-              typeof(f).err()
-          body
-    else:
-      template forAllFields(fieldVar, body: untyped): untyped =
-        x.enumerateSubFields(fieldVar):
-          body
-    when isStableContainer:
-      var activeFields: BitArray[totalChunks]
+
+    when T.isStableContainer or T.isProfile:
+      var activeFields: BitArray[N]
     type IndexKind {.pure.} = enum
       Unknown,
       Data,
@@ -1073,7 +1067,7 @@ func hashTreeRootAux[T](
         if indexKind == IndexKind.Unknown:
           index = indexAt(i)
           indexLayer = log2trunc(index)
-          when isStableContainer:
+          when T.isStableContainer or T.isProfile:
             if index == 1.GeneralizedIndex:
               indexKind = IndexKind.Root
             elif (index shr (indexLayer - 1)) == 3.GeneralizedIndex:
@@ -1100,59 +1094,45 @@ func hashTreeRootAux[T](
               else:
                 chunk = chunkContainingIndex(index)
                 chunk
-        let isActive =
-          when isStableContainer and typeof(f) is Opt:
-            f.isSome
-          else:
-            true
-        when isStableContainer:
-          if isActive:
+        when T.isStableContainer or T.isProfile:
+          if hasField:
             activeFields.setBit(fieldIndex)
         if indexKind == IndexKind.Root:
-          if isActive:
-            when isStableContainer and typeof(f) is Opt:
-              addField f.unsafeGet
-            else:
-              addField f
+          if hasField:
+            addField f
           else:
             addField zeroHashes[0]
         elif indexKind == IndexKind.Data:
           if fieldIndex >= nextField:
             if indexLayer == chunkLayer:
-              if isActive:
-                when isStableContainer and typeof(f) is Opt:
-                  rootAt(i) = hash_tree_root(f.unsafeGet)
-                else:
-                  rootAt(i) = hash_tree_root(f)
+              if hasField:
+                rootAt(i) = hash_tree_root(f)
               else:
                 rootAt(i) = zeroHashes[0]
               inc i
-              when isStableContainer:
+              when T.isStableContainer or T.isProfile:
                 atLayer = atLayer - 1
               indexKind.reset()
             elif indexLayer < chunkLayer:
-              if isActive:
-                when isStableContainer and typeof(f) is Opt:
-                  addField f.unsafeGet
-                else:
-                  addField f
+              if hasField:
+                addField f
               else:
                 addField zeroHashes[0]
               if fieldIndex >= chunks.b:
                 rootAt(i) = getFinalHash(merkleizer)
                 inc i
-                when isStableContainer:
+                when T.isStableContainer or T.isProfile:
                   atLayer = atLayer - 1
                 indexKind.reset()
             else:
               var j = i + 1
               while j <= slice.b:
-                when isStableContainer:
+                when T.isStableContainer or T.isProfile:
                   atLayer = atLayer - 1
                 var
                   index = indexAt(j)
                   indexLayer = log2trunc(index)
-                when isStableContainer:
+                when T.isStableContainer or T.isProfile:
                   atLayer = atLayer + 1
                   if index == 1.GeneralizedIndex or
                       (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
@@ -1163,25 +1143,19 @@ func hashTreeRootAux[T](
                     chunkContainingIndex(index) != chunk:
                   break
                 inc j
-              if isActive:
-                when isStableContainer and typeof(f) is Opt:
-                  ? f.unsafeGet.hash_tree_root_multi(
-                    indices, roots, loopOrder, i ..< j, atLayer + chunkLayer)
-                else:
-                  var atLayer = atLayer + chunkLayer
-                  atLayer = atLayer - chunkLayer
-                  ? f.hash_tree_root_multi(
-                    indices, roots, loopOrder, i ..< j, atLayer + chunkLayer)
+              if hasField:
+                ? f.hash_tree_root_multi(
+                  indices, roots, loopOrder, i ..< j, atLayer + chunkLayer)
               else:
                 return unsupportedIndex
               i = j
-              when isStableContainer:
+              when T.isStableContainer or T.isProfile:
                 atLayer = atLayer - 1
               indexKind.reset()
         else:
           doAssert indexKind == IndexKind.MixIn
       inc fieldIndex
-    when isStableContainer:
+    when T.isStableContainer or T.isProfile:
       doAssert log2trunc(fieldIndex.uint64) <= log2trunc(totalChunks.uint64)
     else:
       doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
@@ -1189,7 +1163,7 @@ func hashTreeRootAux[T](
       if indexKind == IndexKind.Unknown:
         index = indexAt(i)
         indexLayer = log2trunc(index)
-        when isStableContainer:
+        when T.isStableContainer or T.isProfile:
           if index == 1.GeneralizedIndex:
             indexKind = IndexKind.Root
           elif (index shr (indexLayer - 1)) == 3.GeneralizedIndex:
@@ -1209,7 +1183,7 @@ func hashTreeRootAux[T](
             merkleizer.topIndex = chunkLayer - indexLayer
             merkleizer.totalChunks = 0
       if indexKind == IndexKind.Root:
-        when isStableContainer:
+        when T.isStableContainer or T.isProfile:
           mergeBranches(
             getFinalHash(merkleizer),
             hash_tree_root(activeFields),
@@ -1222,20 +1196,20 @@ func hashTreeRootAux[T](
         if indexLayer == chunkLayer:
           rootAt(i) = zeroHashes[0]
           inc i
-          when isStableContainer:
+          when T.isStableContainer or T.isProfile:
             atLayer = atLayer - 1
           indexKind.reset()
         elif indexLayer < chunkLayer:
           rootAt(i) = getFinalHash(merkleizer)
           inc i
-          when isStableContainer:
+          when T.isStableContainer or T.isProfile:
             atLayer = atLayer - 1
           indexKind.reset()
         else:
           return unsupportedIndex
       else:
         doAssert indexKind == IndexKind.MixIn
-        when isStableContainer:
+        when T.isStableContainer or T.isProfile:
           ? activeFields.hash_tree_root_multi(
             indices, roots, loopOrder, i .. slice.b, atLayer)
           i = slice.b + 1

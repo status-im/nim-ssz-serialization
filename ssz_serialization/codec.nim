@@ -522,11 +522,11 @@ proc readSszValue*[T](
     elif T.isProfile:
       static: T.ensureIsValidProfile()
       const O = T.numOptionalFields
-      # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
-      template B: untyped = T.getCustomPragmaVal(sszProfile)
 
       let inputLen = input.len
       when O > 0:
+        # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+        template B: untyped = T.getCustomPragmaVal(sszProfile)
         const numPrefixBytes = BitArray[O].fixedPortionSize
         if inputLen < numPrefixBytes:
           raiseMalformedSszError(T, "Scope too small for " &
