@@ -86,48 +86,6 @@ func getProfileFields[V](
 
   (base: baseFields, profile: profileFields)
 
-func fromProfileBase*[V, B](v: typedesc[V], value: B): Opt[V] =
-  static: doAssert V.getCustomPragmaVal(sszProfile) is B,
-    $V & " is not {.sszProfile: " & $B & ".}"
-  const fields = getProfileFields(V)
-
-  macro createProfile(): untyped =
-    var res = newStmtList()
-    for name in fields.base:
-      if name in fields.profile:
-        continue
-      let nameIdent = ident(name)
-      res.add quote do:
-        if value.`nameIdent`.isSome:
-          return Opt.none(V)
-
-    let resIdent = ident"res"
-    res.add quote do:
-      var `resIdent` = Opt.some(default(V))
-    for name in fields.profile:
-      let nameIdent = ident(name)
-      res.add quote do:
-        block:
-          template dst: untyped = `resIdent`.unsafeGet.`nameIdent`
-          template src: untyped =
-            when value.`nameIdent` is Opt and dst isnot Opt:
-              value.`nameIdent`.valueOr:
-                return Opt.none(V)
-            else:
-              value.`nameIdent`
-          when typeof(dst).isProfile:
-            when typeof(src) is typeof(dst).getCustomPragmaVal(sszProfile):
-              dst = typeof(dst).fromProfileBase(src).valueOr:
-                return Opt.none(V)
-            else:
-              dst = src
-          else:
-            dst = src
-    res.add quote do:
-      `resIdent`
-    res
-  createProfile()
-
 macro createBase(
     value: untyped,
     fields: static[
@@ -804,6 +762,44 @@ func ensureIsValidProfile*(T: typedesc) {.compileTime.} =
       "`" & $T & "." & realFieldName & "` has type `" & $F & "`, " &
       "incompatible with base field `" & $B & "." & realFieldName & "` " &
       "of type " & $realFieldName.baseType.T
+
+func fromBase*[T, B](t: typedesc[T], v: B): Opt[T] =
+  static: doAssert T.hasCompatibleMerkleization(B),
+    "`" & $T & "` is not compatible with `" & $B & "`"
+  when B is T:
+    Opt.some(v)
+  else:
+    var res = Opt.some(default(T))
+    macro fieldValue(name: static string): untyped =
+      let nameIdent = ident(name)
+      quote do:
+        res.unsafeGet.`nameIdent`
+
+    when B.isStableContainer or B.isProfile:
+      v.enumInstanceSerializedFields(fieldName {.used.}, field):
+        when typeof(field) is Opt:
+          when not compiles(fieldName.fieldValue):
+            if field.isSome:
+              return Opt.none(T)  # Field is disallowed in `T`
+          else:
+            when typeof(fieldName.fieldValue) isnot Opt:
+              if field.isNone:
+                return Opt.none(T)  # Field is required in `T`
+
+    v.enumInstanceSerializedFields(fieldName {.used.}, field):
+      when compiles(fieldName.fieldValue):
+        when typeof(field) is Opt and (B.isStableContainer or B.isProfile):
+          when typeof(fieldName.fieldValue) is Opt:
+            if field.isSome:
+              fieldName.fieldValue.ok(
+                ? typeof(fieldName.fieldValue).fromBase(field.unsafeGet))
+          else:
+            fieldValue(fieldName) =
+              ? typeof(fieldName.fieldValue).fromBase(field.get)
+        else:
+          fieldValue(fieldName) =
+            ? typeof(fieldName.fieldValue).fromBase(field)
+    res
 
 macro unsupported*(T: typed): untyped =
   # TODO: {.fatal.} breaks compilation even in `compiles()` context,

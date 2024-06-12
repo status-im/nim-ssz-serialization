@@ -64,7 +64,7 @@ suite "SSZ StableContainer":
         active_fields: BitArray[4](bytes: [0b0011'u8])).hash_tree_root()
       shapes = @[Shape(side: Opt.some 0x42'u16, color: Opt.some 1'u8)]
       squares = @[Square(side: 0x42, color: 1)]
-    squares.add shapes.mapIt Square.fromProfileBase(it).get
+    squares.add shapes.mapIt Square.fromBase(it).get
     shapes.add shapes.mapIt Shape(
       side: it.side, color: it.color, radius: it.radius)
     shapes.add squares.mapIt it.toProfileBase()
@@ -75,15 +75,15 @@ suite "SSZ StableContainer":
       shapes.allIt SSZ.encode(it) == square_bytes_stable
       squares.allIt SSZ.encode(it) == square_bytes_profile
       [
-        Square.fromProfileBase(SSZ.decode(square_bytes_stable, Shape)).get,
+        Square.fromBase(SSZ.decode(square_bytes_stable, Shape)).get,
         SSZ.decode(square_bytes_profile, Square)
       ].toHashSet().card == 1
       shapes.allIt it.hash_tree_root() == square_root
       squares.allIt it.hash_tree_root() == square_root
     static: doAssert not compiles(Circle(side: 0x42, color: 1))
     check:
-      shapes.allIt Circle.fromProfileBase(it).isNone
-      squares.allIt Circle.fromProfileBase(it.toProfileBase()).isNone
+      shapes.allIt Circle.fromBase(it).isNone
+      squares.allIt Circle.fromBase(it.toProfileBase()).isNone
     for shape in shapes.mitems():
       shape.side.ok 0x1337'u16
     for square in squares.mitems():
@@ -99,7 +99,7 @@ suite "SSZ StableContainer":
       shapes.allIt SSZ.encode(it) == square_bytes_stable
       squares.allIt SSZ.encode(it) == square_bytes_profile
       [
-        Square.fromProfileBase(SSZ.decode(square_bytes_stable, Shape)).get,
+        Square.fromBase(SSZ.decode(square_bytes_stable, Shape)).get,
         SSZ.decode(square_bytes_profile, Square)
       ].toHashSet().card == 1
       shapes.allIt it.hash_tree_root() == square_root
@@ -124,7 +124,7 @@ suite "SSZ StableContainer":
       shapes = @[
         Shape(color: Opt.some 1'u8, radius: Opt.some 0x42'u16), modified_shape]
       circles = @[Circle(radius: 0x42, color: 1)]
-    circles.add shapes.mapIt Circle.fromProfileBase(it).get
+    circles.add shapes.mapIt Circle.fromBase(it).get
     shapes.add shapes.mapIt Shape(
       side: it.side, color: it.color, radius: it.radius)
     shapes.add circles.mapIt it.toProfileBase()
@@ -135,15 +135,15 @@ suite "SSZ StableContainer":
       shapes.allIt SSZ.encode(it) == circle_bytes_stable
       circles.allIt SSZ.encode(it) == circle_bytes_profile
       [
-        Circle.fromProfileBase(SSZ.decode(circle_bytes_stable, Shape)).get,
+        Circle.fromBase(SSZ.decode(circle_bytes_stable, Shape)).get,
         SSZ.decode(circle_bytes_profile, Circle)
       ].toHashSet().card == 1
       shapes.allIt it.hash_tree_root() == circle_root
       circles.allIt it.hash_tree_root() == circle_root
     static: doAssert not compiles(Square(radius: 0x42, color: 1))
     check:
-      shapes.allIt Square.fromProfileBase(it).isNone
-      circles.allIt Square.fromProfileBase(it.toProfileBase()).isNone
+      shapes.allIt Square.fromBase(it).isNone
+      circles.allIt Square.fromBase(it.toProfileBase()).isNone
 
   test "SquarePair":
     let
@@ -164,9 +164,7 @@ suite "SSZ StableContainer":
       square_pairs = @[SquarePair(
         shape_1: Square(side: 0x42, color: 1),
         shape_2: Square(side: 0x69, color: 1))]
-    square_pairs.add shape_pairs.mapIt SquarePair(
-      shape_1: Square.fromProfileBase(it.shape_1).get,
-      shape_2: Square.fromProfileBase(it.shape_2).get)
+    square_pairs.add shape_pairs.mapIt SquarePair.fromBase(it).get
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
     shape_pairs.add square_pairs.mapIt ShapePair(
@@ -180,11 +178,8 @@ suite "SSZ StableContainer":
       shape_pairs.allIt SSZ.encode(it) == square_pair_bytes_stable
       square_pairs.allIt SSZ.encode(it) == square_pair_bytes_profile
       [
-        SquarePair(
-          shape_1: Square.fromProfileBase(
-            SSZ.decode(square_pair_bytes_stable, ShapePair).shape_1).get,
-          shape_2: Square.fromProfileBase(
-            SSZ.decode(square_pair_bytes_stable, ShapePair).shape_2).get),
+        SquarePair.fromBase(
+          SSZ.decode(square_pair_bytes_stable, ShapePair)).get,
         SSZ.decode(square_pair_bytes_profile, SquarePair)
       ].toHashSet().card == 1
       shape_pairs.allIt it.hash_tree_root() == square_pair_root
@@ -209,9 +204,7 @@ suite "SSZ StableContainer":
       circle_pairs = @[CirclePair(
         shape_1: Circle(radius: 0x42, color: 1),
         shape_2: Circle(radius: 0x69, color: 1))]
-    circle_pairs.add shape_pairs.mapIt CirclePair(
-      shape_1: Circle.fromProfileBase(it.shape_1).get,
-      shape_2: Circle.fromProfileBase(it.shape_2).get)
+    circle_pairs.add shape_pairs.mapIt CirclePair.fromBase(it).get
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
     shape_pairs.add circle_pairs.mapIt ShapePair(
@@ -225,11 +218,8 @@ suite "SSZ StableContainer":
       shape_pairs.allIt SSZ.encode(it) == circle_pair_bytes_stable
       circle_pairs.allIt SSZ.encode(it) == circle_pair_bytes_profile
       [
-        CirclePair(
-          shape_1: Circle.fromProfileBase(
-            SSZ.decode(circle_pair_bytes_stable, ShapePair).shape_1).get,
-          shape_2: Circle.fromProfileBase(
-            SSZ.decode(circle_pair_bytes_stable, ShapePair).shape_2).get),
+        CirclePair.fromBase(
+          SSZ.decode(circle_pair_bytes_stable, ShapePair)).get,
         SSZ.decode(circle_pair_bytes_profile, CirclePair)
       ].toHashSet().card == 1
       shape_pairs.allIt it.hash_tree_root() == circle_pair_root
@@ -247,8 +237,8 @@ suite "SSZ StableContainer":
     expect SerializationError:
       discard SSZ.decode(shape_bytes, Circle)
     check:
-      Square.fromProfileBase(shape).isNone
-      Circle.fromProfileBase(shape).isNone
+      Square.fromBase(shape).isNone
+      Circle.fromBase(shape).isNone
 
   test "Unsupported (2)":
     let
@@ -275,8 +265,8 @@ suite "SSZ StableContainer":
       if stream.readable:
         raise (ref SerializationError)(msg: "Remaining bytes in the input")
     check:
-      Square.fromProfileBase(shape).isNone
-      Circle.fromProfileBase(shape).isNone
+      Square.fromBase(shape).isNone
+      Circle.fromBase(shape).isNone
 
   test "Unsupported (3)":
     expect SerializationError:
