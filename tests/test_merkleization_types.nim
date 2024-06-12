@@ -10,7 +10,7 @@
 import
   std/[sequtils, tables],
   unittest2,
-  stew/[endians2, results],
+  results, stew/endians2,
   ../ssz_serialization/merkleization
 
 func d(x: openArray[byte]): Digest =

@@ -9,7 +9,7 @@
 
 import
   std/[algorithm, math, sequtils, sets, tables],
-  stew/bitops2, results,
+  results, stew/bitops2,
   "."/[digest, merkleization]
 
 export digest, merkleization
