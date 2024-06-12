@@ -12,7 +12,7 @@
 
 import
   std/typetraits,
-  stew/[endians2, objects, results], stew/shims/macros,
+  stew/[endians2, objects], stew/shims/macros, results,
   ./types
 
 from stew/assign2 import assign
