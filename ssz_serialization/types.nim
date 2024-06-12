@@ -613,7 +613,7 @@ func hasCompatibleMerkleization(
     else:
       false
   elif T is BitArray:
-    when B is Bitarray:
+    when B is BitArray:
       T.bits == B.bits
     else:
       false
