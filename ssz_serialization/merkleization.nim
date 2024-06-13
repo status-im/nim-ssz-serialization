@@ -748,10 +748,10 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
         activeFields: BitArray[N]
         fieldIndex = 0
       merkleizeFields(Limit N, res):
-        x.enumerateSubFields(f):
-          if f.isSome:
+        x.enumerateSubFields(fv):
+          if fv.isSome:
             activeFields.setBit(fieldIndex)
-            addField f.unsafeGet
+            addField fv.unsafeGet
           else:
             addField zeroHashes[0]
           inc fieldIndex
@@ -795,8 +795,8 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
       trs "MERKLEIZING FIELDS"
       const totalChunks = totalSerializedFields(T)
       merkleizeFields(Limit totalChunks, res):
-        x.enumerateSubFields(f):
-          addField f
+        x.enumerateSubFields(fv):
+          addField fv
   else:
     unsupported T
 

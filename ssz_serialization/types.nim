@@ -8,7 +8,7 @@
 {.push raises: [].}
 
 import
-  std/[sets, tables, typetraits, strformat, strutils],
+  std/[tables, typetraits, strformat],
   results, stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
   stint,
   nimcrypto/hash,
@@ -18,7 +18,7 @@ import
 
 from nimcrypto/utils import fromHex  # needed to disambiguate properly
 
-export macros, sets, stint, bitseqs, json_serialization
+export stint, bitseqs, json_serialization
 
 const
   offsetSize* = 4
