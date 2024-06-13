@@ -9,7 +9,7 @@
 {.used.}
 
 import
-  std/sequtils,
+  std/[sequtils, sets],
   results, stew/byteutils, unittest2,
   ../ssz_serialization, ../ssz_serialization/merkleization
 
