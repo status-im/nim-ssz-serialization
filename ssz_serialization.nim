@@ -198,7 +198,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
         w.endRecord ctx
     elif typeof(value).isProfile:
       static: typeof(value).ensureIsValidProfile()
-      const O = T.numOptionalFields
+      const O = typeof(value).numOptionalFields
       when O > 0:
         var
           optionalFields: BitArray[O]
@@ -220,18 +220,19 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
           else:
             fixedSize += offsetSize
 
+      when O > 0:
         w.writeValue optionalFields
-        block:
-          var ctx = VarSizedWriterCtx(
-            offset: fixedSize,
-            fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
-          value.enumInstanceSerializedFields(_ {.used.}, field):
-            when typeof(field) is Opt:
-              if field.isSome:
-                w.writeField ctx, astToStr(field), field.unsafeGet
-            else:
-              w.writeField ctx, astToStr(field), field
-          w.endRecord ctx
+      block:
+        var ctx = VarSizedWriterCtx(
+          offset: fixedSize,
+          fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
+        value.enumInstanceSerializedFields(_ {.used.}, field):
+          when typeof(field) is Opt:
+            if field.isSome:
+              w.writeField ctx, astToStr(field), field.unsafeGet
+          else:
+            w.writeField ctx, astToStr(field), field
+        w.endRecord ctx
     elif isCaseObject(type(value)):
       isUnion(type(value))
 
