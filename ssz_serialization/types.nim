@@ -552,7 +552,10 @@ func hasCompatibleMerkleization(
       false
   elif T is List:
     when B is List:
-      T.maxLen == B.maxLen and T.T.hasCompatibleMerkleization(B.T)
+      # `typeof(distinctBase(default(B))[0])` should be `B.T`:
+      # https://github.com/nim-lang/Nim/issues/23564
+      T.maxLen == B.maxLen and typeof(distinctBase(default(T))[0])
+        .hasCompatibleMerkleization(typeof(distinctBase(default(B))[0]))
     else:
       false
   elif T is array:
