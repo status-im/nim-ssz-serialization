@@ -677,7 +677,8 @@ func ensureIsValidProfile*(T: typedesc) {.compileTime.} =
   macro baseType(name: static string): untyped =
     let nameIdent = ident(name)
     quote do:
-      typeof default(B).`nameIdent`
+      # `vResultPrivate` should be `T`: https://github.com/nim-lang/Nim/issues/23713
+      typeof default(B).`nameIdent`.vResultPrivate
 
   var lastFieldIndex = -1
   T.enumAllSerializedFields:
@@ -697,10 +698,10 @@ func ensureIsValidProfile*(T: typedesc) {.compileTime.} =
       template F: untyped = FieldType.T
     else:
       template F: untyped = FieldType
-    doAssert F.hasCompatibleMerkleization(baseType(realFieldName).T),
+    doAssert F.hasCompatibleMerkleization(baseType(realFieldName)),
       "`" & $T & "." & realFieldName & "` has type `" & $F & "`, " &
       "incompatible with base field `" & $B & "." & realFieldName & "` " &
-      "of type " & $realFieldName.baseType.T
+      "of type " & $realFieldName.baseType
 
 func fromBase*[T, B](t: typedesc[T], v: B): Opt[T] =
   static: doAssert T.hasCompatibleMerkleization(B),
