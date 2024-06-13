@@ -67,7 +67,7 @@ suite "SSZ StableContainer":
     squares.add shapes.mapIt Square.fromBase(it).get
     shapes.add shapes.mapIt Shape(
       side: it.side, color: it.color, radius: it.radius)
-    shapes.add squares.mapIt it.toProfileBase()
+    shapes.add squares.mapIt it.toBase(Shape)
     squares.add squares.mapIt Square(side: it.side, color: it.color)
     check:
       shapes.toHashSet().card == 1
@@ -83,7 +83,7 @@ suite "SSZ StableContainer":
     static: doAssert not compiles(Circle(side: 0x42, color: 1))
     check:
       shapes.allIt Circle.fromBase(it).isNone
-      squares.allIt Circle.fromBase(it.toProfileBase()).isNone
+      squares.allIt Circle.fromBase(it.toBase(Shape)).isNone
     for shape in shapes.mitems():
       shape.side.ok 0x1337'u16
     for square in squares.mitems():
@@ -127,7 +127,7 @@ suite "SSZ StableContainer":
     circles.add shapes.mapIt Circle.fromBase(it).get
     shapes.add shapes.mapIt Shape(
       side: it.side, color: it.color, radius: it.radius)
-    shapes.add circles.mapIt it.toProfileBase()
+    shapes.add circles.mapIt it.toBase(Shape)
     circles.add circles.mapIt Circle(radius: it.radius, color: it.color)
     check:
       shapes.toHashSet().card == 1
@@ -143,7 +143,7 @@ suite "SSZ StableContainer":
     static: doAssert not compiles(Square(radius: 0x42, color: 1))
     check:
       shapes.allIt Square.fromBase(it).isNone
-      circles.allIt Square.fromBase(it.toProfileBase()).isNone
+      circles.allIt Square.fromBase(it.toBase(Shape)).isNone
 
   test "SquarePair":
     let
@@ -167,9 +167,7 @@ suite "SSZ StableContainer":
     square_pairs.add shape_pairs.mapIt SquarePair.fromBase(it).get
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
-    shape_pairs.add square_pairs.mapIt ShapePair(
-      shape_1: it.shape_1.toProfileBase(),
-      shape_2: it.shape_2.toProfileBase())
+    shape_pairs.add square_pairs.mapIt it.toBase(ShapePair)
     square_pairs.add square_pairs.mapIt(
       SquarePair(shape_1: it.shape_1, shape_2: it.shape_2))
     check:
@@ -207,9 +205,7 @@ suite "SSZ StableContainer":
     circle_pairs.add shape_pairs.mapIt CirclePair.fromBase(it).get
     shape_pairs.add shape_pairs.mapIt(
       ShapePair(shape_1: it.shape_1, shape_2: it.shape_2))
-    shape_pairs.add circle_pairs.mapIt ShapePair(
-      shape_1: it.shape_1.toProfileBase(),
-      shape_2: it.shape_2.toProfileBase())
+    shape_pairs.add circle_pairs.mapIt it.toBase(ShapePair)
     circle_pairs.add circle_pairs.mapIt(
       CirclePair(shape_1: it.shape_1, shape_2: it.shape_2))
     check:
@@ -445,9 +441,9 @@ suite "SSZ StableContainer":
 
     const
       foo_profile = FooFields(foo: 42, more: Opt.some 69'u32)
-      foo_stable = foo_profile.toProfileBase()
+      foo_stable = foo_profile.toBase(StableFields)
       bar_profile = BarFields(bar: 2, quix: 3, more: Opt.some 69'u32)
-      bar_stable = bar_profile.toProfileBase()
+      bar_stable = bar_profile.toBase(StableFields)
       i = [3.GeneralizedIndex, 16, 17, 18, 19, 20]
 
     check:

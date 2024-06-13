@@ -56,73 +56,6 @@ template isProfile*(T: untyped): bool =
   else:
     false
 
-func getProfileFields[V](
-    v: typedesc[V]
-): tuple[base: HashSet[string], profile: HashSet[string]] {.compileTime.} =
-  type B = V.getCustomPragmaVal(sszProfile)
-
-  func getBaseFields(): HashSet[string] {.compileTime.} =
-    var res: HashSet[string]
-    for fieldName, _ in fieldPairs(declval(B)):
-      let name = fieldName.nimIdentNormalize()
-      doAssert not res.containsOrIncl name, $B & "." & name & " duplicated"
-    res
-  const baseFields = getBaseFields()
-
-  func getProfileFields(): HashSet[string] {.compileTime.} =
-    var res: HashSet[string]
-    for fieldName, _ in fieldPairs(declval(V)):
-      let name = fieldName.nimIdentNormalize()
-      doAssert name in baseFields, $V & "." & name & " missing in " & $B
-      doAssert not res.containsOrIncl name, $V & "." & name & " duplicated"
-    res
-  const profileFields = getProfileFields()
-
-  for fieldName, fieldValue in fieldPairs(declval(B)):
-    let name = fieldName.nimIdentNormalize()
-    if name notin profileFields:
-      doAssert typeof(fieldValue) is Opt,
-        "Required " & $B & "." & name & " missing in " & $V
-
-  (base: baseFields, profile: profileFields)
-
-macro createBase(
-    value: untyped,
-    fields: static[
-      tuple[base: HashSet[string], profile: HashSet[string]]]): untyped =
-  var res = newStmtList()
-  let resIdent = ident"res"
-  res.add quote do:
-    var `resIdent`: typeof(`value`).getCustomPragmaVal(sszProfile)
-  for name in fields.profile:
-    let nameIdent = ident(name)
-    res.add quote do:
-      block:
-        template src: untyped = `value`.`nameIdent`
-        when `resIdent`.`nameIdent` is Opt and src isnot Opt:
-          template setDst(val: untyped): untyped = `resIdent`.`nameIdent`.ok val
-        else:
-          template setDst(val: untyped): untyped = `resIdent`.`nameIdent` = val
-        when typeof(src).isProfile:
-          when `resIdent`.`nameIdent` is Opt and src isnot Opt:
-            template dstType: untyped = typeof(`resIdent`.`nameIdent`).T
-          else:
-            template dstType: untyped = typeof(`resIdent`.`nameIdent`)
-          when typeof(src).getCustomPragmaVal(sszProfile) is dstType():
-            setDst block: createBase(src(), getProfileFields(typeof(src)))
-          else:
-            setDst src
-        else:
-          setDst src
-  res.add quote do:
-    `resIdent`
-  res
-
-func toProfileBase*[V](value: V): auto =
-  static: doAssert V.hasCustomPragma(sszProfile),
-    $V & " is not {.sszProfile.}"
-  createBase(value, getProfileFields(V))
-
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
 # * chunkIdx - leaf data index after chunking starting from 0
@@ -799,6 +732,41 @@ func fromBase*[T, B](t: typedesc[T], v: B): Opt[T] =
         else:
           fieldValue(fieldName) =
             ? typeof(fieldName.fieldValue).fromBase(field)
+    res
+
+func toBase*[T, B](v: T, t: typedesc[B]): B =
+  static: doAssert T.hasCompatibleMerkleization(B),
+    "`" & $T & "` is not compatible with `" & $B & "`"
+  when T is B:
+    v
+  else:
+    macro fieldValue(name: static string): untyped =
+      let nameIdent = ident(name)
+      quote do:
+        v.`nameIdent`
+
+    var res: B
+    res.enumInstanceSerializedFields(fieldName {.used.}, field):
+      when compiles(fieldName.fieldValue):
+        when (B.isStableContainer or B.isProfile):
+          when typeof(field) is Opt:
+            when typeof(fieldName.fieldValue) is Opt:
+              if fieldName.fieldValue.isSome:
+                field.ok fieldName.fieldValue.unsafeGet.toBase(typeof(field).T)
+            else:
+              field.ok fieldName.fieldValue.toBase(typeof(field).T)
+          else:
+            when typeof(fieldName.fieldValue) is Opt:
+              field = fieldName.fieldValue.get.toBase(typeof(field))
+            else:
+              field = fieldName.fieldValue.toBase(typeof(field))
+        else:
+          field = fieldName.fieldValue.toBase(typeof(field))
+      else:
+        static: doAssert(
+          typeof(field) is Opt and (B.isStableContainer or B.isProfile),
+          "`" & fieldName & "` is required in `" & $B & "` " &
+          "but missing in `" & $T & "`")
     res
 
 macro unsupported*(T: typed): untyped =
