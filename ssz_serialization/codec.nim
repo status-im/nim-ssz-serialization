@@ -492,8 +492,8 @@ proc readSszValue*[T](
             if inputLen - offset < offsetSize:
               raiseMalformedSszError(T, "Scope too small for " &
                 "`" & fieldName & "` offset")
-            dynFieldOffsets.add readOffsetUnchecked(offset)
-            if dynFieldOffsets[^1] > inputLen - fixedSize:
+            dynFieldOffsets.add readOffset(offset)
+            if dynFieldOffsets[^1] > inputLen - numPrefixBytes:
               raiseMalformedSszError(T, "Field offset past end")
             if dynFieldOffsets.len > 1 and
                 dynFieldOffsets[^1] < dynFieldOffsets[^2]:
@@ -566,8 +566,8 @@ proc readSszValue*[T](
             if inputLen - offset < offsetSize:
               raiseMalformedSszError(T, "Scope too small for " &
                 "`" & fieldName & "` offset")
-            dynFieldOffsets.add readOffsetUnchecked(offset)
-            if dynFieldOffsets[^1] > inputLen - fixedSize:
+            dynFieldOffsets.add readOffset(offset)
+            if dynFieldOffsets[^1] > inputLen - numPrefixBytes:
               raiseMalformedSszError(T, "Field offset past end")
             if dynFieldOffsets.len > 1 and
                 dynFieldOffsets[^1] < dynFieldOffsets[^2]:
