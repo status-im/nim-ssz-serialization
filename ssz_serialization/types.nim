@@ -580,9 +580,12 @@ func hasCompatibleMerkleization(
           return false
         if realFieldName.nimIdentNormalize() != fieldNames[fieldIndex]:
           return false
-        if not FieldType.hasCompatibleMerkleization(realFieldName.baseType):
-          return false
         inc fieldIndex
+        when compiles(realFieldName.baseType):
+          if not FieldType.hasCompatibleMerkleization(realFieldName.baseType):
+            return false
+        else:
+          return false
       fieldIndex == fieldNames.len
     else:
       false
