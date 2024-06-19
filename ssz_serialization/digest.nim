@@ -5,7 +5,7 @@
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
-import nimcrypto/[hash, sha2], stew/ptrops, ./types
+import std/strutils, nimcrypto/[hash, sha2], stew/ptrops, ./types
 
 # Depending on platform, we have several SHA256 implementations to choose from:
 # * nimcrypto is pure nim and used for compile-time evaluation and fallback
@@ -39,7 +39,10 @@ else:
   type DigestCtx* = sha2.sha256
 
 when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
-  ((defined(linux) or defined(windows)) and defined(gcc)) or
+  (defined(linux) and defined(gcc)) or
+  # llvm-mingw doesn't support hashtree well even with "-fno-integrated-as"
+  # this is true with clang-17(19th June 2024).
+  (defined(windows) and defined(gcc) and "clang" notin staticExec("gcc --version")) or
   (defined(linux) and defined(clang)) or
   (defined(macosx) and defined(clang) and defined(arm64))
 ):
