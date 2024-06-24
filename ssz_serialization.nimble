@@ -7,9 +7,10 @@ description   = "Simple Serialize (SSZ) serialization and merkleization"
 license       = "Apache License 2.0"
 skipDirs      = @["tests"]
 
-requires "nim >= 1.6.0",
+requires "nim >= 2.0.0",
          "serialization",
          "json_serialization",
+         "results",
          "stew",
          "stint",
          "nimcrypto",
@@ -33,17 +34,15 @@ proc build(args, path: string) =
   exec nimc & " " & lang & " " & cfg & " " & flags & " " & args & " " & path
 
 proc run(args, path: string) =
-  build args & " -r", path
-  if (NimMajor, NimMinor) > (1, 6):
-    build args & " --mm:refc -r", path
+  build args & " --mm:orc -r", path
+  build args & " --mm:refc -r", path
 
 task test, "Run all tests":
   for blst in [false, true]:
     for hashtree in [false, true]:
       let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
       run opts, "tests/test_all"
-      if (NimMajor, NimMinor) > (1, 6):
-        run "--mm:refc " & opts, "tests/test_all"
+      run "--mm:refc " & opts, "tests/test_all"
 
 task fuzzHashtree, "Run fuzzing test":
   # TODO We don't run because the timeout parameter doesn't seem to work so
