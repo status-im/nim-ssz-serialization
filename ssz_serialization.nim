@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2024 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -12,7 +12,7 @@
 
 import
   std/[options, typetraits],
-  stew/[endians2, leb128, objects, ptrops, results],
+  results, stew/[endians2, leb128, objects, ptrops],
   serialization, serialization/testing/tracing,
   ./ssz_serialization/[codec, bitseqs, types]
 
@@ -88,8 +88,7 @@ func init*(T: type SszWriter, stream: OutputStream): T =
 
 proc writeVarSizeType(w: var SszWriter, value: auto) {.gcsafe, raises: [IOError].}
 
-func beginRecord*(w: var SszWriter, TT: type): auto  =
-  type T = TT
+func beginRecord*(w: var SszWriter, T: typedesc): auto =
   when isFixedSize(T):
     FixedSizedWriterCtx()
   else:
@@ -106,7 +105,8 @@ template writeField*(w: var SszWriter,
   when ctx is FixedSizedWriterCtx:
     writeFixedSized(w.stream, toSszType(field))
   else:
-    type FieldType = type toSszType(field)
+    # `FieldType` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+    template FieldType: untyped = typeof toSszType(field)
 
     when isFixedSize(FieldType):
       writeFixedSized(ctx.fixedParts, toSszType(field))
@@ -154,6 +154,7 @@ proc writeElements[T](w: var SszWriter, value: openArray[T])
 proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
   trs "STARTING VAR SIZE TYPE"
 
+  mixin toSszType
   when value is HashArray|HashList:
     writeVarSizeType(w, value.data)
   elif value is array:
@@ -169,29 +170,92 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       w.writeValue 1'u8
       w.writeValue value.get
   elif value is object|tuple:
-    when isCaseObject(type(value)):
+    when typeof(value).isStableContainer:
+      static: typeof(value).ensureIsValidStableContainer()
+      const N = typeof(value).getCustomPragmaVal(sszStableContainer)
+      var
+        activeFields: BitArray[N]
+        fieldIndex = 0
+        fixedSize = 0
+      value.enumInstanceSerializedFields(_ {.used.}, field):
+        if field.isSome:
+          template F: untyped = typeof(field).T
+          when F.isFixedSize:
+            fixedSize += static(F.fixedPortionSize)
+          else:
+            fixedSize += offsetSize
+          activeFields.setBit(fieldIndex)
+        inc fieldIndex
+
+      w.writeValue activeFields
+      block:
+        var ctx = VarSizedWriterCtx(
+          offset: fixedSize,
+          fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
+        value.enumInstanceSerializedFields(_ {.used.}, field):
+          if field.isSome:
+            w.writeField ctx, astToStr(field), field.unsafeGet
+        w.endRecord ctx
+    elif typeof(value).isProfile:
+      static: typeof(value).ensureIsValidProfile()
+      const O = typeof(value).numOptionalFields
+      when O > 0:
+        var
+          optionalFields: BitArray[O]
+          optIndex = 0
+      var fixedSize = 0
+      value.enumInstanceSerializedFields(_ {.used.}, field):
+        when typeof(field) is Opt:
+          let hasField = field.isSome
+          if hasField:
+            optionalFields.setBit(optIndex)
+          inc optIndex
+          template F: untyped = typeof(field).T
+        else:
+          const hasField = true
+          template F: untyped = typeof(field)
+        if hasField:
+          when F.isFixedSize:
+            fixedSize += static(F.fixedPortionSize)
+          else:
+            fixedSize += offsetSize
+
+      when O > 0:
+        w.writeValue optionalFields
+      block:
+        var ctx = VarSizedWriterCtx(
+          offset: fixedSize,
+          fixedParts: w.stream.delayFixedSizeWrite(fixedSize))
+        value.enumInstanceSerializedFields(_ {.used.}, field):
+          when typeof(field) is Opt:
+            if field.isSome:
+              w.writeField ctx, astToStr(field), field.unsafeGet
+          else:
+            w.writeField ctx, astToStr(field), field
+        w.endRecord ctx
+    elif isCaseObject(type(value)):
       isUnion(type(value))
 
       trs "WRITING SSZ Union"
 
-      # toSszType for enum is kept local here as we don't want enums to
-      # serialize in general, only for object variants.
-      # TODO: This is not sufficiant as it will still allow to parse enum
-      # fields in the object variant itself. Will probably need some macro
-      # which enumerates the fields instead to take specific action on the
-      # discriminator.
-      template toSszType[E: enum](x: E): uint8 =
-        uint8(x)
-
       # TODO: At this point, the assumption is a correct `isUnion` as described
       # above.
       enumerateSubFields(value, field):
-        type T = type toSszType(field)
-
-        when isFixedSize(T):
-          w.stream.writeFixedSized toSszType(field)
+        when typeof(field) is enum:
+          # toSszType for enum is kept local here as we don't want enums to
+          # serialize in general, only for object variants.
+          # TODO: This is not sufficiant as it will still allow to parse enum
+          # fields in the object variant itself. Will probably need some macro
+          # which enumerates the fields instead to take specific action on the
+          # discriminator.
+          w.stream.writeFixedSized uint8(field)
         else:
-          w.writeVarSizeType toSszType(field)
+          type T = type toSszType(field)
+
+          when isFixedSize(T):
+            w.stream.writeFixedSized toSszType(field)
+          else:
+            w.writeVarSizeType toSszType(field)
     else:
       trs "WRITING OBJECT"
       var ctx = beginRecord(w, type value)
@@ -221,7 +285,9 @@ func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
 
 func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   mixin toSszType
-  type T = type toSszType(value)
+
+  # `T` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template T: untyped = typeof toSszType(value)
 
   when isFixedSize(T):
     anonConst fixedPortionSize(T)
@@ -247,7 +313,34 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
       0
 
   elif T is object|tuple:
-    when T.isCaseObject():
+    when T.isStableContainer:
+      static: T.ensureIsValidStableContainer()
+      var total = static(T.fixedPortionSize)
+      value.enumInstanceSerializedFields(_ {.used.}, field):
+        if field.isSome:
+          template F: untyped = typeof(field).T
+          when F.isFixedSize:
+            total += static(F.fixedPortionSize)
+          else:
+            total += offsetSize + field.unsafeGet.sszSize
+      total
+    elif T.isProfile:
+      static: typeof(value).ensureIsValidProfile()
+      var total = static(T.fixedPortionSize)
+      when not T.isFixedSize:
+        value.enumInstanceSerializedFields(_ {.used.}, field):
+          when typeof(field) is Opt:
+            if field.isSome:
+              template F: untyped = typeof(field).T
+              when F.isFixedSize:
+                total += static(F.fixedPortionSize)
+              else:
+                total += offsetSize + field.unsafeGet.sszSize
+          else:
+            when not typeof(field).isFixedSize:
+              total += field.sszSize
+      total
+    elif T.isCaseObject():
       isUnion(T)
       unionSize(value)
     else:
