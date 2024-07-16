@@ -26,13 +26,11 @@ jobs:
             cpu: arm64
           - os: windows
             cpu: amd64
-          #- os: windows
-            #cpu: i386
         branch: [version-1-6, version-2-0, devel]
         include:
           - target:
               os: linux
-            builder: ubuntu-22.04
+            builder: ubuntu-latest
             shell: bash
           - target:
               os: macos
@@ -43,11 +41,11 @@ jobs:
               os: macos
               cpu: arm64
             # On macos-14, we get an M1 cpu
-            builder: macos-14
+            builder: macos-latest
             shell: bash
           - target:
               os: windows
-            builder: windows-2019
+            builder: windows-latest
             shell: msys2 {0}
 
     defaults:
@@ -59,7 +57,7 @@ jobs:
     continue-on-error: ${{ matrix.branch == 'devel' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: true
 
@@ -107,7 +105,7 @@ jobs:
       - name: Restore Nim DLLs dependencies (Windows) from cache
         if: runner.os == 'Windows'
         id: windows-dlls-cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: external/dlls-${{ matrix.target.cpu }}
           key: 'dlls-${{ matrix.target.cpu }}'
@@ -173,15 +171,8 @@ jobs:
           nim --version
           nimble --version
           nimble install -y --depsOnly
-          if [[ "${{ matrix.branch }}" == "version-1-6" ]]; then
-            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
-            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
-          else
-            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
-            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} --mm:refc" nimble test
-            env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
-            env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
-          fi
+          env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
+          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
 
       - name: Fuzz a little
         if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
