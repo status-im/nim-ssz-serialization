@@ -9,7 +9,8 @@
 
 import
   std/[tables, typetraits, strformat],
-  stew/shims/macros, stew/[assign2, byteutils, bitops2, objects, results],
+  stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
+  results,
   stint,
   nimcrypto/hash,
   serialization/[object_serialization, errors],
