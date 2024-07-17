@@ -158,6 +158,10 @@ type
     BasicType | array | HashArray | List | HashList | BitArray | BitList |
     Digest | object | tuple
 
+  # Convenience aliases from specification
+  ByteList*[maxLen: static Limit] = List[byte, maxLen]
+  ByteVector*[maxLen: static Limit] = array[maxLen, byte]
+
 template asSeq*(x: List): auto = distinctBase(x)
 
 template init*[T, N](L: type List[T, N], x: seq[T]): auto =
