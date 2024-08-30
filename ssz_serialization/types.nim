@@ -9,7 +9,8 @@
 
 import
   std/[tables, typetraits, strformat, strutils],
-  results, stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
+  stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
+  results,
   stint,
   nimcrypto/hash,
   serialization/[object_serialization, errors],
@@ -177,6 +178,10 @@ type
   SszType* =
     BasicType | array | HashArray | List | HashList | BitArray | BitList |
     Digest | object | tuple
+
+  # Convenience aliases from specification
+  ByteList*[maxLen: static Limit] = List[byte, maxLen]
+  ByteVector*[maxLen: static Limit] = array[maxLen, byte]
 
 template asSeq*(x: List): auto = distinctBase(x)
 

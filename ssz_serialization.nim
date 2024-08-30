@@ -12,7 +12,8 @@
 
 import
   std/[options, typetraits],
-  results, stew/[endians2, leb128, objects, ptrops],
+  results,
+  stew/[endians2, leb128, objects, ptrops],
   serialization, serialization/testing/tracing,
   ./ssz_serialization/[codec, bitseqs, types]
 
