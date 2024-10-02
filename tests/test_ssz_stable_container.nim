@@ -271,6 +271,10 @@ suite "SSZ StableContainer":
       doAssert not compiles(Square(radius: 0x42, color: 1))
       doAssert not compiles(Circle(side: 0x42, color: 1))
 
+  test "Unsupported (4)":
+    check:
+      Square.fromBase(Circle(radius: 0x42, color: 1).toBase(Shape)).isNone
+
   test "Surrounding container":
     type
       ShapeContainer = object
@@ -305,6 +309,40 @@ suite "SSZ StableContainer":
         circle: ShapeRepr(
           value: ShapePayload(side: 0, color: 1, radius: 0x42),
           active_fields: BitArray[4](bytes: [0b0110'u8]))).hash_tree_root()
+
+  test "Unsupported surrounding container":
+    type
+      ShapeContainer = object
+        shape: Shape
+
+      SquareContainer = object
+        shape: Square
+
+      CircleContainer = object
+        shape: Circle
+
+      ShapeStableContainer {.sszStableContainer: 1.} = object
+        shape: Opt[Shape]
+
+      SquareStableContainer {.sszStableContainer: 1.} = object
+        shape: Opt[Square]
+
+      CircleStableContainer {.sszStableContainer: 1.} = object
+        shape: Opt[Circle]
+
+    check:
+      List[Square, 5].fromBase(
+        List[Circle, 5](@[Circle(radius: 0x42, color: 1)])
+          .toBase(List[Shape, 5])).isNone
+      array[1, Square].fromBase(
+        [Circle(radius: 0x42, color: 1)]
+          .toBase(array[1, Shape])).isNone
+      SquareContainer.fromBase(
+        CircleContainer(shape: Circle(radius: 0x42, color: 1))
+          .toBase(ShapeContainer)).isNone
+      SquareStableContainer.fromBase(
+        CircleStableContainer(shape: Opt.some Circle(radius: 0x42, color: 1))
+          .toBase(ShapeStableContainer)).isNone
 
   test "StableContainer":
     type

@@ -565,7 +565,7 @@ func hasCompatibleMerkleization(
       false
   elif T is array:
     when B is array:
-      T.I == B.I and T.T.hasCompatibleMerkleization(B.T)
+      T.len == B.len and ElemType(T).hasCompatibleMerkleization(ElemType(B))
     else:
       false
   elif T is object and not T.isStableContainer and not T.isProfile:
@@ -713,6 +713,13 @@ func fromBase*[T, B](t: typedesc[T], v: B): Opt[T] =
     "`" & $T & "` is not compatible with `" & $B & "`"
   when B is T:
     Opt.some(v)
+  elif B is array|HashArray:
+    var res: T
+    for i in 0 ..< res.len:
+      res[i] = ? ElemType(T).fromBase(v[i])
+    Opt.some(res)
+  elif B is List|HashList:
+    Opt.some(T.init v.mapIt(? ElemType(T).fromBase(it)))
   else:
     var res = Opt.some(default(T))
     macro fieldValue(name: static string): untyped =
@@ -737,7 +744,7 @@ func fromBase*[T, B](t: typedesc[T], v: B): Opt[T] =
           when typeof(fieldName.fieldValue) is Opt:
             if field.isSome:
               fieldName.fieldValue.ok(
-                ? typeof(fieldName.fieldValue).fromBase(field.unsafeGet))
+                ? typeof(fieldName.fieldValue.T).fromBase(field.unsafeGet))
           else:
             fieldValue(fieldName) =
               ? typeof(fieldName.fieldValue).fromBase(field.get)
@@ -751,6 +758,13 @@ func toBase*[T, B](v: T, t: typedesc[B]): B =
     "`" & $T & "` is not compatible with `" & $B & "`"
   when T is B:
     v
+  elif T is array|HashArray:
+    var res: B
+    for i in 0 ..< res.len:
+      res[i] = v[i].toBase(ElemType(B))
+    res
+  elif T is List|HashList:
+    B.init v.mapIt(it.toBase(ElemType(B)))
   else:
     macro fieldValue(name: static string): untyped =
       let nameIdent = ident(name)
