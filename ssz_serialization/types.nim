@@ -398,7 +398,9 @@ template len*(a: type HashArray): auto = int(a.maxLen)
 func add*(x: var HashList, val: auto): bool =
   if add(x.data, val):
     x.resizeHashes()
-    clearCaches(x, x.data.len() - 1)
+    if x.data.len() > 0:
+      # Otherwise, adding an empty list to an empty list fails
+      clearCaches(x, x.data.len() - 1)
     true
   else:
     false
