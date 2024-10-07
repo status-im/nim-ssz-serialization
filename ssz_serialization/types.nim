@@ -195,7 +195,7 @@ func setLenUninitialized*(x: var List, newLen: int): bool =
     # TODO https://github.com/nim-lang/Nim/issues/19727
     when List.T is SomeNumber:
       if x.len !=  newLen:
-        distinctBase(x) = newSeqUninitialized[x.T](newLen)
+        distinctBase(x) = newSeqUninit[x.T](newLen)
     else:
       setLen(distinctBase(x), newLen)
     true
