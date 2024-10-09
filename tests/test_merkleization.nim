@@ -70,6 +70,9 @@ let cases = (
   TestData[16](count: 9, expectedRoot: h(h(h(h(e(0), e(1)), h(e(2), e(3))), h(h(e(4), e(5)), h(e(6), e(7)))), h(h(h(e(8), z(0)), z(1)), z(2))))
 )
 
+type U = distinct uint64
+template toSszType(v: U): auto = uint64(v)
+
 suite "Merkleization":
   test "Calculate correct root from provided chunks":
     for testCase in cases.fields:
@@ -84,3 +87,7 @@ suite "Merkleization":
       let calculatedRoot = merk.getFinalHash()
 
       check calculatedRoot.data.toSeq() == testCase.expectedRoot
+
+  test "Calculate correct root using distinct BasicType":
+    check: hash_tree_root(default(List[U, 2])) ==
+      hash_tree_root(default(List[uint64, 2]))

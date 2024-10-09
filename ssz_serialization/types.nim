@@ -89,7 +89,7 @@ template dataPerChunk(T: type): int =
   # How many data items fit in a chunk
   mixin toSszType
   const isCompressed =
-    when compiles(toSszType(declval T)):
+    when compiles(typeof toSszType(declval T)):
       (typeof toSszType(declval T)) is BasicType
     else:
       T is BasicType
@@ -419,7 +419,9 @@ template len*(a: type HashArray): auto = int(a.maxLen)
 func add*(x: var HashList, val: auto): bool =
   if add(x.data, val):
     x.resizeHashes()
-    clearCaches(x, x.data.len() - 1)
+    if x.data.len() > 0:
+      # Otherwise, adding an empty list to an empty list fails
+      clearCaches(x, x.data.len() - 1)
     true
   else:
     false
