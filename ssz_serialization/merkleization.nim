@@ -1413,13 +1413,13 @@ func hash_tree_root*(
     when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
       ResultType.ok([hash_tree_root(x)])
     else:
-      var roots {.noinit.}: array[indices.len, Digest]
       const
         loopOrder = merkleizationLoopOrder(indices)
         v = validateIndices(indices, loopOrder)
       when v.isErr:
         ResultType.err(v.error)
       else:
+        var roots {.noinit.}: array[indices.len, Digest]
         const slice = 0 ..< loopOrder.len
         let w = hash_tree_root_multi(x, indices, roots, loopOrder, slice)
         if w.isErr:
