@@ -19,7 +19,11 @@ import
 
 from nimcrypto/utils import fromHex  # needed to disambiguate properly
 
-export macros, stint, bitseqs, json_serialization
+export
+  macros.getCustomPragmaVal,
+  macros.hasCustomPragma,
+  macros.newIdentNode,
+  stint, bitseqs, json_serialization
 
 const
   offsetSize* = 4

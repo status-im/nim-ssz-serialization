@@ -18,7 +18,7 @@
 
 import
   std/[algorithm, options, sequtils],
-  stew/[assign2, bitops2, endians2, objects, ptrops],
+  stew/shims/macros, stew/[assign2, bitops2, endians2, objects, ptrops],
   results,
   nimcrypto/[hash, sha2],
   serialization/testing/tracing,
