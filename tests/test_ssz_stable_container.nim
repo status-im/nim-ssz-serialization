@@ -310,7 +310,19 @@ suite "SSZ StableContainer":
           value: ShapePayload(side: 0, color: 1, radius: 0x42),
           active_fields: BitArray[4](bytes: [0b0110'u8]))).hash_tree_root()
 
-  test "Unsupported surrounding container":
+  test "Nested surrounding container":
+    block:
+      let shapes = List[Circle, 5].init @[Circle(radius: 0x42, color: 1)]
+      check:
+        List[Circle, 5].fromBase(shapes.toBase(List[Shape, 5])).get == shapes
+        List[Square, 5].fromBase(shapes.toBase(List[Shape, 5])).isNone
+
+    block:
+      let shapes = [(Circle(radius: 0x42, color: 1))]
+      check:
+        array[1, Circle].fromBase(shapes.toBase(array[1, Shape])).get == shapes
+        array[1, Square].fromBase(shapes.toBase(array[1, Shape])).isNone
+
     type
       ShapeContainer = object
         shape: Shape
@@ -320,7 +332,13 @@ suite "SSZ StableContainer":
 
       CircleContainer = object
         shape: Circle
+    block:
+      let shape = CircleContainer(shape: Circle(radius: 0x42, color: 1))
+      check:
+        CircleContainer.fromBase(shape.toBase(ShapeContainer)).get == shape
+        SquareContainer.fromBase(shape.toBase(ShapeContainer)).isNone
 
+    type
       ShapeStableContainer {.sszStableContainer: 1.} = object
         shape: Opt[Shape]
 
@@ -329,20 +347,32 @@ suite "SSZ StableContainer":
 
       CircleStableContainer {.sszStableContainer: 1.} = object
         shape: Opt[Circle]
+    block:
+      let shape = CircleStableContainer(
+        shape: Opt.some Circle(radius: 0x42, color: 1))
+      check:
+        CircleStableContainer.fromBase(
+          shape.toBase(ShapeStableContainer)).get == shape
+        SquareStableContainer.fromBase(
+          shape.toBase(ShapeStableContainer)).isNone
 
-    check:
-      List[Square, 5].fromBase(
-        List[Circle, 5](@[Circle(radius: 0x42, color: 1)])
-          .toBase(List[Shape, 5])).isNone
-      array[1, Square].fromBase(
-        [Circle(radius: 0x42, color: 1)]
-          .toBase(array[1, Shape])).isNone
-      SquareContainer.fromBase(
-        CircleContainer(shape: Circle(radius: 0x42, color: 1))
-          .toBase(ShapeContainer)).isNone
-      SquareStableContainer.fromBase(
-        CircleStableContainer(shape: Opt.some Circle(radius: 0x42, color: 1))
-          .toBase(ShapeStableContainer)).isNone
+    type
+      NestedShapeContainer = object
+        item: ShapeContainer
+
+      NestedSquareContainer = object
+        item: SquareContainer
+
+      NestedCircleContainer = object
+        item: CircleContainer
+    block:
+      let shape = NestedCircleContainer(
+        item: CircleContainer(shape: Circle(radius: 0x42, color: 1)))
+      check:
+        NestedCircleContainer.fromBase(
+          shape.toBase(NestedShapeContainer)).get == shape
+        NestedSquareContainer.fromBase(
+          shape.toBase(NestedShapeContainer)).isNone
 
   test "StableContainer":
     type
