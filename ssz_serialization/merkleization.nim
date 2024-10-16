@@ -1619,6 +1619,7 @@ func hash_tree_root*(
       when v.isErr:
         ResultType.err(v.error)
       else:
+        var roots {.noinit.}: array[indices.len, Digest]
         const slice = 0 ..< loopOrder.len
         var roots {.noinit.}: array[indices.len, Digest]
         let w = hash_tree_root_multi(x, indices, roots, loopOrder, slice)

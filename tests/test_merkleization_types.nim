@@ -8,10 +8,13 @@
 {.used.}
 
 import
-  std/[sequtils, tables],
+  std/tables,
+  results,
   unittest2,
-  results, stew/endians2,
+  stew/endians2,
   ../ssz_serialization/merkleization
+
+from std/sequtils import mapIt
 
 func d(x: openArray[byte]): Digest =
   result.data[0 ..< x.len] = x
@@ -97,8 +100,7 @@ let
     u: E(x: false, y: true),
     v: (a: false, b: true),
     w: (a: E(x: false, y: true), b: E(x: true, y: false), c: true),
-    x: HashArray[2, E](data:
-      [E(x: false, y: true), E(x: true, y: false)]),
+    x: HashArray[2, E](data: [E(x: false, y: true), E(x: true, y: false)]),
     y: HashList[E, 2].init(
       @[E(x: false, y: true), E(x: true, y: false)]),
     z: HashList[E, 2].init(@[]))
