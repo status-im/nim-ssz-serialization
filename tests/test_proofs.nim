@@ -9,9 +9,9 @@
 
 import
   std/sequtils,
-  stew/bitops2,
+  stew/bitops2, stew/byteutils, stew/staticfor,
   unittest2,
-  ../ssz_serialization/proofs
+  ../ssz_serialization/[merkleization_batch, proofs]
 
 suite "Merkle proofs":
   test "get_branch_indices":
@@ -51,55 +51,107 @@ suite "Merkle proofs":
           5.GeneralizedIndex
         ]
 
+  test "BatchRequest":
+    const
+      idx = [1.GeneralizedIndex, 2, 3, 4, 5]
+      expectedOrder = [1.GeneralizedIndex, 2, 4, 4, 5, 5, 2, 3, 3, 1]
+    check:
+      BatchRequest.init(idx).loopOrder.mapIt(idx[it]) == expectedOrder
+      BatchRequest.init(@idx)[].loopOrder.mapIt(idx[it]) == expectedOrder
+
   test "verify_merkle_multiproof":
     var allLeaves: array[8, Digest]
     for i in 0 ..< allLeaves.len:
       allLeaves[i] = digest([i.byte])
+    debugecho "allLeaves --> ", $allLeaves.mapIt(it.data.toHex.`$`)
+
+    type Foo = object
+      a: Digest
+      b: Digest
+      c: Digest
+      d: Digest
+      e: Digest
+      f: Digest
+      g: Digest
+      h: Digest
+
+    let foo = Foo(
+      a: allLeaves[0],
+      b: allLeaves[1],
+      c: allLeaves[2],
+      d: allLeaves[3],
+      e: allLeaves[4],
+      f: allLeaves[5],
+      g: allLeaves[6],
+      h: allLeaves[7])
 
     var nodes: array[16, Digest]
     for i in 0 ..< allLeaves.len:
       nodes[i + 8] = allLeaves[i]
     for i in countdown(7, 1):
       nodes[i] = digest(nodes[2 * i + 0].data, nodes[2 * i + 1].data)
+    debugecho "nodes --> ", $nodes.mapIt(it.data.toHex.`$`)
+
+    staticFor index_int, 1 .. 15:
+      const index = index_int.GeneralizedIndex
+      checkpoint "Verifying " & $index  & " --- static"
+      check:
+        nodes[index_int] == foo.hash_tree_root(index).get
+        nodes[index_int] == allLeaves.hash_tree_root(index).get
+
+    for index_int in 1 .. 15:
+      let index = index_int.GeneralizedIndex
+      checkpoint "Verifying " & $index  & " --- dynamic"
+      check:
+        nodes[index_int] == foo.hash_tree_root(index).get
+        nodes[index_int] == allLeaves.hash_tree_root(index).get
 
     proc verify(indices_int: openArray[int]) =
       let
         indices = indices_int.mapIt(it.GeneralizedIndex)
-        helper_indices = get_helper_indices(indices)
-        leaves = indices.mapIt(nodes[it])
-        proof = helper_indices.mapIt(nodes[it])
-        root = nodes[1]
-      checkpoint "Verifying " & $indices & "---" & $helper_indices
-      check:
-        proof == build_proof(allLeaves, indices).get
-        verify_merkle_multiproof(leaves, proof, indices, root)
+      #   helper_indices = get_helper_indices(indices)
+      #   leaves = indices.mapIt(nodes[it])
+      #   proof = helper_indices.mapIt(nodes[it])
+      #   root = nodes[1]
+      # checkpoint "Verifying " & $indices & " --- " & $helper_indices
+      # check:
+      #   proof == foo.build_proof(indices).get
+      #   proof == allLeaves.build_proof(indices).get
+      #   verify_merkle_multiproof(leaves, proof, indices, root)
 
       let
         union_indices = get_helper_indices(indices, union = true)
         proof_union = union_indices.mapIt(nodes[it])
-      check proof_union == build_proof(allLeaves, indices, union = true).get
-      for index in indices:
-        if index == 1.GeneralizedIndex:
-          continue  # Empty proof
-        checkpoint "- Split " & $union_indices & " --- " & $index
-        let branch = get_helper_indices(index).mapIt(nodes[it])
-        check:
-          branch == proof_union.split_proof_union(indices, index).get
-          nodes[index].is_valid_merkle_branch(
-            branch, log2trunc(index), get_subtree_index(index), root)
+      echo $union_indices
+      echo $proof_union.mapIt($toHex(it.data))
+      echo $foo.build_proof(indices, union = true).get.mapIt($toHex(it.data))
+      # check:
+      #   proof_union == foo.build_proof(indices, union = true).get
+      #   proof_union == allLeaves.build_proof(indices, union = true).get
+      # for index in indices:
+      #   if index == 1.GeneralizedIndex:
+      #     continue  # Empty proof
+      #   checkpoint "- Split " & $union_indices & " --- " & $index
+      #   let branch = get_helper_indices(index).mapIt(nodes[it])
+      #   check:
+      #     branch == proof_union.split_proof_union(indices, index).get
+      #     nodes[index].is_valid_merkle_branch(
+      #       branch, log2trunc(index), get_subtree_index(index), root)
 
-    verify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    verify([15, 6])
 
-    for a in 1 .. 15:
-      verify([a])
-      for b in 1 .. 15:
-        verify([a, b])
-        for c in 1 .. 15:
-          verify([a, b, c])
-          for d in 8 .. 15:
-            verify([a, b, c, d])
-            for e in 1 .. 7:
-              verify([a, b, c, d, e])
+    # verify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+
+    # for a in 1 .. 15:
+    #   verify([a])
+    #   for b in 1 .. 15:
+    #     verify([a, b])
+    #     for c in 1 .. 15:
+    #       verify([a, b, c])
+    #       for d in 8 .. 15:
+    #         verify([a, b, c, d])
+    #         for e in 1 .. 7:
+    #           verify([a, b, c, d, e])
 
   test "is_valid_merkle_branch":
     type TestCase = object

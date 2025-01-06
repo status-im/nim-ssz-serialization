@@ -39,7 +39,7 @@ func binaryTreeHeight*(totalElements: Limit): int =
   bitWidth nextPow2(uint64 totalElements)
 
 type
-  SszMerkleizer2*[height: static[int]] = object
+  SszMerkleizer2*[height: static[int], Q: static[int] = 0] = object
     ## The Merkleizer incrementally computes the SSZ-style Merkle root of a tree
     ## with `2**(height-1)` leaf nodes.
     ##
@@ -56,6 +56,7 @@ type
     # `SszMerkleizer` used chunk count as limit
     # TODO it's possible to further parallelize by using even wider buffers here
 
+    batch: BatchQuery[Q]
     combinedChunks: array[height, (Digest, Digest)]
     totalChunks*: uint64 # Public for historical reasons
     topIndex: int
@@ -92,16 +93,21 @@ func computeZeroHashes: array[sizeof(Limit) * 8, Digest] =
 const zeroHashes* = computeZeroHashes()
 
 func combineChunks(merkleizer: var SszMerkleizer2, start: int) =
+  var gindex =
+    (1.GeneralizedIndex shl merkleizer.topIndex.uint) + merkleizer.totalChunks
   for i in start..<merkleizer.topIndex:
     trs "CALLING MERGE BRANCHES"
+    gindex = gindex shr 1
     if getBitLE(merkleizer.totalChunks, i + 1):
       mergeBranches(
         merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
         merkleizer.combinedChunks[i + 1][1])
+      merkleizer.batch[gindex] = merkleizer.combinedChunks[i + 1][1]
     else:
       mergeBranches(
         merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
         merkleizer.combinedChunks[i + 1][0])
+      merkleizer.batch[gindex] = merkleizer.combinedChunks[i + 1][0]
       break
 
 template addChunkDirect(merkleizer: var SszMerkleizer2, body: untyped) =
@@ -124,6 +130,8 @@ template addChunkDirect(merkleizer: var SszMerkleizer2, body: untyped) =
   block:
     template chunk: Digest {.inject.} = chunkAddr[]
     body
+    let gindex = (1'u64 shl merkleizer.topIndex.uint) + merkleizer.totalChunks
+    merkleizer.batch[gindex] = chunk
 
   if odd:
     merkleizer.combineChunks(0)
@@ -962,6 +970,7 @@ func hashTreeRootAux[T](
       if i <= slice.b:
         if not isActive:
           index = indexAt(i)
+          debugecho ">>>>>>>>>>>>>>>>>>>>>>> ", $index, " index selected"
           indexLayer = log2trunc(index)
           nextField =
             if indexLayer == chunkLayer:
@@ -1421,19 +1430,14 @@ func hash_tree_root*(
     when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
       ResultType.ok([hash_tree_root(x)])
     else:
-      const
-        loopOrder = merkleizationLoopOrder(indices)
-        v = validateIndices(indices, loopOrder)
-      when v.isErr:
-        ResultType.err(v.error)
+      var
+        roots {.noinit.}: array[indices.len, Digest]
+        batch = BatchQuery.init(indices, addr roots)
+      let w = hash_tree_root_multi(x, batch)
+      if w.isErr:
+        ResultType.err(w.error)
       else:
-        var roots {.noinit.}: array[indices.len, Digest]
-        const slice = 0 ..< loopOrder.len
-        let w = hash_tree_root_multi(x, indices, roots, loopOrder, slice)
-        if w.isErr:
-          ResultType.err(w.error)
-        else:
-          ResultType.ok(roots)
+        ResultType.ok(roots)
 
 func hash_tree_root*(
     x: auto,
@@ -1444,11 +1448,10 @@ func hash_tree_root*(
   elif index == 1.GeneralizedIndex:
     ok(hash_tree_root(x))
   else:
-    const
-      loopOrder = @[0]
-      slice = 0 ..< loopOrder.len
-    var roots {.noinit.}: array[1, Digest]
-    ? hash_tree_root_multi(x, [index], roots, loopOrder, slice)
+    var
+      roots {.noinit.}: array[1, Digest]
+      batch = ? BatchQuery.init(@[index], addr roots)
+    ? hash_tree_root_multi(x, batch)
     ok(roots[0])
 
 func hash_tree_root*(
@@ -1460,9 +1463,8 @@ func hash_tree_root*(
   elif index == 1.GeneralizedIndex:
     ok(hash_tree_root(x))
   else:
-    const
-      loopOrder = @[0]
-      slice = 0 ..< loopOrder.len
-    var roots {.noinit.}: array[1, Digest]
-    ? hash_tree_root_multi(x, [index], roots, loopOrder, slice)
+    var
+      roots {.noinit.}: array[1, Digest]
+      batch = BatchQuery.init([index], addr roots)
+    ? hash_tree_root_multi(x, batch)
     ok(roots[0])
