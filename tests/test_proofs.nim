@@ -74,6 +74,20 @@ suite "Merkle proofs":
         proof == build_proof(allLeaves, indices).get
         verify_merkle_multiproof(leaves, proof, indices, root)
 
+      let
+        union_indices = get_helper_indices(indices, union = true)
+        proof_union = union_indices.mapIt(nodes[it])
+      check proof_union == build_proof(allLeaves, indices, union = true).get
+      for index in indices:
+        if index == 1.GeneralizedIndex:
+          continue  # Empty proof
+        checkpoint "- Split " & $union_indices & " --- " & $index
+        let branch = get_helper_indices(index).mapIt(nodes[it])
+        check:
+          branch == proof_union.split_proof_union(indices, index).get
+          nodes[index].is_valid_merkle_branch(
+            branch, log2trunc(index), get_subtree_index(index), root)
+
     verify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
     for a in 1 .. 15:

@@ -60,7 +60,8 @@ iterator get_path_indices*(
 
 # https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
 func get_helper_indices*(
-    indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
+    indices: varargs[GeneralizedIndex],
+    union = false): seq[GeneralizedIndex] =
   ## Get the generalized indices of all "extra" chunks in the tree needed
   ## to prove the chunks with the given generalized indices. Note that the
   ## decreasing order is chosen deliberately to ensure equivalence to the order
@@ -69,9 +70,10 @@ func get_helper_indices*(
   for index in indices:
     for idx in get_branch_indices(index):
       all_helper_indices.incl idx
-  for index in indices:
-    for idx in get_path_indices(index):
-      all_helper_indices.excl idx
+  if not union:
+    for index in indices:
+      for idx in get_path_indices(index):
+        all_helper_indices.excl idx
 
   var res = newSeqOfCap[GeneralizedIndex](all_helper_indices.len)
   for idx in all_helper_indices:
@@ -285,21 +287,23 @@ func build_proof*(
 func build_proof*(
     anchor: auto,
     indices: openArray[GeneralizedIndex],
-    proof: var openArray[Digest]): Result[void, string] =
+    proof: var openArray[Digest],
+    union = false): Result[void, string] =
   ? check_multiproof_acceptable(indices)
-  let helper_indices = get_helper_indices(indices)
+  let helper_indices = get_helper_indices(indices, union = union)
   doAssert proof.len == helper_indices.len
   hash_tree_root(anchor, helper_indices, proof)
 
 func build_proof*(
     anchor: auto,
     indices: static openArray[GeneralizedIndex],
-    proof: var openArray[Digest]): Result[void, string] =
+    proof: var openArray[Digest],
+    union: static bool = false): Result[void, string] =
   const v = check_multiproof_acceptable(indices)
   when v.isErr:
     result.err(v.error)
   else:
-    const helper_indices = get_helper_indices(indices)
+    const helper_indices = get_helper_indices(indices, union = union)
     doAssert proof.len == helper_indices.len
     hash_tree_root(anchor, helper_indices, proof)
 
@@ -326,41 +330,91 @@ func build_proof*(
 
 func build_proof*(
     anchor: auto,
-    indices: openArray[GeneralizedIndex]
-): Result[seq[Digest], string] =
+    indices: openArray[GeneralizedIndex],
+    union = false): Result[seq[Digest], string] =
   ? check_multiproof_acceptable(indices)
-  let helper_indices = get_helper_indices(indices)
+  let helper_indices = get_helper_indices(indices, union = union)
   hash_tree_root(anchor, helper_indices)
 
 func build_proof*(
     anchor: auto,
-    indices: static openArray[GeneralizedIndex]
-): auto =
+    indices: static openArray[GeneralizedIndex],
+    union: static bool = false): auto =
   const v = check_multiproof_acceptable(indices)
   when v.isErr:
     Result[array[0, Digest], string].err(v.error)
   else:
-    const helper_indices = get_helper_indices(indices)
+    const helper_indices = get_helper_indices(indices, union = union)
     hash_tree_root(anchor, helper_indices)
 
 func build_proof*(
     anchor: auto,
-    index: GeneralizedIndex
-): Result[seq[Digest], string] =
+    index: GeneralizedIndex): Result[seq[Digest], string] =
   ? check_multiproof_acceptable(index)
   let helper_indices = get_helper_indices(index)
   hash_tree_root(anchor, helper_indices)
 
 func build_proof*(
     anchor: auto,
-    index: static GeneralizedIndex
-): auto =
+    index: static GeneralizedIndex): auto =
   const v = check_multiproof_acceptable(index)
   when v.isErr:
     Result[array[0, Digest], string].err(v.error)
   else:
     const helper_indices = get_helper_indices(index)
     hash_tree_root(anchor, helper_indices)
+
+func split_proof_union(
+    proof_union: openArray[Digest],
+    proof_union_indices: openArray[GeneralizedIndex],
+    request_indices: openArray[GeneralizedIndex],
+    request_roots: var openArray[Digest]): Result[void, string] =
+  doAssert proof_union.len == proof_union_indices.len
+  doAssert request_roots.len == request_indices.len
+  # Assumption: both lists are ordered descending and have no duplicates
+  var pos = 0
+  for i, request_index in request_indices:
+    while true:
+      if pos >= proof_union_indices.len:
+        return err("Requested index not covered by proof union")
+      let proof_index = proof_union_indices[pos]
+      if proof_index > request_index:
+        inc pos
+        continue
+      if proof_index == request_index:
+        request_roots[i] = proof_union[pos]
+        inc pos
+        break
+      return err("Requested index not covered by proof union")
+  ok()
+
+func split_proof_union*(
+    proof_union: openArray[Digest],
+    proof_indices: openArray[GeneralizedIndex],
+    request_index: GeneralizedIndex): Result[seq[Digest], string] =
+  doAssert check_multiproof_acceptable(proof_indices).isOk
+  doAssert check_multiproof_acceptable(request_index).isOk
+  let proof_union_indices = get_helper_indices(proof_indices, union = true)
+  doAssert proof_union.len == proof_union_indices.len
+  let request_indices = get_helper_indices(request_index)
+  var res = newSeq[Digest](request_indices.len)
+  ? proof_union.split_proof_union(proof_union_indices, request_indices, res)
+  ok res
+
+func split_proof_union*(
+    proof_union: openArray[Digest],
+    proof_indices: static openArray[GeneralizedIndex],
+    request_index: static GeneralizedIndex): auto =
+  static:
+    doAssert check_multiproof_acceptable(proof_indices).isOk
+    doAssert check_multiproof_acceptable(request_index).isOk
+  const proof_union_indices = get_helper_indices(proof_indices, union = true)
+  static: doAssert proof_union.len == proof_union_indices.len
+  const request_indices = get_helper_indices(request_index)
+  var res: array[request_indices.len, Digest]
+  proof_union.split_proof_union(
+    proof_union_indices, request_indices, res).expect("Request OK")
+  res
 
 # https://github.com/ethereum/consensus-specs/blob/v1.1.6/specs/phase0/beacon-chain.md#is_valid_merkle_branch
 func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],

@@ -13,8 +13,8 @@
 
 # TODO https://github.com/nim-lang/Nim/issues/19357 and general pointer aliasing
 # misdetection means we use output parameters rather than return values for a
-# large part of the internal implemenation thus avoiding spurious `zeroMem` calls
-# and other artefacts of the introduction of hidden temporaries
+# large part of the internal implemenation thus avoiding spurious `zeroMem`
+# calls and other artefacts of the introduction of hidden temporaries
 
 import
   std/[algorithm, options, sequtils],
@@ -22,7 +22,7 @@ import
   results,
   nimcrypto/[hash, sha2],
   serialization/testing/tracing,
-  "."/[bitseqs, codec, digest, types]
+  "."/[bitseqs, codec, digest, merkleization_batch, types]
 
 export
   results, hash.fromHex, codec, bitseqs, types, digest
@@ -60,7 +60,7 @@ type
     totalChunks*: uint64 # Public for historical reasons
     topIndex: int
     internal: bool
-      # Avoid copying chunk data into merkleizer when not needed - maw result
+      # Avoid copying chunk data into merkleizer when not needed - may result
       # in an incomplete root-to-leaf proof
 
 template limit*(T: type SszMerkleizer2): Limit =
@@ -75,7 +75,8 @@ template getChunkCount*(m: SszMerkleizer2): uint64 =
 func getCombinedChunks*(m: SszMerkleizer2): seq[Digest] =
   mapIt(toOpenArray(m.combinedChunks, 0, m.topIndex), it[0])
 
-template mergeBranches(existing: Digest, newData: array[32, byte], res: var Digest) =
+template mergeBranches(
+    existing: Digest, newData: array[32, byte], res: var Digest) =
   trs "MERGING BRANCHES ARRAY"
   digest(existing.data, newData, res)
 
@@ -1281,28 +1282,45 @@ func hash_tree_root_multi(
     slice.mapIt(indexAt(it)), " = ", slice.mapIt("0x" & $rootAt(it))
   ok()
 
-template normalize(v: GeneralizedIndex): GeneralizedIndex =
-  # GeneralizedIndex is 1-based.
-  # Looking at their bit patterns, from MSB to LSB, they:
-  # - Start with a 1 bit.
-  # - Continue with a 0 bit when going left or 1 bit when going right,
-  #   from the tree root down to the leaf.
-  # i.e., 0b1_110 is the node after picking right branch twice, then left.
-  #
-  # For depth-first ordering, shorter bit-strings are parents of nodes
-  # that include them as their prefix.
-  # i.e., 0b1_110 is parent of 0b1_1100 (left) and 0b1_1101 (right)
-  # An extra 1 bit is added to distinguish parents from their left child.
-  ((v shl 1) or 1) shl leadingZeros(v)
-
-# Comparison utility for sorting indices in depth-first order (in-order).
+# Comparison utility for sorting indices in depth-first order (post-order).
 # This order is needed because `enumInstanceSerializedFields` does not allow
 # random access to specific fields. With depth-first order only a single pass
 # is required to fill in all the roots. `enumAllSerializedFields` cannot be
 # used for pre-computation at compile time, because the generalized indices
 # depend on the specific case values defined by the specific object instance.
 func cmpDepthFirst(x, y: GeneralizedIndex): int =
-  cmp(x.normalize, y.normalize)
+  #     1
+  #    / \       Post-order: 4 -> 5 -> 2 -> 3 -> 1
+  #   2   3      Rationale that both child node values must be known
+  #  / \         to compute the parent node. This is relevant if both
+  # 4   5        child and parent nodes are requested.
+
+  # GeneralizedIndex is 1-based.
+  # Looking at their bit patterns, from MSB to LSB, they:
+  # - Start with a 1 bit.
+  # - Continue with a 0 bit when going left or 1 bit when going right,
+  #   from the tree root down to the leaf.
+  # e.g., 0b1_110 is the node after picking right branch twice, then left.
+  let
+    xZeros = x.leadingZeros()
+    yZeros = y.leadingZeros()
+  if xZeros == yZeros:
+    # Same layer
+    cmp(x, y)
+  elif xZeros < yZeros:
+    # `x` is on a deeper layer than `y`, check if `y` is an ancestor of `x`
+    let xAncestorAtLayerOfY = x shr (yZeros - xZeros)
+    if xAncestorAtLayerOfY == y:
+      -1  # Visit `x` before `y`
+    else:
+      cmp(xAncestorAtLayerOfY, y)
+  else:
+    # `y` is on a deeper layer than `x`, check if `x` is an ancestor of `y`
+    let yAncestorAtLayerOfX = y shr (xZeros - yZeros)
+    if yAncestorAtLayerOfX == x:
+      1  # Visit `y` before `x`
+    else:
+      cmp(yAncestorAtLayerOfX, x)
 
 func merkleizationLoopOrderNimvm(
     indices: openArray[GeneralizedIndex]): seq[int] {.compileTime.} =
@@ -1328,25 +1346,15 @@ func merkleizationLoopOrder(
 func validateIndices(
     indices: openArray[GeneralizedIndex],
     loopOrder: seq[int]): Result[void, string] =
-  var
-    prev = indices[loopOrder[0]]
-    prevLayer = log2trunc(prev)
-  if prev < 1.GeneralizedIndex: return err("Invalid generalized index.")
-  for i in 1 .. loopOrder.high:
-    let
-      curr = indices[loopOrder[i]]
-      currLayer = log2trunc(curr)
-      indicesOverlap =
-        if currLayer < prevLayer:
-          (prev shr (prevLayer - currLayer)) == curr
-        elif currLayer > prevLayer:
-          (curr shr (currLayer - prevLayer)) == prev
-        else:
-          curr == prev
-    if indicesOverlap:
-      return err("Given indices cover some leafs multiple times.")
-    prev = curr
-    prevLayer = currLayer
+  doAssert loopOrder.len == indices.len
+  if loopOrder.len > 0:
+    if indices[loopOrder[0]] < 1.GeneralizedIndex:
+      return err("Invalid generalized index.")
+    for i in 1 .. loopOrder.high:
+      if indices[loopOrder[i]] < 1.GeneralizedIndex:
+        return err("Invalid generalized index.")
+      if indices[loopOrder[i]] == indices[loopOrder[i - 1]]:
+        return err("Duplicate generalized index.")
   ok()
 
 func hash_tree_root*(
