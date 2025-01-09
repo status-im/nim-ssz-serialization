@@ -53,13 +53,28 @@ static:
   doAssert fixedPortionSize(array[SomeEnum, DistinctInt]) == 24
   doAssert fixedPortionSize(array[3..5, List[byte, 256]]) == 12
 
+  doAssert maxSize(array[10, bool]) == 10
+  doAssert maxSize(array[SomeEnum, uint64]) == 24
+  doAssert maxSize(array[SomeEnum, DistinctInt]) == 24
+  doAssert maxSize(array[3..5, List[byte, 256]]) == 3 * (4 + 256)
+
   doAssert isFixedSize(array[20, bool]) == true
   doAssert isFixedSize(Simple) == true
   doAssert isFixedSize(List[bool, 128]) == false
 
+  doAssert maxSize(array[20, bool]) == 20
+  doAssert maxSize(Simple) == 1 + 256 + 256
+  doAssert maxSize(List[bool, 128]) == 128
+
   doAssert isFixedSize(NonFixed) == false
 
+  doAssert maxSize(NonFixed) == 4 + 1024 * 8
+
+  doAssert maxSize(HashList[BitList[24], 20]) == 20 * (4 + 4)
+  doAssert maxSize(HashList[NonFixed, 20]) == 20 * (4 + (4 + 1024 * 8))
+
   reject fixedPortionSize(int)
+  reject maxSize(int)
 
 type
   ObjWithFields = object
