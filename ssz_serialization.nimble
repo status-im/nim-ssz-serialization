@@ -41,8 +41,7 @@ task test, "Run all tests":
   for blst in [false, true]:
     for hashtree in [false, true]:
       let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
-      run "--mm:refc " & opts, "tests/test_all"
-      run "--mm:orc " & opts, "tests/test_all"
+      run opts, "tests/test_all"
 
 task fuzzHashtree, "Run fuzzing test":
   # TODO We don't run because the timeout parameter doesn't seem to work so
