@@ -9,7 +9,7 @@
 
 import
   std/sequtils,
-  stew/bitops2,
+  stew/[bitops2, byteutils, staticfor],
   unittest2,
   ../ssz_serialization/proofs
 
@@ -56,11 +56,45 @@ suite "Merkle proofs":
     for i in 0 ..< allLeaves.len:
       allLeaves[i] = digest([i.byte])
 
+    type Foo = object
+      a: Digest
+      b: Digest
+      c: Digest
+      d: Digest
+      e: Digest
+      f: Digest
+      g: Digest
+      h: Digest
+
+    let foo = Foo(
+      a: allLeaves[0],
+      b: allLeaves[1],
+      c: allLeaves[2],
+      d: allLeaves[3],
+      e: allLeaves[4],
+      f: allLeaves[5],
+      g: allLeaves[6],
+      h: allLeaves[7])
+
     var nodes: array[16, Digest]
     for i in 0 ..< allLeaves.len:
       nodes[i + 8] = allLeaves[i]
     for i in countdown(7, 1):
       nodes[i] = digest(nodes[2 * i + 0].data, nodes[2 * i + 1].data)
+
+    staticFor index_int, 1 .. 15:
+      const index = index_int.GeneralizedIndex
+      checkpoint "Verifying " & $index  & " --- static"
+      check:
+        nodes[index_int] == foo.hash_tree_root(index).get
+        nodes[index_int] == allLeaves.hash_tree_root(index).get
+
+    for index_int in 1 .. 15:
+      let index = index_int.GeneralizedIndex
+      checkpoint "Verifying " & $index  & " --- dynamic"
+      check:
+        nodes[index_int] == foo.hash_tree_root(index).get
+        nodes[index_int] == allLeaves.hash_tree_root(index).get
 
     proc verify(indices_int: openArray[int]) =
       let
@@ -71,7 +105,8 @@ suite "Merkle proofs":
         root = nodes[1]
       checkpoint "Verifying " & $indices & "---" & $helper_indices
       check:
-        proof == build_proof(allLeaves, indices).get
+        proof == foo.build_proof(indices).get
+        proof == allLeaves.build_proof(indices).get
         verify_merkle_multiproof(leaves, proof, indices, root)
 
     verify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
