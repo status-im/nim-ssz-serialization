@@ -22,7 +22,7 @@ import
   results,
   nimcrypto/[hash, sha2],
   serialization/testing/tracing,
-  "."/[bitseqs, codec, digest, types]
+  "."/[bitseqs, codec, digest, merkleization_batch, types]
 
 export
   results, hash.fromHex, codec, bitseqs, types, digest
@@ -487,9 +487,8 @@ func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [], noinit.}
 
 func hash_tree_root_multi(
     x: auto,
-    indices: openArray[GeneralizedIndex],
+    request: BatchRequest,
     roots: var openArray[Digest],
-    loopOrder: seq[int],
     slice: Slice[int],
     atLayer = 0): Result[void, string] {.gcsafe, raises: [].}
 
@@ -678,7 +677,7 @@ template chunkContainingIndex(index: GeneralizedIndex): Limit =
 
 template indexAt(i: int): GeneralizedIndex =
   block:
-    let v = indices[loopOrder[i]]
+    let v = request.indices[request.loopOrder[i]]
     if atLayer != 0:
       let
         n = leadingZeros(v) + 1 + atLayer
@@ -688,7 +687,7 @@ template indexAt(i: int): GeneralizedIndex =
       v
 
 template rootAt(i: int): Digest =
-  roots[loopOrder[i]]
+  roots[request.loopOrder[i]]
 
 const unsupportedIndex =
   err(Result[void, string], "Generalized index not supported.")
@@ -752,9 +751,8 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
 
 func hashTreeRootAux[T](
     x: T,
-    indices: openArray[GeneralizedIndex],
+    request: BatchRequest,
     roots: var openArray[Digest],
-    loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
   mixin hash_tree_root, toSszType
@@ -763,7 +761,7 @@ func hashTreeRootAux[T](
       if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
       hashTreeRootAux(x, rootAt(i))
   elif T is BitArray:
-    ? hashTreeRootAux(x.bytes, indices, roots, loopOrder, slice, atLayer)
+    ? hashTreeRootAux(x.bytes, request, roots, slice, atLayer)
   elif T is BitList:
     const
       totalChunks = maxChunksCount(T, x.maxLen)
@@ -836,7 +834,7 @@ func hashTreeRootAux[T](
                   chunkContainingIndex(index) != chunk:
                 break
               inc j
-            ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+            ? hash_tree_root_multi(x[chunk], request, roots, i ..< j,
                                    atLayer + chunkLayer)
             i = j
   elif T is List:
@@ -885,7 +883,7 @@ func hashTreeRootAux[T](
                   chunkContainingIndex(index) != chunk:
                 break
               inc j
-            ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+            ? hash_tree_root_multi(x[chunk], request, roots, i ..< j,
                                    atLayer + chunkLayer)
             i = j
       else: return unsupportedIndex
@@ -933,7 +931,7 @@ func hashTreeRootAux[T](
               chunkContainingIndex(index) != chunk:
             break
           inc j
-        ? hash_tree_root_multi(x.get, indices, roots, loopOrder, i ..< j,
+        ? hash_tree_root_multi(x.get, request, roots, i ..< j,
                                atLayer + chunkLayer)
         i = j
       else: return unsupportedIndex
@@ -995,7 +993,7 @@ func hashTreeRootAux[T](
                   chunkContainingIndex(index) != chunk:
                 break
               inc j
-            ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
+            ? hash_tree_root_multi(f, request, roots, i ..< j,
                                    atLayer + chunkLayer)
             i = j
             isActive = false
@@ -1127,9 +1125,8 @@ func hashTreeRootCached*(x: HashList): Digest {.noinit.} =
 
 func hashTreeRootCached*(
     x: HashArray,
-    indices: openArray[GeneralizedIndex],
+    request: BatchRequest,
     roots: var openArray[Digest],
-    loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
   mixin toSszType
@@ -1168,16 +1165,15 @@ func hashTreeRootCached*(
               chunkContainingIndex(index) != chunk:
             break
           inc j
-        ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+        ? hash_tree_root_multi(x[chunk], request, roots, i ..< j,
                                atLayer + chunkLayer)
         i = j
   ok()
 
 func hashTreeRootCached*(
     x: HashList,
-    indices: openArray[GeneralizedIndex],
+    request: BatchRequest,
     roots: var openArray[Digest],
-    loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
   mixin toSszType
@@ -1227,7 +1223,7 @@ func hashTreeRootCached*(
                 chunkContainingIndex(index) != chunk:
               break
             inc j
-          ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
+          ? hash_tree_root_multi(x[chunk], request, roots, i ..< j,
                                  atLayer + chunkLayer)
           i = j
     else: return unsupportedIndex
@@ -1263,9 +1259,8 @@ func hash_tree_root*(x: auto): Digest {.noinit.} =
 # https://github.com/nim-lang/Nim/issues/19157
 func hash_tree_root_multi(
     x: auto,
-    indices: openArray[GeneralizedIndex],
+    request: BatchRequest,
     roots: var openArray[Digest],
-    loopOrder: seq[int],
     slice: Slice[int],
     atLayer = 0): Result[void, string] =
   trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x)),
@@ -1273,80 +1268,12 @@ func hash_tree_root_multi(
   mixin toSszType
 
   when x is HashArray|HashList:
-    ? hashTreeRootCached(x, indices, roots, loopOrder, slice, atLayer)
+    ? hashTreeRootCached(x, request, roots, slice, atLayer)
   else:
-    ? hashTreeRootAux(toSszType(x), indices, roots, loopOrder, slice, atLayer)
+    ? hashTreeRootAux(toSszType(x), request, roots, slice, atLayer)
 
   trs "HASH TREE ROOT FOR ", name(typeof(x)),
     slice.mapIt(indexAt(it)), " = ", slice.mapIt("0x" & $rootAt(it))
-  ok()
-
-template normalize(v: GeneralizedIndex): GeneralizedIndex =
-  # GeneralizedIndex is 1-based.
-  # Looking at their bit patterns, from MSB to LSB, they:
-  # - Start with a 1 bit.
-  # - Continue with a 0 bit when going left or 1 bit when going right,
-  #   from the tree root down to the leaf.
-  # i.e., 0b1_110 is the node after picking right branch twice, then left.
-  #
-  # For depth-first ordering, shorter bit-strings are parents of nodes
-  # that include them as their prefix.
-  # i.e., 0b1_110 is parent of 0b1_1100 (left) and 0b1_1101 (right)
-  # An extra 1 bit is added to distinguish parents from their left child.
-  ((v shl 1) or 1) shl leadingZeros(v)
-
-# Comparison utility for sorting indices in depth-first order (in-order).
-# This order is needed because `enumInstanceSerializedFields` does not allow
-# random access to specific fields. With depth-first order only a single pass
-# is required to fill in all the roots. `enumAllSerializedFields` cannot be
-# used for pre-computation at compile time, because the generalized indices
-# depend on the specific case values defined by the specific object instance.
-func cmpDepthFirst(x, y: GeneralizedIndex): int =
-  cmp(x.normalize, y.normalize)
-
-func merkleizationLoopOrderNimvm(
-    indices: openArray[GeneralizedIndex]): seq[int] {.compileTime.} =
-  result = toSeq(indices.low .. indices.high)
-  let idx = toSeq(indices)
-  result.sort do (x, y: int) -> int:
-    cmpDepthFirst(idx[x], idx[y])
-
-func merkleizationLoopOrderRegular(
-    indices: openArray[GeneralizedIndex]): seq[int] =
-  result = toSeq(indices.low .. indices.high)
-  let idx = makeUncheckedArray(unsafeAddr indices[0])
-  result.sort do (x, y: int) -> int:
-    cmpDepthFirst(idx[x], idx[y])
-
-func merkleizationLoopOrder(
-    indices: openArray[GeneralizedIndex]): seq[int] =
-  when nimvm:
-    merkleizationLoopOrderNimvm(indices)
-  else:
-    merkleizationLoopOrderRegular(indices)
-
-func validateIndices(
-    indices: openArray[GeneralizedIndex],
-    loopOrder: seq[int]): Result[void, string] =
-  var
-    prev = indices[loopOrder[0]]
-    prevLayer = log2trunc(prev)
-  if prev < 1.GeneralizedIndex: return err("Invalid generalized index.")
-  for i in 1 .. loopOrder.high:
-    let
-      curr = indices[loopOrder[i]]
-      currLayer = log2trunc(curr)
-      indicesOverlap =
-        if currLayer < prevLayer:
-          (prev shr (prevLayer - currLayer)) == curr
-        elif currLayer > prevLayer:
-          (curr shr (currLayer - prevLayer)) == prev
-        else:
-          curr == prev
-    if indicesOverlap:
-      return err("Given indices cover some leafs multiple times.")
-    prev = curr
-    prevLayer = currLayer
   ok()
 
 func hash_tree_root*(
@@ -1360,10 +1287,10 @@ func hash_tree_root*(
     roots[0] = hash_tree_root(x)
     ok()
   else:
-    let loopOrder = merkleizationLoopOrder(indices)
-    ? validateIndices(indices, loopOrder)
-    let slice = 0 ..< loopOrder.len
-    hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+    let
+      request = ? BatchRequest.init(indices)
+      slice = 0 ..< request.len
+    hash_tree_root_multi(x, request, roots, slice)
 
 func hash_tree_root*(
     x: auto,
@@ -1377,35 +1304,31 @@ func hash_tree_root*(
       roots[0] = hash_tree_root(x)
       ok()
     else:
-      const
-        loopOrder = merkleizationLoopOrder(indices)
-        v = validateIndices(indices, loopOrder)
-      when v.isErr:
-        err(v.error)
+      const request = BatchRequest.init(indices)
+      when request.isErr:
+        err(request.error)
       else:
-        const slice = 0 ..< loopOrder.len
-        hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+        const slice = 0 ..< request.unsafeGet.len
+        hash_tree_root_multi(x, request.unsafeGet, roots, slice)
 
 func hash_tree_root*(
     x: auto,
-    indices: openArray[GeneralizedIndex]
-): Result[seq[Digest], string] =
+    indices: openArray[GeneralizedIndex]): Result[seq[Digest], string] =
   if indices.len == 0:
     ok(newSeq[Digest](0))
   elif indices.len == 1 and indices[0] == 1.GeneralizedIndex:
     ok(@[hash_tree_root(x)])
   else:
-    let loopOrder = merkleizationLoopOrder(indices)
-    ? validateIndices(indices, loopOrder)
-    let slice = 0 ..< loopOrder.len
-    var roots = newSeq[Digest](indices.len)
-    ? hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+    let
+      request = ? BatchRequest.init(indices)
+      slice = 0 ..< request.len
+    var roots = newSeq[Digest](request.len)
+    ? hash_tree_root_multi(x, request, roots, slice)
     ok(roots)
 
 func hash_tree_root*(
     x: auto,
-    indices: static openArray[GeneralizedIndex]
-): auto =
+    indices: static openArray[GeneralizedIndex]): auto =
   type ResultType = Result[array[indices.len, Digest], string]
   when indices.len == 0:
     ResultType.ok([])
@@ -1413,15 +1336,22 @@ func hash_tree_root*(
     when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
       ResultType.ok([hash_tree_root(x)])
     else:
-      const
-        loopOrder = merkleizationLoopOrder(indices)
-        v = validateIndices(indices, loopOrder)
-      when v.isErr:
-        ResultType.err(v.error)
+      static: debugecho "htr ", $type(x)
+      static: debugecho $indices
+      static: debugecho $BatchRequest.init([1.GeneralizedIndex,2.GeneralizedIndex,3.GeneralizedIndex])
+      static: debugecho $afafa(indices)
+      static: debugecho $BatchRequest.init(indices)
+      static: debugecho "OK?"
+      const request = BatchRequest.init(indices)
+      static: debugecho "request done"
+      static: debugecho $request
+      static: raiseAssert "no way"
+      when request.isErr:
+        ResultType.err(request.error)
       else:
-        var roots {.noinit.}: array[indices.len, Digest]
-        const slice = 0 ..< loopOrder.len
-        let w = hash_tree_root_multi(x, indices, roots, loopOrder, slice)
+        var roots {.noinit.}: array[request.unsafeGet.len, Digest]
+        const slice = 0 ..< request.unsafeGet.len
+        let w = hash_tree_root_multi(x, request.unsafeGet, roots, slice)
         if w.isErr:
           ResultType.err(w.error)
         else:
@@ -1429,32 +1359,32 @@ func hash_tree_root*(
 
 func hash_tree_root*(
     x: auto,
-    index: GeneralizedIndex
-): Result[Digest, string] =
+    index: GeneralizedIndex): Result[Digest, string] =
   if index < 1.GeneralizedIndex:
     err("Invalid generalized index.")
   elif index == 1.GeneralizedIndex:
     ok(hash_tree_root(x))
   else:
-    const
-      loopOrder = @[0]
-      slice = 0 ..< loopOrder.len
+    let
+      request = ? BatchRequest.init([index])
+      slice = 0 ..< request.len
     var roots {.noinit.}: array[1, Digest]
-    ? hash_tree_root_multi(x, [index], roots, loopOrder, slice)
+    ? hash_tree_root_multi(x, request, roots, slice)
     ok(roots[0])
 
 func hash_tree_root*(
     x: auto,
-    index: static GeneralizedIndex
-): Result[Digest, string] =
+    index: static GeneralizedIndex): Result[Digest, string] =
   when index < 1.GeneralizedIndex:
     err("Invalid generalized index.")
   elif index == 1.GeneralizedIndex:
     ok(hash_tree_root(x))
   else:
-    const
-      loopOrder = @[0]
-      slice = 0 ..< loopOrder.len
-    var roots {.noinit.}: array[1, Digest]
-    ? hash_tree_root_multi(x, [index], roots, loopOrder, slice)
-    ok(roots[0])
+    const request = BatchRequest.init([index])
+    when request.isErr:
+      err(request.error)
+    else:
+      const slice = 0 ..< request.unsafeGet.len
+      var roots {.noinit.}: array[1, Digest]
+      ? hash_tree_root_multi(x, request.unsafeGet, roots, slice)
+      ok(roots[0])
