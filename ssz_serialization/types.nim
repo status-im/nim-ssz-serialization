@@ -8,7 +8,7 @@
 {.push raises: [].}
 
 import
-  std/[tables, typetraits, strformat],
+  std/[tables, typetraits, strformat, strutils],
   stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
   results,
   stint,
@@ -19,7 +19,11 @@ import
 
 from nimcrypto/utils import fromHex  # needed to disambiguate properly
 
-export stint, bitseqs, json_serialization
+export
+  macros.getCustomPragmaVal,
+  macros.hasCustomPragma,
+  macros.newIdentNode,
+  stint, bitseqs, json_serialization
 
 const
   offsetSize* = 4
@@ -35,6 +39,27 @@ type
   Limit* = int64
 
   Digest* = MDigest[32 * 8]
+
+# These pragmas control `StableContainer` according to
+# https://eips.ethereum.org/EIPS/eip-7495
+# The EIP is still under review, functionality may change
+# or go away without deprecation.
+template sszStableContainer*(n: int) {.pragma.}
+template sszProfile*(b: typedesc) {.pragma.}
+
+# `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
+template isStableContainer*(T: untyped): bool =
+  when compiles(T.hasCustomPragma(sszStableContainer)):
+    T.hasCustomPragma(sszStableContainer)
+  else:
+    false
+
+# `T` should be a `typedesc`: https://github.com/nim-lang/Nim/issues/23564
+template isProfile*(T: untyped): bool =
+  when compiles(T.hasCustomPragma(sszProfile)):
+    T.hasCustomPragma(sszProfile)
+  else:
+    false
 
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
@@ -479,6 +504,303 @@ template sum*[maxLen; T](a: var HashArray[maxLen, T]): T =
   mixin sum
   sum(a.data)
 
+func ensureIsValidStableContainer*(T: typedesc) {.compileTime.} =
+  static: doAssert T.isStableContainer
+  const N = T.getCustomPragmaVal(sszStableContainer)
+  doAssert N >= 0, "Unsupported capacity: " &
+    "`" & $T & " {.sszStableContainer: " & $N & ".}`"
+
+  var n = 0
+  T.enumAllSerializedFields:
+    doAssert fieldCaseDiscriminator == "",
+      "`StableContainer` types must not be case objects but " &
+      "`" & $T & "." & realFieldName & "` requires " &
+      "`" & fieldCaseDiscriminator & "`"
+    doAssert FieldType is Opt,
+      "`StableContainer` fields must be `Opt[T]` but " &
+      "`" & $T & "." & realFieldName & "` has type `" & $FieldType & "`"
+    inc n
+  doAssert n <= N, "`" & $T & "` is `{.sszStableContainer: " & $N & ".}` " &
+    "but contains " & $n & " fields"
+
+func numOptionalFields*(T: typedesc): int {.compileTime.} =
+  static: doAssert T.isProfile
+  var o = 0
+  T.enumAllSerializedFields:
+    when FieldType is Opt:
+      inc o
+  o
+
+func ensureIsValidProfile*(T: typedesc) {.compileTime.}
+
+func hasCompatibleMerkleization(
+    T: typedesc, B: typedesc): bool {.compileTime.} =
+  when T is B and B is T:
+    true
+  elif T is bool:
+    B is bool
+  elif T is uint8:
+    B is uint8
+  elif T is uint16:
+    B is uint16
+  elif T is uint32:
+    B is uint32
+  elif T is uint64:
+    B is uint64
+  elif T is UInt128:
+    B is UInt128
+  elif T is UInt256:
+    B is UInt256
+  elif T is BitList:
+    when B is BitList:
+      T.maxLen == B.maxLen
+    else:
+      false
+  elif T is BitArray:
+    when B is BitArray:
+      T.bits == B.bits
+    else:
+      false
+  elif T is List:
+    when B is List:
+      # `typeof(distinctBase(default(B))[0])` should be `B.T`:
+      # https://github.com/nim-lang/Nim/issues/23564
+      T.maxLen == B.maxLen and typeof(distinctBase(default(T))[0])
+        .hasCompatibleMerkleization(typeof(distinctBase(default(B))[0]))
+    else:
+      false
+  elif T is array:
+    when B is array:
+      T.len == B.len and ElemType(T).hasCompatibleMerkleization(ElemType(B))
+    else:
+      false
+  elif T is object and not T.isStableContainer and not T.isProfile:
+    when B is object and not B.isStableContainer and not B.isProfile:
+      var fieldNames: seq[string]
+      B.enumAllSerializedFields:
+        fieldNames.add realFieldName.nimIdentNormalize()
+
+      macro baseType(name: static string): untyped =
+        let nameIdent = ident(name)
+        quote do:
+          typeof default(B).`nameIdent`
+
+      var fieldIndex = 0
+      T.enumAllSerializedFields:
+        if fieldIndex >= fieldNames.len:
+          return false
+        if realFieldName.nimIdentNormalize() != fieldNames[fieldIndex]:
+          return false
+        inc fieldIndex
+        when compiles(realFieldName.baseType):
+          if not FieldType.hasCompatibleMerkleization(realFieldName.baseType):
+            return false
+        else:
+          return false
+      fieldIndex == fieldNames.len
+    else:
+      false
+  elif T.isStableContainer:
+    static: T.ensureIsValidStableContainer()
+    when B.isStableContainer:
+      static: B.ensureIsValidStableContainer()
+      when T.getCustomPragmaVal(sszStableContainer) ==
+          B.getCustomPragmaVal(sszStableContainer):
+        var fieldNames: seq[string]
+        B.enumAllSerializedFields:
+          fieldNames.add realFieldName.nimIdentNormalize()
+
+        macro baseType(name: static string): untyped =
+          let nameIdent = ident(name)
+          quote do:
+            typeof default(B).`nameIdent`
+
+        var fieldIndex = 0
+        T.enumAllSerializedFields:
+          if fieldIndex >= fieldNames.len:
+            return false
+          if realFieldName.nimIdentNormalize() != fieldNames[fieldIndex]:
+            return false
+          if not FieldType.T.hasCompatibleMerkleization(
+              realFieldName.baseType.T):
+            return false
+          inc fieldIndex
+        fieldIndex == fieldNames.len
+      else:
+        false
+    else:
+      false
+  elif T.isProfile:
+    static: T.ensureIsValidProfile()
+    when B.isStableContainer:
+      static: B.ensureIsValidStableContainer()
+      T.getCustomPragmaVal(sszProfile).hasCompatibleMerkleization(B)
+    elif B.isProfile:
+      static: B.ensureIsValidProfile()
+      when T.getCustomPragmaVal(sszProfile).hasCompatibleMerkleization(
+          B.getCustomPragmaVal(sszProfile)):
+        var fieldNames: seq[string]
+        B.enumAllSerializedFields:
+          fieldNames.add realFieldName.nimIdentNormalize()
+
+        macro baseType(name: static string): untyped =
+          let nameIdent = ident(name)
+          quote do:
+            typeof default(B).`nameIdent`
+
+        var fieldIndex = 0
+        T.enumAllSerializedFields:
+          if fieldIndex >= fieldNames.len:
+            return false
+          if realFieldName.nimIdentNormalize() != fieldNames[fieldIndex]:
+            return false
+          when FieldType is Opt:
+            template F: untyped = FieldType.T
+          else:
+            template F: untyped = FieldType
+          when realFieldName.baseType is Opt:
+            template G: untyped = realFieldName.baseType.T
+          else:
+            template G: untyped = realFieldName.baseType
+          if not F.hasCompatibleMerkleization(G):
+            return false
+          inc fieldIndex
+        fieldIndex == fieldNames.len
+      else:
+        false
+    else:
+      false
+  else:
+    false
+
+func ensureIsValidProfile*(T: typedesc) {.compileTime.} =
+  static: doAssert T.isProfile
+  # `B` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template B: untyped = T.getCustomPragmaVal(sszProfile)
+  static: doAssert B.isStableContainer, "Invalid base type: " &
+    "`" & $T & " {.sszProfile: " & $B & ".}`"
+  static: B.ensureIsValidStableContainer()
+
+  var fieldNames: seq[string]
+  B.enumAllSerializedFields:
+    fieldNames.add realFieldName.nimIdentNormalize()
+
+  macro baseType(name: static string): untyped =
+    let nameIdent = ident(name)
+    quote do:
+      # `vResultPrivate` should be `T`: https://github.com/nim-lang/Nim/issues/23713
+      typeof default(B).`nameIdent`.vResultPrivate
+
+  var lastFieldIndex = -1
+  T.enumAllSerializedFields:
+    doAssert fieldCaseDiscriminator == "",
+      "`Profile` types must not be case objects but " &
+      "`" & $T & "." & realFieldName & "` requires " &
+      "`" & fieldCaseDiscriminator & "`"
+    let fieldIndex = fieldNames.find(realFieldName.nimIdentNormalize())
+    doAssert fieldIndex >= 0,
+      "`" & $T & "` fields must exist in the base type but " &
+      "`" & realFieldName & "` is not defined in `" & $B & "`"
+    doAssert fieldIndex > lastFieldIndex,
+      "`" & $T & "` fields must have the same order as in the base type but " &
+      "`" & realFieldName & "` is defined earlier than in `" & $B & "`"
+    lastFieldIndex = fieldIndex
+    when FieldType is Opt:
+      template F: untyped = FieldType.T
+    else:
+      template F: untyped = FieldType
+    doAssert F.hasCompatibleMerkleization(baseType(realFieldName)),
+      "`" & $T & "." & realFieldName & "` has type `" & $F & "`, " &
+      "incompatible with base field `" & $B & "." & realFieldName & "` " &
+      "of type " & $realFieldName.baseType
+
+func fromBase*[T, B](t: typedesc[T], v: B): Opt[T] =
+  static: doAssert T.hasCompatibleMerkleization(B),
+    "`" & $T & "` is not compatible with `" & $B & "`"
+  when B is T:
+    Opt.some(v)
+  elif B is array|HashArray:
+    var res: T
+    for i in 0 ..< res.len:
+      res[i] = ? ElemType(T).fromBase(v[i])
+    Opt.some(res)
+  elif B is List|HashList:
+    Opt.some(T.init v.mapIt(? ElemType(T).fromBase(it)))
+  else:
+    var res = Opt.some(default(T))
+    macro fieldValue(name: static string): untyped =
+      let nameIdent = ident(name)
+      quote do:
+        res.unsafeGet.`nameIdent`
+
+    when B.isStableContainer or B.isProfile:
+      v.enumInstanceSerializedFields(fieldName {.used.}, field):
+        when typeof(field) is Opt:
+          when not compiles(fieldName.fieldValue):
+            if field.isSome:
+              return Opt.none(T)  # Field is disallowed in `T`
+          else:
+            when typeof(fieldName.fieldValue) isnot Opt:
+              if field.isNone:
+                return Opt.none(T)  # Field is required in `T`
+
+    v.enumInstanceSerializedFields(fieldName {.used.}, field):
+      when compiles(fieldName.fieldValue):
+        when typeof(field) is Opt and (B.isStableContainer or B.isProfile):
+          when typeof(fieldName.fieldValue) is Opt:
+            if field.isSome:
+              fieldName.fieldValue.ok(
+                ? typeof(fieldName.fieldValue.T).fromBase(field.unsafeGet))
+          else:
+            fieldValue(fieldName) =
+              ? typeof(fieldName.fieldValue).fromBase(field.get)
+        else:
+          fieldValue(fieldName) =
+            ? typeof(fieldName.fieldValue).fromBase(field)
+    res
+
+func toBase*[T, B](v: T, t: typedesc[B]): B =
+  static: doAssert T.hasCompatibleMerkleization(B),
+    "`" & $T & "` is not compatible with `" & $B & "`"
+  when T is B:
+    v
+  elif T is array|HashArray:
+    var res: B
+    for i in 0 ..< res.len:
+      res[i] = v[i].toBase(ElemType(B))
+    res
+  elif T is List|HashList:
+    B.init v.mapIt(it.toBase(ElemType(B)))
+  else:
+    macro fieldValue(name: static string): untyped =
+      let nameIdent = ident(name)
+      quote do:
+        v.`nameIdent`
+
+    var res: B
+    res.enumInstanceSerializedFields(fieldName {.used.}, field):
+      when compiles(fieldName.fieldValue):
+        when (B.isStableContainer or B.isProfile):
+          when typeof(field) is Opt:
+            when typeof(fieldName.fieldValue) is Opt:
+              if fieldName.fieldValue.isSome:
+                field.ok fieldName.fieldValue.unsafeGet.toBase(typeof(field).T)
+            else:
+              field.ok fieldName.fieldValue.toBase(typeof(field).T)
+          else:
+            when typeof(fieldName.fieldValue) is Opt:
+              field = fieldName.fieldValue.get.toBase(typeof(field))
+            else:
+              field = fieldName.fieldValue.toBase(typeof(field))
+        else:
+          field = fieldName.fieldValue.toBase(typeof(field))
+      else:
+        static: doAssert(
+          typeof(field) is Opt and (B.isStableContainer or B.isProfile),
+          "`" & fieldName & "` is required in `" & $B & "` " &
+          "but missing in `" & $T & "`")
+    res
+
 macro unsupported*(T: typed): untyped =
   # TODO: {.fatal.} breaks compilation even in `compiles()` context,
   # so we use this macro instead. It's also much better at figuring
@@ -525,7 +847,8 @@ func supportsBulkCopy*(T: type): bool {.compileTime.} =
 func isFixedSize*(T0: type): bool {.compileTime.} =
   mixin toSszType, enumAllSerializedFields
 
-  type T = type toSszType(default T0)
+  # `T` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template T: untyped = typeof toSszType(default T0)
 
   when T is BasicType:
     return true
@@ -534,7 +857,16 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
   elif T is OptionalType:
     return false
   elif T is object|tuple:
-    when isCaseObject(T):
+    when T.isStableContainer:
+      return false
+    elif T.isProfile:
+      T.enumAllSerializedFields:
+        when FieldType is Opt:
+          return false
+        elif not FieldType.isFixedSize:
+          return false
+      return true
+    elif isCaseObject(T):
       return false
     else:
       enumAllSerializedFields(T):
@@ -545,7 +877,8 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
 func fixedPortionSize*(T0: type): int {.compileTime.} =
   mixin enumAllSerializedFields, toSszType
 
-  type T = type toSszType(declval T0)
+  # `T` should be `type`: https://github.com/nim-lang/Nim/issues/23564
+  template T: untyped = typeof toSszType(declval T0)
 
   when T is BasicType: sizeof(T)
   elif T is array|HashArray:
@@ -553,11 +886,29 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
   elif T is object|tuple:
-    enumAllSerializedFields(T):
-      when isFixedSize(FieldType):
-        result += fixedPortionSize(FieldType)
-      else:
-        result += offsetSize
+    when T.isStableContainer:
+      static: T.ensureIsValidStableContainer()
+      const N = T.getCustomPragmaVal(sszStableContainer)
+      BitArray[N].fixedPortionSize
+    elif T.isProfile:
+      static: T.ensureIsValidProfile()
+      const O = T.numOptionalFields
+      var total = 0
+      when O > 0:
+        total = static(BitArray[O].fixedPortionSize)
+      T.enumAllSerializedFields:
+        when FieldType isnot Opt:
+          when FieldType.isFixedSize:
+            total += static(FieldType.fixedPortionSize)
+          else:
+            total += offsetSize
+      total
+    else:
+      enumAllSerializedFields(T):
+        when isFixedSize(FieldType):
+          result += fixedPortionSize(FieldType)
+        else:
+          result += offsetSize
   else:
     unsupported T0
 
