@@ -912,6 +912,58 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
   else:
     unsupported T0
 
+func minSize*(T0: type): int {.compileTime.} =
+  mixin enumAllSerializedFields, toSszType
+
+  type T = type toSszType(declval T0)
+
+  when isFixedSize(T):
+    fixedPortionSize(T)
+  elif T is array|HashArray:
+    type E = ElemType(T)
+    static: doAssert not isFixedSize(E)
+    T.len * (offsetSize + minSize(E))
+  elif T is List|HashList:
+    0
+  elif T is BitList:
+    1  # Trailing 1-bit
+  elif T is object:
+    var res = fixedPortionSize(T)
+    enumAllSerializedFields(T):
+      when not isFixedSize(FieldType):
+        res += minSize(FieldType)
+    res
+  else:
+    unsupported T0
+
+func maxSize*(T0: type): int {.compileTime.} =
+  mixin enumAllSerializedFields, toSszType
+
+  type T = type toSszType(declval T0)
+
+  when isFixedSize(T):
+    fixedPortionSize(T)
+  elif T is array|HashArray:
+    type E = ElemType(T)
+    static: doAssert not isFixedSize(E)
+    T.len * (offsetSize + maxSize(E))
+  elif T is List|HashList:
+    type E = ElemType(T)
+    when isFixedSize(E):
+      T.maxLen * fixedPortionSize(E)
+    else:
+      T.maxLen * (offsetSize + maxSize(E))
+  elif T is BitList:
+    ((T.maxLen + 1) + 7) div 8
+  elif T is object:
+    var res = fixedPortionSize(T)
+    enumAllSerializedFields(T):
+      when not isFixedSize(FieldType):
+        res += maxSize(FieldType)
+    res
+  else:
+    unsupported T0
+
 iterator fieldInfos(RecordType: type): tuple[name: string,
                                              offset: int,
                                              fixedSize: int,
