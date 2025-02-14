@@ -214,19 +214,21 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
             raiseMalformedSszError(`type recordDef`, "empty union not allowed")
 
           var selector: `selectorFieldType`
-          # TODO: `checkedEnumAssign` does not check for holes in an enum.
-          # SSZ Union spec also doesn't allow this, so it should be fine, but
-          # nothing stops currently defining an enum with holes and such data
-          # will also be parsed and result in an object like:
-          # `(selector: 2 (invalid data!))`
+          # `checkedEnumAssign` also checks for holes in an enum.
           if not checkedEnumAssign(selector, `input`[0]):
             raiseMalformedSszError(`type recordDef`, "union selector is out of bounds")
 
           var caseObj = `TInst`(`selectorFieldName`: selector)
 
+          var fieldCount = 0
           enumInstanceSerializedFields(caseObj, fieldName, field):
             when fieldName != `SelectorFieldNameLit`:
               readSszValue(`input`.toOpenArray(1, `input`.len - 1), field)
+              fieldCount.inc()
+
+          if fieldCount == 0: # This represents a `None` in the Union
+            if `input`.len != 1:
+              raiseMalformedSszError(`type recordDef`, "Union None should have no value")
 
           caseObj
 
