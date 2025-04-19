@@ -13,6 +13,8 @@ import
   ../ssz_serialization,
   ../ssz_serialization/[merkleization, navigator, dynamic_navigator]
 
+from nimcrypto/utils import fromHex
+
 # TODO: Move to types?
 func `$`*(x: Digest): string =
   x.data.toHex()
@@ -374,6 +376,63 @@ suite "hash":
     readSszValue(emptyBytes, sloaded)
     check:
       emptyRoot == hash_tree_root(sloaded)
+
+    template checkReject(encoded: string): untyped =
+      checkpoint encoded
+      expect(SszError):
+        var x: HashList[List[uint64, 1024], 1024]
+        readSszBytes(utils.fromHex(encoded), x)
+      expect(SszError):
+        var x: List[List[uint64, 1024], 1024]
+        readSszBytes(utils.fromHex(encoded), x)
+
+    # < `offsetSize`
+    checkReject "00"
+    checkReject "0000"
+    checkReject "000000"
+
+    # Invalid offsets (too small)
+    checkReject "00000000"
+    checkReject "01000000"
+    checkReject "02000000"
+    checkReject "03000000"
+
+    # Invalid offsets (too large)
+    checkReject "05000000"
+    checkReject "06000000"
+    checkReject "07000000"
+    checkReject "08000000"
+    checkReject "09000000"
+
+    # Invalid offsets (too small) with extra data
+    checkReject "0000000000"
+    checkReject "0100000000"
+    checkReject "0200000000"
+    checkReject "0300000000"
+
+    # Valid offset with extra data
+    checkReject "0400000000"
+
+    # Invalid offsets (too large) with extra data
+    checkReject "0500000000"
+    checkReject "0600000000"
+    checkReject "0700000000"
+    checkReject "0800000000"
+    checkReject "0900000000"
+
+    # Invalid second offsets
+    checkReject "0800000000000000"
+    checkReject "0800000004000000"
+    checkReject "0800000007000000"
+    checkReject "0800000009000000"
+
+    # Invalid second offsets with extra data
+    checkReject "090000000900000000"
+    checkReject "0900000009000000FF"
+    checkReject "0A0000000A0000000000"
+    checkReject "0A0000000A000000FFFF"
+    checkReject "0B0000000B000000000000"
+    checkReject "0B0000000B000000FFFFFF"
 
 suite "underlong values":
   template testit(t: auto) =
