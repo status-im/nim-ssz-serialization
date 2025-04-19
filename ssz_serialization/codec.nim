@@ -283,8 +283,17 @@ proc readSszValue*[T](
     if resultBytesCount == maxExpectedSize:
       checkForForbiddenBits(T, input, val.maxLen + 1)
 
-  elif val is HashList:
+  elif val is Digest:
+    readSszValue(input, val.data)
+  elif val is HashArray:
+    readSszValue(input, toSszType(val.data))
+    val.resetCache()
+  elif val is HashList|List|array:
     type E = typeof toSszType(declval ElemType(typeof val))
+    when val is HashList:
+      template v: untyped = val.data
+    else:
+      template v: untyped = val
 
     when isFixedSize(E):
       const elemSize = fixedPortionSize(E)
@@ -296,133 +305,86 @@ proc readSszValue*[T](
           ex.elementSize = elemSize
           raise ex
 
-      val.data.setOutputSize input.len div elemSize
-      when supportsBulkCopy(type E):
-        if val.data.len > 0:
-          copyMem addr val.data[0], unsafeAddr input[0], input.len
+      v.setOutputSize input.len div elemSize
+      when supportsBulkCopy(type v[0]):
+        if v.len > 0:
+          copyMem addr v[0], unsafeAddr input[0], input.len
 
-        # There's no selective invalidation here, because it would require a
-        # potential performance tradeoff, either interfering with bulk copy,
-        # or involving more verification of changed hash entries.
-        val.resetCache()
+        when val is HashList:
+          # There's no selective invalidation here, because it would require a
+          # potential performance tradeoff, either interfering with bulk copy,
+          # or involving more verification of changed hash entries.
+          val.resetCache()
       else:
-        var prevValue: E
-        val.resizeHashes()
+        when val is HashList:
+          val.resizeHashes()
+          var prevValue: E
 
         for i in 0 ..< val.len:
           let offset = i * elemSize
-          assign(prevValue, val.data[i])
+          when val is HashList:
+            assign(prevValue, toSszType(v[i]))
           readSszValue(
-            input.toOpenArray(offset, offset + elemSize - 1), val.data[i])
-          if prevValue != val.data[i]:
-            val.clearCaches(i)
+            input.toOpenArray(offset, offset + elemSize - 1), toSszType(v[i]))
+          when val is HashList:
+            if prevValue != toSszType(v[i]):
+              val.clearCaches(i)
 
+        when val is HashList:
+          # Unconditionally trigger small, O(1) updates to handle when the list
+          # shrinks without otherwise changing.
+          val.clearCaches(0)
+          val.clearCaches(max(val.len - 1, 0))
+
+    else:
+      if input.len == 0:
+        # This is an empty list.
+        # The default initialization of the return value is fine.
+        v.setOutputSize 0
+        when val is HashList:
+          val.resetCache()
+        return
+      elif input.len < offsetSize:
+        raiseMalformedSszError(T, "input of insufficient size")
+
+      var offset = readOffset 0
+      if offset mod offsetSize != 0:
+        raiseMalformedSszError(T, "unaligned list element offset")
+
+      let resultLen = offset div offsetSize
+      if resultLen == 0:
+        # If there are too many elements, other constraints detect problems
+        # (not monotonically increasing, past end of input, or last element
+        # not matching up with its nextOffset properly)
+        raiseMalformedSszError(T, "incorrect encoding of zero length")
+
+      v.setOutputSize resultLen
+      when val is HashList:
+        val.resizeHashes()
+        var prevValue: E
+
+      for i in 1 ..< resultLen:
+        let nextOffset = readOffset(i * offsetSize)
+        if nextOffset < offset:
+          raiseMalformedSszError(T, "list element offsets are decreasing")
+        else:
+          when val is HashList:
+            assign(prevValue, toSszType(v[i - 1]))
+          readSszValue(
+            input.toOpenArray(offset, nextOffset - 1), toSszType(v[i - 1]))
+          when val is HashList:
+            if prevValue != toSszType(v[i - 1]):
+              val.clearCaches(i - 1)
+        offset = nextOffset
+
+      readSszValue(
+        input.toOpenArray(offset, input.len - 1), toSszType(v[resultLen - 1]))
+
+      when val is HashList:
         # Unconditionally trigger small, O(1) updates to handle when the list
         # shrinks without otherwise changing.
         val.clearCaches(0)
         val.clearCaches(max(val.len - 1, 0))
-
-    else:
-      if input.len == 0:
-        # This is an empty list.
-        # The default initialization of the return value is fine.
-        val.data.setOutputSize 0
-        val.resetCache()
-        return
-      elif input.len < offsetSize:
-        raiseMalformedSszError(T, "input of insufficient size")
-
-      var offset = readOffset 0
-      let resultLen = offset div offsetSize
-
-      if resultLen == 0:
-        # If there are too many elements, other constraints detect problems
-        # (not monotonically increasing, past end of input, or last element
-        # not matching up with its nextOffset properly)
-        raiseMalformedSszError(T, "incorrect encoding of zero length")
-
-      val.data.setOutputSize resultLen
-      val.resizeHashes()
-
-      var prevValue: E
-      for i in 1 ..< resultLen:
-        let nextOffset = readOffset(i * offsetSize)
-        if nextOffset < offset:
-          raiseMalformedSszError(T, "list element offsets are decreasing")
-        else:
-          assign(prevValue, val.data[i - 1])
-          readSszValue(
-            input.toOpenArray(offset, nextOffset - 1), val.data[i - 1])
-          if prevValue != val.data[i - 1]:
-            val.clearCaches(i - 1)
-        offset = nextOffset
-
-      readSszValue(
-        input.toOpenArray(offset, input.len - 1), val.data[resultLen - 1])
-
-      # Unconditionally trigger small, O(1) updates to handle when the list
-      # shrinks without otherwise changing.
-      val.clearCaches(0)
-      val.clearCaches(max(val.len - 1, 0))
-
-  elif val is HashArray:
-    readSszValue(input, toSszType(val.data))
-    val.resetCache()
-  elif val is Digest:
-    readSszValue(input, val.data)
-  elif val is List|array:
-    type E = typeof toSszType(declval ElemType(typeof val))
-
-    when isFixedSize(E):
-      const elemSize = fixedPortionSize(E)
-      when elemSize > 1:
-        if input.len mod elemSize != 0:
-          var ex = new SszSizeMismatchError
-          ex.deserializedType = cstring typetraits.name(T)
-          ex.actualSszSize = input.len
-          ex.elementSize = elemSize
-          raise ex
-
-      val.setOutputSize input.len div elemSize
-      when supportsBulkCopy(type val[0]):
-        if val.len > 0:
-          copyMem addr val[0], unsafeAddr input[0], input.len
-      else:
-        for i in 0 ..< val.len:
-          let offset = i * elemSize
-          readSszValue(
-            input.toOpenArray(offset, offset + elemSize - 1), toSszType(val[i]))
-
-    else:
-      if input.len == 0:
-        # This is an empty list.
-        # The default initialization of the return value is fine.
-        val.setOutputSize 0
-        return
-      elif input.len < offsetSize:
-        raiseMalformedSszError(T, "input of insufficient size")
-
-      var offset = readOffset 0
-      let resultLen = offset div offsetSize
-
-      if resultLen == 0:
-        # If there are too many elements, other constraints detect problems
-        # (not monotonically increasing, past end of input, or last element
-        # not matching up with its nextOffset properly)
-        raiseMalformedSszError(T, "incorrect encoding of zero length")
-
-      val.setOutputSize resultLen
-      for i in 1 ..< resultLen:
-        let nextOffset = readOffset(i * offsetSize)
-        if nextOffset < offset:
-          raiseMalformedSszError(T, "list element offsets are decreasing")
-        else:
-          readSszValue(
-            input.toOpenArray(offset, nextOffset - 1), toSszType(val[i - 1]))
-        offset = nextOffset
-
-      readSszValue(
-        input.toOpenArray(offset, input.len - 1), toSszType(val[resultLen - 1]))
 
   elif val is OptionalType:
     type E = ElemType(T)
