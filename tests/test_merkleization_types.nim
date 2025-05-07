@@ -60,6 +60,12 @@ type
     x: HashArray[2, E]
     y: HashList[E, 2]
     z: HashList[E, 2]
+    aa: HashArray[2, uint64]
+    ab: HashList[uint64, 2]
+    ac: HashList[uint64, 2]
+    ad: HashArray[1, E]
+    ae: HashList[E, 1]
+    af: HashList[E, 1]
 let
   x = X(
     a: true,
@@ -103,7 +109,13 @@ let
     x: HashArray[2, E](data: [E(x: false, y: true), E(x: true, y: false)]),
     y: HashList[E, 2].init(
       @[E(x: false, y: true), E(x: true, y: false)]),
-    z: HashList[E, 2].init(@[]))
+    z: HashList[E, 2].init(@[]),
+    aa: HashArray[2, uint64](data: [1'u64, 2]),
+    ab: HashList[uint64, 2].init(@[1'u64, 2]),
+    ac: HashList[uint64, 2].init(@[]),
+    ad: HashArray[1, E](data: [E(x: true, y: false)]),
+    ae: HashList[E, 1].init(@[E(x: true, y: false)]),
+    af: HashList[E, 1].init(@[]))
   roots = block:
     var res = {
       # a
@@ -224,14 +236,38 @@ let
       # z
       228: d(0.u256),
       229: d(0.u256),
-      115: d(0'u64)
+      115: d(0'u64),
+
+      # aa
+      58: d([1'u8, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]),
+
+      # ab
+      118: d([1'u8, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]),
+      119: d(2'u64),
+
+      # ac
+      120: d([]),
+      121: d(0'u64),
+
+      # ad
+      122: d(1'u8),
+      123: d(0'u8),
+
+      # ae
+      248: d(1'u8),
+      249: d(0'u8),
+      125: d(1'u64),
+
+      # af
+      126: d(0.u256),
+      127: d(0'u64),
     }.toOrderedTable
-    for i in 58 ..< 64:
+    for i in 64 ..< 64:
       res[i] = d(0.u256)
     for i in [
         40, 41, 84, 42, 86, 43, 88, 44, 90, 45, 47, 96, 97, 48,
         196, 197, 98, 49, 100, 50, 102, 51, 52, 53, 216, 217, 108, 109, 54,
-        110, 111, 55, 224, 225, 112, 56, 114, 57]:
+        110, 111, 55, 224, 225, 112, 56, 114, 57, 59, 60, 61, 124, 62, 63]:
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
     for i in countdown(31, 1):
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))

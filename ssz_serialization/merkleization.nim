@@ -1020,6 +1020,25 @@ func hashTreeRootAux[T](
     unsupported T
   ok()
 
+func singleDataHash(x: HashArray|HashList, res: var Digest) =
+  static: doAssert x.maxChunks == 1
+  if x.len == 0:
+    res.reset()
+  else:
+    type S = typeof toSszType(declval x.T)
+    when S is BasicType | Digest:
+      when cpuEndian == bigEndian:
+        unsupported typeof(x) # No bigendian support here!
+
+      let
+        bytes = cast[ptr UncheckedArray[byte]](unsafeAddr x.data[0])
+        byteLen = x.data.len * sizeof(x.T)
+        nbytes = min(byteLen, 32)
+      res.data[0 ..< nbytes] = bytes.toOpenArray(0, nbytes - 1)
+      res.data[nbytes ..< 32] = zero64.toOpenArray(nbytes, 31)
+    else:
+      res = hash_tree_root(x.data[0])
+
 func mergedDataHash(x: HashArray|HashList, chunkIdx: int64, res: var Digest) =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
   mixin hash_tree_root, toSszType
@@ -1078,7 +1097,10 @@ func hashTreeRootCachedPtr*(x: HashArray, vIdx: int64): ptr Digest =
   let px = unsafeAddr x.hashes[vIdx]
   if not isCached(x.hashes[vIdx]):
     # TODO oops. so much for maintaining non-mutability.
-    mergedHash(x, vIdx * 2, px[])
+    when x.maxChunks == 1:
+      singleDataHash(x, px[])
+    else:
+      mergedHash(x, vIdx * 2, px[])
   px
 
 func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
@@ -1095,7 +1117,7 @@ func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
 
   trs "GETTING ", vIdx, " ", layerIdx, " ", layer, " ", x.indices.len
 
-  doAssert layer < x.maxDepth
+  doAssert layer < x.maxDepth or layer == 0
   if layerIdx >= x.indices[layer + 1]:
     trs "ZERO ", x.indices[layer], " ", x.indices[layer + 1]
     unsafeAddr zeroHashes[x.maxDepth - layer]
@@ -1104,7 +1126,10 @@ func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
     if not isCached(px[]):
       trs "REFRESHING ", vIdx, " ", layerIdx, " ", layer
       # TODO oops. so much for maintaining non-mutability.
-      mergedHash(x, vIdx * 2, px[])
+      when x.maxChunks == 1:
+        singleDataHash(x, px[])
+      else:
+        mergedHash(x, vIdx * 2, px[])
     else:
       trs "CACHED ", layerIdx
     px
