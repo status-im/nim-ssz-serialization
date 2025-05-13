@@ -9,7 +9,7 @@
 
 import
   std/sequtils,
-  stew/[bitops2, byteutils, staticfor],
+  stew/[bitops2, staticfor],
   unittest2,
   ../ssz_serialization/proofs
 
