@@ -66,7 +66,7 @@ type
     ad: HashArray[1, E]
     ae: HashList[E, 1]
     af: HashList[E, 1]
-    ag: uint8
+    ag: seq[uint16]
 let
   x = X(
     a: true,
@@ -117,7 +117,7 @@ let
     ad: HashArray[1, E](data: [E(x: true, y: false)]),
     ae: HashList[E, 1].init(@[E(x: true, y: false)]),
     af: HashList[E, 1].init(@[]),
-    ag: 0)
+    ag: @[])
   roots = block:
     var res = {
       # a
@@ -265,15 +265,17 @@ let
       191: d(0'u64),
 
       # ag
-      96: d(0'u64),
+      192: d(0.u256),
+      193: d(0'u64),
     }.toOrderedTable
-    for i in 97 ..< 128:
-      res[i] = d(0.u256)
     for i in [
         72, 73, 148, 74, 150, 75, 152, 76, 154, 77, 79, 160, 161, 80,
         324, 325, 162, 81, 164, 82, 166, 83, 84, 85, 344, 345, 172, 173, 86,
-        174, 175, 87, 352, 353, 176, 88, 178, 89, 91, 92, 93, 188, 94, 95]:
+        174, 175, 87, 352, 353, 176, 88, 178, 89, 91, 92, 93, 188, 94, 95,
+        96]:
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
+    for i in 98 ..< 128:
+      res[i] = d(0.u256)
     for i in countdown(63, 1):
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
     res

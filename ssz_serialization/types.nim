@@ -139,6 +139,17 @@ type
         hashListIndicesLen(max(maxChunkIdx(T, maxLen), 2)), int64] ##\
       ## Holds the starting index in the hashes list for each level of the tree
 
+  HashSeq*[T] = object
+    data*: seq[T]
+    hashes* {.dontSerialize.}: seq[seq[Digest]]
+      # All but last entry: Same format as for `HashArray`, one per full layer
+      # Last entry: Same format as for `HashList`, incomplete layer only
+      # [0] stores the root of the current layer data, and the next layer root
+    indices* {.dontSerialize.}: seq[int64]
+      # Same format as for `HashList`, last layer only
+    cachedRoot* {.dontSerialize.}: Digest
+      # Stores the root of initial layer root, and the length mix-in
+
   # Note for readers:
   # We use `array` for `Vector` and
   #        `BitArray` for `BitVector`
@@ -156,8 +167,8 @@ type
   # covered here needs to create overloads for toSszType / fromSszBytes
   # (basic types) or writeValue / readValue (complex types)
   SszType* =
-    BasicType | array | HashArray | List | HashList | BitArray | BitList |
-    Digest | object | tuple
+    BasicType | array | HashArray | List | HashList | seq | HashSeq |
+    BitArray | BitList | Digest | object | tuple
 
   # Convenience aliases from specification
   ByteList*[maxLen: static Limit] = List[byte, maxLen]

@@ -733,6 +733,31 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     var contentsHash {.noinit.}: Digest
     chunkedHashTreeRoot(binaryTreeHeight totalChunks, asSeq x, contentsHash)
     mixInLength(contentsHash, x.len, res)
+  elif T is seq:
+    type E = typeof toSszType(declval ElemType(T))
+    const valuesPerChunk =
+      when E is BasicType:
+        bytesPerChunk div sizeof(E)
+      else:
+        1
+
+    let numChunks =
+      when valuesPerChunk != 1:
+        (x.len + (valuesPerChunk - 1)) div valuesPerChunk
+      else:
+        x.len
+    var
+      firstIdx = 0
+      depth = -2
+    while numChunks > firstIdx:
+      depth += 2
+      firstIdx += (1'u64 shl depth)
+
+    var contentsHash: Digest
+    while depth >= 0:
+
+      depth -= 2
+
   elif T is OptionalType:
     if x.isSome:
       mixInLength(hash_tree_root(x.get), length = 1, res)
