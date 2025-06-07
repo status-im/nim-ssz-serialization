@@ -658,7 +658,7 @@ template bitListHashTreeRoot(
     totalChunks: static Limit, x: BitSeq, res: var Digest) =
   bitListHashTreeRoot(totalChunks, x, 0.Limit ..< totalChunks, topLayer = 0, res)
 
-func progressiveChunkedHashTreeRoot[T](x: seq[T], res: var Digest) =
+func totalChunkCount[T](x: seq[T]): int =
   type E = typeof toSszType(declval T)
   const valuesPerChunk =
     when E is BasicType:
@@ -666,28 +666,31 @@ func progressiveChunkedHashTreeRoot[T](x: seq[T], res: var Digest) =
     else:
       1'u64
 
-  let numChunks =
-    when valuesPerChunk != 1:
-      (x.len + static(valuesPerChunk - 1)) div valuesPerChunk
-    else:
-      x.len
+  when valuesPerChunk != 1:
+    (x.len + static(valuesPerChunk - 1)) div valuesPerChunk
+  else:
+    x.len
+
+func progressiveBottom(numChunks: int): (Limit, int) =
   var
     firstIdx = 0.Limit
-    height = -1
+    depth = 0
   while numChunks > firstIdx:
-    height += 2
-    firstIdx += height.limit
+    firstIdx = (firstIdx shl 2) or 1
+    inc depth
+  (firstIdx, depth)
 
+func progressiveChunkedHashTreeRoot[T](x: seq[T], res: var Digest) =
   res.reset()
-  while height >= 0:
-    let limit = height.limit
+  var firstIdx, depth = x.totalChunkCount.progressiveBottom()
+  while depth > 0:
+    dec depth
     var contentsHash {.noinit.}: Digest
     chunkedHashTreeRoot(
-      height, x, firstIdx ..< firstIdx + limit,
+      1 + (depth shl 1), x, firstIdx .. (firstIdx shl 2),
       topLayer = 0, contentsHash)
     mergeBranches(contentsHash, res, res)
-    firstIdx -= limit
-    height -= 2
+    firstIdx = firstIdx shr 2
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
   when T is BitArray|BitList:
@@ -953,7 +956,69 @@ func hashTreeRootAux[T](
         progressiveChunkedHashTreeRoot(x, rootAt(i))
         inc i
       elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
-        return unsupportedIndex
+        var j = i + 1
+        while j <= slice.b:
+          let
+            index = indexAt(j)
+            indexLayer = log2trunc(index)
+          if index < 4.GeneralizedIndex or
+              (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
+            break
+          inc j
+        let atLayer = atLayer + 1
+
+        var
+          needAll = false
+          res {.noinit.}: Digest
+        for x in i ..< j:
+          let index = indexAt(x)
+          if (index + 1).countOnes == 1:
+            needAll = true
+            res.reset()
+            break
+        var
+          p = j
+          firstIdx, depth = x.totalChunkCount.progressiveBottom()
+        while depth > 0:
+          dec depth
+          while p >= i:
+            let
+              index = indexAt(p - 1)
+              indexLayer = log2trunc(index)
+            if indexLayer < depth or
+                (index shr (indexLayer - depth)) !=
+                ((2 shl depth) - 1).GeneralizedIndex:
+              break
+            dec p
+          let atLayer = atLayer + depth
+          while p < j:
+            let
+              index = indexAt(p)
+              indexLayer = log2trunc(p)
+
+
+
+
+
+
+        # while j > i:
+
+
+        #  2:    10
+        #  5:   101
+        # 11:  1011
+        # 23: 10111
+
+
+        debugEcho $i, " --> ", $j
+
+        var indexLayer = indexLayer + 1
+
+        var
+          firstIdx = 0.Limit
+          height = -1
+
+        i = j
       else:
         return unsupportedIndex
   elif T is OptionalType:
