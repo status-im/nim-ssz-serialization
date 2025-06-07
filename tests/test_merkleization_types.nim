@@ -274,7 +274,7 @@ let
         174, 175, 87, 352, 353, 176, 88, 178, 89, 91, 92, 93, 188, 94, 95,
         96]:
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
-    for i in 98 ..< 128:
+    for i in 97 ..< 128:
       res[i] = d(0.u256)
     for i in countdown(63, 1):
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
