@@ -377,26 +377,11 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizer2,
 
   merkleizer.totalChunks = newTotalChunks
 
-func init*(S: type SszMerkleizer2): S =
-  S(
-    topIndex: S.height - 1,
-    totalChunks: 0)
-
-func init*(S: type SszMerkleizer2,
-           combinedChunks: openArray[Digest],
-           totalChunks: uint64): S =
-  for i in 0..<combinedChunks.len:
-    result.combinedChunks[i][0] = combinedChunks[i]
-  result.topIndex = S.height - 1
-  result.totalChunks = totalChunks
-
 template createMerkleizer2*(
     height: static Limit, topLayer = 0,
     internalParam = false): auto =
   trs "CREATING A MERKLEIZER FOR ", height, " (topLayer: ", topLayer, ")"
-
   let topIndex = height - 1 - topLayer
-
   SszMerkleizer2[height](
     topIndex: if (topIndex < 0): 0 else: topIndex,
     totalChunks: 0,
