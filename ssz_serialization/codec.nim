@@ -43,6 +43,14 @@ func setOutputSize(list: var List, length: int) {.raises: [SszError].} =
   if not list.setLenUninitialized length:
     raiseMalformedSszError(typeof(list), "length exceeds list limit")
 
+func setOutputSize[T](x: var seq[T], length: int) {.raises: [SszError].} =
+  # We will overwrite all bytes
+  when T is SomeNumber:
+    if x.len != length:
+      x = newSeqUninitialized[T](length)
+  else:
+    x.setLen(length)
+
 # fromSszBytes copies the wire representation to a Nim variable,
 # assuming there's enough data in the buffer
 func fromSszBytes*(
@@ -239,11 +247,19 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
 func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
   initSszUnionImpl(T, input)
 
+func read(F: typedesc, input: openArray[byte]): F {.raises: [SszError].} =
+  when compiles(F.fromSszBytes(input)):
+    F.fromSszBytes(input)
+  else:
+    var f: F
+    readSszValue(input, f)
+    f
+
 proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
   mixin fromSszBytes, toSszType, readSszValue
 
-  template readOffsetUnchecked(n: int): uint32 {.used.}=
+  template readOffsetUnchecked(n: int): uint32 {.used.} =
     fromSszBytes(uint32, input.toOpenArray(n, n + offsetSize - 1))
 
   template readOffset(n: int): int {.used.} =
@@ -288,7 +304,7 @@ proc readSszValue*[T](
   elif val is HashArray:
     readSszValue(input, toSszType(val.data))
     val.resetCache()
-  elif val is HashList|List|array:
+  elif val is HashList|List|array|seq:
     type E = typeof toSszType(declval ElemType(typeof val))
     when val is HashList:
       template v: untyped = val.data
