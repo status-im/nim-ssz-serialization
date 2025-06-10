@@ -133,7 +133,7 @@ type
     ## Array implementation that caches the hash of each chunk of data - see
     ## also HashList for more details.
     data*: array[maxLen, T]
-    hashes* {.dontSerialize.}: array[maxChunkIdx(T, maxLen), Digest]
+    hashes* {.dontSerialize.}: array[max(maxChunkIdx(T, maxLen), 2), Digest]
 
   HashList*[T; maxLen: static Limit] = object
     ## List implementation that caches the hash of each chunk of data as well
@@ -160,7 +160,8 @@ type
       ## Flattened tree store that skips "empty" branches of the tree - the
       ## starting index in this sequence of each "level" in the tree is found
       ## in `indices`.
-    indices* {.dontSerialize.}: array[hashListIndicesLen(maxChunkIdx(T, maxLen)), int64] ##\
+    indices* {.dontSerialize.}: array[
+        hashListIndicesLen(max(maxChunkIdx(T, maxLen), 2)), int64] ##\
       ## Holds the starting index in the hashes list for each level of the tree
 
   # Note for readers:
@@ -180,8 +181,8 @@ type
   # covered here needs to create overloads for toSszType / fromSszBytes
   # (basic types) or writeValue / readValue (complex types)
   SszType* =
-    BasicType | array | HashArray | List | HashList | BitArray | BitList |
-    Digest | object | tuple
+    BasicType | array | HashArray | List | HashList | seq |
+    BitArray | BitList | Digest | object | tuple
 
   # Convenience aliases from specification
   ByteList*[maxLen: static Limit] = List[byte, maxLen]
@@ -220,7 +221,10 @@ func setLenUninitialized*(x: var List, newLen: int): bool =
     # TODO https://github.com/nim-lang/Nim/issues/19727
     when List.T is SomeNumber:
       if x.len !=  newLen:
-        distinctBase(x) = newSeqUninitialized[x.T](newLen)
+        distinctBase(x) = when (NimMajor, NimMinor) < (2, 2):
+                            newSeqUninitialized[x.T](newLen)
+                          else:
+                            newSeqUninit[x.T](newLen)
     else:
       setLen(distinctBase(x), newLen)
     true
@@ -287,6 +291,7 @@ template clearCache*(v: var Digest) =
 template maxChunks*(a: HashList|HashArray): int64 =
   ## Layer where data is
   const v = maxChunkIdx(a.T, a.maxLen) # force compile-time eval
+  static: doAssert (v mod 2 == 0) or (v == 1)
   v
 
 template maxDepth*(a: HashList|HashArray): int =
@@ -377,7 +382,7 @@ func resizeHashes*(a: var HashList) =
   let
     leaves = int(
       chunkIdx(a, a.data.len() + dataPerChunk(a.T) - 1))
-    newSize = 1 + cacheNodes(a.maxDepth, leaves)
+    newSize = 1 + max(cacheNodes(a.maxDepth, leaves), 1)
 
   # Growing might be because of add(), addDefault(), or in-place reading of a
   # larger HashList. In-place reading of a smaller HashList causes shrinking.
@@ -394,12 +399,12 @@ func resizeHashes*(a: var HashList) =
     assign(newHashes[i], uninitSentinel)
 
   newIndices[0] = nodesAtLayer(0, a.maxDepth, leaves)
-  for i in 1..a.maxDepth:
+  for i in 1 .. max(a.maxDepth, 1):
     newIndices[i] =
       newIndices[i - 1] + nodesAtLayer(i - 1, a.maxDepth, leaves)
 
   # When shrinking, truncate each layer
-  for i in 1 ..< a.maxDepth:
+  for i in 1 ..< max(a.maxDepth, 1):
     for j in 0 ..< min(
         a.indices[i] - a.indices[i-1], newIndices[i] - newIndices[i - 1]):
       newHashes[newIndices[i - 1] + j] = a.hashes[a.indices[i - 1] + j]

@@ -80,10 +80,6 @@ proc writeFixedSized(s: var (OutputStream|WriteCursor), x: auto) {.raises: [IOEr
 template writeOffset(cursor: var WriteCursor, offset: int) =
   write cursor, toBytesLE(uint32 offset)
 
-template supports*(_: type SSZ, T: type): bool =
-  mixin toSszType
-  anonConst compiles(fixedPortionSize toSszType(declval T))
-
 func init*(T: type SszWriter, stream: OutputStream): T =
   result.stream = stream
 
