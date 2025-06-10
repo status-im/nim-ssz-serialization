@@ -886,11 +886,11 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
   elif T is object|tuple:
-    when T.isStableContainer:
+    when T0.isStableContainer:
       static: T.ensureIsValidStableContainer()
       const N = T.getCustomPragmaVal(sszStableContainer)
       BitArray[N].fixedPortionSize
-    elif T.isProfile:
+    elif T0.isProfile:
       static: T.ensureIsValidProfile()
       const O = T.numOptionalFields
       var total = 0
