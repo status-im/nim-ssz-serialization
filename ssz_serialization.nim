@@ -154,7 +154,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
   mixin toSszType
   when value is HashArray|HashList:
     writeVarSizeType(w, value.data)
-  elif value is array:
+  elif value is array|seq:
     writeElements(w, value)
   elif value is List:
     writeElements(w, asSeq value)
@@ -289,13 +289,13 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   when isFixedSize(T):
     anonConst fixedPortionSize(T)
 
-  elif T is array|List|HashList|HashArray:
+  elif T is array|List|HashList|HashArray|seq:
     type E = ElemType(T)
     when isFixedSize(E):
       len(value) * anonConst(fixedPortionSize(E))
     elif T is HashArray:
       sszSizeForVarSizeList(value.data)
-    elif T is array:
+    elif T is array|seq:
       sszSizeForVarSizeList(value)
     else:
       sszSizeForVarSizeList(asSeq value)
@@ -324,8 +324,9 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
     elif T.isProfile:
       static: typeof(value).ensureIsValidProfile()
       var total = static(T.fixedPortionSize)
+      debugEcho $total
       when not T.isFixedSize:
-        value.enumInstanceSerializedFields(_ {.used.}, field):
+        value.enumInstanceSerializedFields(fn {.used.}, field):
           when typeof(field) is Opt:
             if field.isSome:
               template F: untyped = typeof(field).T
@@ -336,6 +337,7 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
           else:
             when not typeof(field).isFixedSize:
               total += field.sszSize
+          debugEcho $total, " ", fn
       total
     elif T.isCaseObject():
       isUnion(T)
