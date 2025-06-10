@@ -43,6 +43,14 @@ func setOutputSize(list: var List, length: int) {.raises: [SszError].} =
   if not list.setLenUninitialized length:
     raiseMalformedSszError(typeof(list), "length exceeds list limit")
 
+func setOutputSize[T](x: var seq[T], length: int) {.raises: [SszError].} =
+  # We will overwrite all bytes
+  when T is SomeNumber:
+    if x.len != length:
+      x = newSeqUninitialized[T](length)
+  else:
+    x.setLen(length)
+
 # fromSszBytes copies the wire representation to a Nim variable,
 # assuming there's enough data in the buffer
 func fromSszBytes*(
@@ -296,7 +304,7 @@ proc readSszValue*[T](
   elif val is HashArray:
     readSszValue(input, toSszType(val.data))
     val.resetCache()
-  elif val is HashList|List|array:
+  elif val is HashList|List|array|seq:
     type E = typeof toSszType(declval ElemType(typeof val))
     when val is HashList:
       template v: untyped = val.data
