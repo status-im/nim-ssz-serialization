@@ -665,10 +665,13 @@ template indexAt(i: int): GeneralizedIndex =
   block:
     let v = indices[loopOrder[i]]
     if atLayer != 0:
-      let
-        n = leadingZeros(v) + 1 + atLayer
-        x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
-      rotateRight(x, n)
+      let n = leadingZeros(v) + 1 + atLayer
+      if n < 64:
+        let x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
+        rotateRight(x, n)
+      else:  # `v shl 64` doesn't shift and silently becomes a noop
+        doAssert n == 64
+        1.GeneralizedIndex
     else:
       v
 
