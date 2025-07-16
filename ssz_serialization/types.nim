@@ -156,8 +156,8 @@ type
   # covered here needs to create overloads for toSszType / fromSszBytes
   # (basic types) or writeValue / readValue (complex types)
   SszType* =
-    BasicType | array | HashArray | List | HashList | BitArray | BitList |
-    Digest | object | tuple
+    BasicType | array | HashArray | List | HashList | seq |
+    BitArray | BitList | Digest | object | tuple
 
   # Convenience aliases from specification
   ByteList*[maxLen: static Limit] = List[byte, maxLen]

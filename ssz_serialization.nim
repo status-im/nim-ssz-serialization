@@ -153,7 +153,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
 
   when value is HashArray|HashList:
     writeVarSizeType(w, value.data)
-  elif value is array:
+  elif value is array|seq:
     writeElements(w, value)
   elif value is List:
     writeElements(w, asSeq value)
@@ -223,13 +223,13 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   when isFixedSize(T):
     anonConst fixedPortionSize(T)
 
-  elif T is array|List|HashList|HashArray:
+  elif T is array|List|HashList|HashArray|seq:
     type E = ElemType(T)
     when isFixedSize(E):
       len(value) * anonConst(fixedPortionSize(E))
     elif T is HashArray:
       sszSizeForVarSizeList(value.data)
-    elif T is array:
+    elif T is array|seq:
       sszSizeForVarSizeList(value)
     else:
       sszSizeForVarSizeList(asSeq value)
