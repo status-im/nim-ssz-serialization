@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2025 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -201,7 +201,7 @@ func init*(T: type BitSeq, len: int): T =
   Bytes(result).setBit len
 
 func init*(T: type BitArray): T =
-  # The default zero-initializatio is fine
+  # The default zero-initialization is fine
   discard
 
 template `[]`*(a: BitArray, pos: Natural): bool =

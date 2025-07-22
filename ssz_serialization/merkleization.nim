@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2024 Status Research & Development GmbH
+# Copyright (c) 2018-2025 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -607,13 +607,13 @@ func chunkedHashTreeRoot[T](
     chunkedHashTreeRoot(merkleizer, arr, 0, arr.len, res)
 
 func bitListHashTreeRoot(
-    merkleizer: var SszMerkleizer2, x: BitSeq, chunks: Slice[Limit],
-    res: var Digest) =
+    merkleizer: var SszMerkleizer2, x: openArray[byte],
+    chunks: Slice[Limit], res: var Digest) =
   # TODO: Switch to a simpler BitList representation and
   #       replace this with `chunkedHashTreeRoot`
   var
-    totalBytes = bytes(x).len
-    lastCorrectedByte = bytes(x)[^1]
+    totalBytes = x.len
+    lastCorrectedByte = x[^1]
 
   if lastCorrectedByte == byte(1):
     if totalBytes == 1:
@@ -623,7 +623,7 @@ func bitListHashTreeRoot(
       return
 
     totalBytes -= 1
-    lastCorrectedByte = bytes(x)[^2]
+    lastCorrectedByte = x[^2]
   else:
     let markerPos = log2trunc(lastCorrectedByte)
     lastCorrectedByte.clearBit(markerPos)
@@ -641,7 +641,7 @@ func bitListHashTreeRoot(
       chunkStartPos = i.int * bytesPerChunk
       chunkEndPos = chunkStartPos + bytesPerChunk - 1
 
-    addChunk(merkleizer, bytes(x).toOpenArray(chunkStartPos, chunkEndPos))
+    addChunk(merkleizer, x.toOpenArray(chunkStartPos, chunkEndPos))
 
   if fullChunks in chunks:
     var
@@ -649,7 +649,7 @@ func bitListHashTreeRoot(
       chunkStartPos = fullChunks * bytesPerChunk
 
     for i in 0 .. bytesInLastChunk - 2:
-      lastChunk[i] = bytes(x)[chunkStartPos + i]
+      lastChunk[i] = x[chunkStartPos + i]
 
     lastChunk[bytesInLastChunk - 1] = lastCorrectedByte
 
@@ -657,15 +657,21 @@ func bitListHashTreeRoot(
 
   getFinalHash(merkleizer, res)
 
+func bitListHashTreeRoot(
+    merkleizer: var SszMerkleizer2, x: BitSeq,
+    chunks: Slice[Limit], res: var Digest) =
+  bitListHashTreeRoot(merkleizer, bytes(x), chunks, res)
+
 template bitListHashTreeRoot(
-    totalChunks: static Limit, x: BitSeq,
+    height: static Limit, x: BitSeq,
     chunks: Slice[Limit], topLayer: int, res: var Digest) =
-  var merkleizer = createMerkleizer(totalChunks, topLayer, internalParam = true)
+  var merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
   bitListHashTreeRoot(merkleizer, x, chunks, res)
 
 template bitListHashTreeRoot(
-    totalChunks: static Limit, x: BitSeq, res: var Digest) =
-  bitListHashTreeRoot(totalChunks, x, 0.Limit ..< totalChunks, topLayer = 0, res)
+    height: static Limit, x: BitSeq, res: var Digest) =
+  bitListHashTreeRoot(
+    height, x, 0.Limit ..< (1.Limit shl height), topLayer = 0, res)
 
 func valuesPerChunk[T](x: typedesc[T]): int {.compileTime.} =
   type E = typeof toSszType(declval T)
@@ -777,7 +783,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
   elif T is BitList:
     const totalChunks = maxChunksCount(T, x.maxLen)
     var contentsHash {.noinit.}: Digest
-    bitListHashTreeRoot(totalChunks, BitSeq x, contentsHash)
+    bitListHashTreeRoot(binaryTreeHeight totalChunks, BitSeq x, contentsHash)
     mixInLength(contentsHash, x.len, res)
   elif T is array:
     type E = ElemType(T)
@@ -846,14 +852,16 @@ func hashTreeRootAux[T](
         indexLayer = log2trunc(index)
       if index == 1.GeneralizedIndex:
         var contentsHash {.noinit.}: Digest
-        bitListHashTreeRoot(totalChunks, BitSeq x, contentsHash)
+        bitListHashTreeRoot(
+          binaryTreeHeight totalChunks, BitSeq x, contentsHash)
         mixInLength(contentsHash, x.len, rootAt(i))
         inc i
       elif index == 3.GeneralizedIndex:
         hashTreeRootAux(x.len.uint64, rootAt(i))
         inc i
       elif index == 2.GeneralizedIndex:
-        bitListHashTreeRoot(totalChunks, BitSeq x, rootAt(i))
+        bitListHashTreeRoot(
+          binaryTreeHeight totalChunks, BitSeq x, rootAt(i))
         inc i
       elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
         let
@@ -863,7 +871,8 @@ func hashTreeRootAux[T](
         if indexLayer <= chunkLayer:
           let chunks = chunksForIndex(index)
           bitListHashTreeRoot(
-            totalChunks, BitSeq x, chunks, indexLayer, rootAt(i))
+            binaryTreeHeight totalChunks, BitSeq x,
+            chunks, indexLayer, rootAt(i))
           inc i
         else: return unsupportedIndex
       else: return unsupportedIndex
