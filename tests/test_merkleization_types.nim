@@ -77,6 +77,13 @@ type
     am: seq[SingleFieldTestStruct]
     an: seq[SingleFieldTestStruct]
     ao: seq[SingleFieldTestStruct]
+    ap: BitSeq
+    aq: BitSeq
+    ar: BitSeq
+    `as`: BitSeq
+    at: BitSeq
+    au: BitSeq
+    av: BitArray[256]
 let
   x = X(
     a: true,
@@ -162,7 +169,18 @@ let
     ao: @[
       SingleFieldTestStruct(a: 1), SingleFieldTestStruct(a: 2),
       SingleFieldTestStruct(a: 3), SingleFieldTestStruct(a: 4),
-      SingleFieldTestStruct(a: 5)])
+      SingleFieldTestStruct(a: 5)],
+    ap: BitSeq(@[0x01'u8]),
+    aq: BitSeq(@[0x2b'u8, 0x01]),
+    ar: BitSeq(@[0x1a'u8]),
+    `as`: BitSeq(@[0x0a'u8]),
+    at: BitSeq(@[0xc5'u8, 0x06]),
+    au: BitSeq(@[0xc5'u8, 0xc2, 0x01]),
+    av: BitArray[256](bytes: [
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]))
   roots = block:
     var res = {
       # a
@@ -409,6 +427,40 @@ let
       3335: d(5'u8),
       417: d(1'u8),
       209: d(5'u64),
+
+      # ap
+      210: d([]),
+      211: d(0'u64),
+
+      # aq
+      424: d([]),
+      425: d(0x2b.u256),
+      213: d(8'u64),
+
+      # ar
+      428: d([]),
+      429: d(0x0a.u256),
+      215: d(4'u64),
+
+      # as
+      432: d([]),
+      433: d(0x02.u256),
+      217: d(3'u64),
+
+      # at
+      436: d([]),
+      437: d(0x02c5.u256),
+      219: d(0x0a'u64),
+
+      # au
+      440: d([]),
+      441: d(0xc2c5.u256),
+      221: d(0x10'u64),
+
+      # av
+      111: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.u256
+      ),
     }.toOrderedTable
     for i in [
         72, 73, 148, 74, 150, 75, 152, 76, 154, 77, 79, 160, 161, 80,
@@ -420,9 +472,10 @@ let
         6404, 6405, 6406, 6407, 3202, 3203, 1601, 800,
         1602, 1603, 801, 400, 200, 100,
         101, 204, 102, 1650, 1651, 825, 412, 206, 103,
-        1666, 1667, 833, 416, 208, 104]:
+        1666, 1667, 833, 416, 208, 104,
+        105, 212, 106, 214, 107, 216, 108, 218, 109, 220, 110]:
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
-    for i in 105 ..< 128:
+    for i in 112 ..< 128:
       res[i] = d([])
     for i in countdown(63, 1):
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
