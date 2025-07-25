@@ -75,9 +75,6 @@ func fromSszBytes*(
     raiseIncorrectSize T
   copyMem(result.data.addr, unsafeAddr data[0], sizeof(result.data))
 
-template fromSszBytes*(T: type BitSeq, bytes: openArray[byte]): auto =
-  BitSeq @bytes
-
 func `[]`[T, U, V](s: openArray[T], x: HSlice[U, V]) {.error:
   "Please don't use openArray's [] as it allocates a result sequence".}
 
@@ -247,14 +244,6 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
 func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
   initSszUnionImpl(T, input)
 
-func read(F: typedesc, input: openArray[byte]): F {.raises: [SszError].} =
-  when compiles(F.fromSszBytes(input)):
-    F.fromSszBytes(input)
-  else:
-    var f: F
-    readSszValue(input, f)
-    f
-
 proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
   mixin fromSszBytes, toSszType, readSszValue
@@ -271,14 +260,17 @@ proc readSszValue*[T](
 
   when compiles(fromSszBytes(T, input)):
     val = fromSszBytes(T, input)
-  elif val is BitList:
+  elif val is BitList|BitSeq:
     if input.len == 0:
       raiseMalformedSszError(T, "invalid empty value")
 
     # Since our BitLists have an in-memory representation that precisely
     # matches their SSZ encoding, we can deserialize them as regular Lists:
-    const maxExpectedSize = (val.maxLen div 8) + 1
-    type MatchingListType = List[byte, maxExpectedSize]
+    when val is BitList:
+      const maxExpectedSize = (val.maxLen div 8) + 1
+      type MatchingListType = List[byte, maxExpectedSize]
+    else:
+      type MatchingListType = seq[byte]
 
     when false:
       # TODO: Nim doesn't like this simple type coercion,
@@ -296,8 +288,9 @@ proc readSszValue*[T](
     if bytes(val)[resultBytesCount - 1] == 0:
       raiseMalformedSszError(T, "missing termination")
 
-    if resultBytesCount == maxExpectedSize:
-      checkForForbiddenBits(T, input, val.maxLen + 1)
+    when val is BitList:
+      if resultBytesCount == maxExpectedSize:
+        checkForForbiddenBits(T, input, val.maxLen + 1)
 
   elif val is Digest:
     readSszValue(input, val.data)
