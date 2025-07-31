@@ -77,6 +77,21 @@ type
     am: seq[SingleFieldTestStruct]
     an: seq[SingleFieldTestStruct]
     ao: seq[SingleFieldTestStruct]
+    ap: BitSeq
+    aq: BitSeq
+    ar: BitSeq
+    `as`: BitSeq
+    at: BitSeq
+    au: BitSeq
+    av: BitArray[256]
+    aw: BitList[256]
+    ax: BitSeq
+    ay: BitArray[257]
+    az: BitList[257]
+    ba: BitSeq
+    bb: BitSeq
+    bc: BitSeq
+    bd: BitSeq
 let
   x = X(
     a: true,
@@ -84,8 +99,8 @@ let
     c: 0x1616'u16,
     d: 0x32323232'u32,
     e: 0x6464646464646464'u64,
-    f: 0x01281281281281281281281281281280.u128,
-    g: 0x02562562562562562562562562562562562562562560.u256,
+    f: 0x01281281281281281281281281281280'u128,
+    g: 0x02562562562562562562562562562562562562562560'u256,
     h: BitArray[40](bytes: [
       0b01010101'u8, 0b10101010'u8, 0b11111111'u8,
       0b10101010'u8, 0b01010101'u8]),
@@ -162,7 +177,69 @@ let
     ao: @[
       SingleFieldTestStruct(a: 1), SingleFieldTestStruct(a: 2),
       SingleFieldTestStruct(a: 3), SingleFieldTestStruct(a: 4),
-      SingleFieldTestStruct(a: 5)])
+      SingleFieldTestStruct(a: 5)],
+    ap: BitSeq(@[0x01'u8]),
+    aq: BitSeq(@[0x2b'u8, 0x01]),
+    ar: BitSeq(@[0x1a'u8]),
+    `as`: BitSeq(@[0x0a'u8]),
+    at: BitSeq(@[0xc5'u8, 0x06]),
+    au: BitSeq(@[0xc5'u8, 0xc2, 0x01]),
+    av: BitArray[256](bytes: [
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+    aw: BitList[256](@[
+      0xff'u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x01]),
+    ax: BitSeq(@[
+      0xff'u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x01]),
+    ay: BitArray[257](bytes: [
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x01]),
+    az: BitList[257](@[
+      0xff'u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x03]),
+    ba: BitSeq(@[
+      0xff'u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x03]),
+    bb: BitSeq(@[0x03'u8]),
+    bc: BitSeq(@[
+      0xff'u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x01]),
+    bd: BitSeq(@[
+      0xff'u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x03]))
   roots = block:
     var res = {
       # a
@@ -181,10 +258,10 @@ let
       68: d(0x6464646464646464'u64),
 
       # f
-      69: d(0x01281281281281281281281281281280.u128),
+      69: d(0x01281281281281281281281281281280'u128),
 
       # g
-      70: d(0x02562562562562562562562562562562562562562560.u256),
+      70: d(0x02562562562562562562562562562562562562562560'u256),
 
       # h
       71: d(0b01010101_10101010_11111111_10101010_01010101'u64),
@@ -207,18 +284,18 @@ let
       # l
       300: d([0'u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
         16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 0x7F]),
-      301: d(0.u256),
+      301: d(0'u256),
       151: d(255'u64),
 
       # m
       304: d([0'u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
         16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]),
-      305: d(0.u256),
+      305: d(0'u256),
       153: d(256'u64),
 
       # n
-      308: d(0.u256),
-      309: d(0.u256),
+      308: d(0'u256),
+      309: d(0'u256),
       155: d(0'u64),
 
       # o
@@ -242,13 +319,13 @@ let
       163: d(2'u64),
 
       # s
-      328: d(0.u256),
-      329: d(0.u256),
+      328: d(0'u256),
+      329: d(0'u256),
       165: d(0'u64),
 
       # t
-      332: d(0.u256),
-      333: d(0.u256),
+      332: d(0'u256),
+      333: d(0'u256),
       167: d(0'u64),
 
       # u
@@ -265,7 +342,7 @@ let
       690: d(1'u8),
       691: d(0'u8),
       346: d(1'u8),
-      347: d(0.u256),
+      347: d(0'u256),
 
       # x
       348: d(0'u8),
@@ -281,8 +358,8 @@ let
       177: d(2'u64),
 
       # z
-      356: d(0.u256),
-      357: d(0.u256),
+      356: d(0'u256),
+      357: d(0'u256),
       179: d(0'u64),
 
       # aa
@@ -306,7 +383,7 @@ let
       189: d(1'u64),
 
       # af
-      190: d(0.u256),
+      190: d(0'u256),
       191: d(0'u64),
 
       # ag
@@ -409,6 +486,108 @@ let
       3335: d(5'u8),
       417: d(1'u8),
       209: d(5'u64),
+
+      # ap
+      210: d([]),
+      211: d(0'u64),
+
+      # aq
+      424: d([]),
+      425: d(0x2b'u256),
+      213: d(8'u64),
+
+      # ar
+      428: d([]),
+      429: d(0x0a'u256),
+      215: d(4'u64),
+
+      # as
+      432: d([]),
+      433: d(0x02'u256),
+      217: d(3'u64),
+
+      # at
+      436: d([]),
+      437: d(0x02c5'u256),
+      219: d(0x0a'u64),
+
+      # au
+      440: d([]),
+      441: d(0xc2c5'u256),
+      221: d(0x10'u64),
+
+      # av
+      111: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+
+      # aw
+      224: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      225: d(0x0100'u64),
+
+      # ax
+      452: d([]),
+      453: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      227: d(0x0100'u64),
+
+      # ay
+      228: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      229: d(0x01'u64),
+
+      # az
+      460: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      461: d(0x01'u256),
+      231: d(0x0101'u64),
+
+      # ba
+      928: d([]),
+      3716: d(0x01'u256),
+      3717: d([]),
+      3718: d([]),
+      3719: d([]),
+      465: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      233: d(0x0101'u64),
+
+      # bb
+      468: d([]),
+      469: d(0x01'u256),
+      235: d(0x01'u64),
+
+      # bc
+      944: d([]),
+      3780: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      3781: d([]),
+      3782: d([]),
+      3783: d([]),
+      473: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      237: d(0x0200'u64),
+
+      # bd
+      952: d([]),
+      3812: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      3813: d(0x01'u256),
+      3814: d([]),
+      3815: d([]),
+      477: d(
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'u256
+      ),
+      239: d(0x0201'u64),
     }.toOrderedTable
     for i in [
         72, 73, 148, 74, 150, 75, 152, 76, 154, 77, 79, 160, 161, 80,
@@ -420,9 +599,12 @@ let
         6404, 6405, 6406, 6407, 3202, 3203, 1601, 800,
         1602, 1603, 801, 400, 200, 100,
         101, 204, 102, 1650, 1651, 825, 412, 206, 103,
-        1666, 1667, 833, 416, 208, 104]:
+        1666, 1667, 833, 416, 208, 104,
+        105, 212, 106, 214, 107, 216, 108, 218, 109, 220, 110,
+        112, 226, 113, 114, 230, 115, 1858, 1859, 929, 464, 232, 116, 234, 117,
+        1890, 1891, 945, 472, 236, 118, 1906, 1907, 953, 476, 238, 119]:
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
-    for i in 105 ..< 128:
+    for i in 120 ..< 128:
       res[i] = d([])
     for i in countdown(63, 1):
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))

@@ -157,7 +157,7 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     writeElements(w, value)
   elif value is List:
     writeElements(w, asSeq value)
-  elif value is BitList:
+  elif value is BitList|BitSeq:
     # ATTENTION! We can reuse `writeSeq` only as long as our BitList type is implemented
     # to internally match the binary representation of SSZ BitLists in memory.
     writeElements(w, bytes value)
@@ -234,7 +234,7 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
     else:
       sszSizeForVarSizeList(asSeq value)
 
-  elif T is BitList:
+  elif T is BitList|BitSeq:
     return len(bytes(value))
 
   elif T is OptionalType:

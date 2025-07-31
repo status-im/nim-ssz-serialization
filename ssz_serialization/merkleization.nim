@@ -663,13 +663,13 @@ func bitListHashTreeRoot(
   bitListHashTreeRoot(merkleizer, bytes(x), chunks, res)
 
 template bitListHashTreeRoot(
-    height: static Limit, x: BitSeq,
+    height: Limit | static Limit, x: BitSeq | openArray[byte],
     chunks: Slice[Limit], topLayer: int, res: var Digest) =
   var merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
   bitListHashTreeRoot(merkleizer, x, chunks, res)
 
 template bitListHashTreeRoot(
-    height: static Limit, x: BitSeq, res: var Digest) =
+    height: Limit | static Limit, x: BitSeq | openArray[byte], res: var Digest) =
   bitListHashTreeRoot(
     height, x, 0.Limit ..< (1.Limit shl height), topLayer = 0, res)
 
@@ -696,6 +696,14 @@ template progressiveRange[T](x: seq[T], firstIdx: Limit): openArray[T] =
       firstIdx.int,
       min(firstIdx.int shl 2, x.high))
 
+template progressiveRange(
+    x: BitSeq, firstIdx: Limit, hasPartialChunks: bool): openArray[byte] =
+  x.bytes.toOpenArray(
+    32 * firstIdx.int,
+    min(
+      32 * ((firstIdx.int shl 2) or 1) - 1,
+      x.bytes.high - (if hasPartialChunks: 0 else: 1)))
+
 func progressiveBottom(numChunks: Limit): (Limit, Limit) =
   var
     firstIdx = 0.Limit
@@ -714,6 +722,51 @@ func progressiveChunkedHashTreeRoot[T](x: seq[T], res: var Digest) =
     var contentsHash {.noinit.}: Digest
     chunkedHashTreeRoot(
       (depth shl 1) + 1, x.progressiveRange(firstIdx), contentsHash)
+    mergeBranches(res, contentsHash, res)
+
+func chunkedBitListHashTreeRoot(
+    atBottom: var bool, merkleizer: var SszMerkleizer2, x: openArray[byte],
+    chunks: Slice[Limit], res: var Digest) =
+  if atBottom:
+    bitListHashTreeRoot(merkleizer, x, chunks, res)
+    atBottom = false
+  else:
+    let
+      firstIdx = chunks.a * 32
+      numFromFirst = min((chunks.b - chunks.a + 1) * 32, x.len - firstIdx)
+    chunkedHashTreeRoot(merkleizer, x, firstIdx, numFromFirst, res)
+
+template chunkedBitListHashTreeRoot(
+    atBottom: var bool, height: Limit, x: openArray[byte],
+    chunks: Slice[Limit], topLayer: int, res: var Digest) =
+  if x.len <= chunks.a * 32:
+    res = zeroHashes[height - 1 - topLayer]
+  else:
+    var merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
+    atBottom.chunkedBitListHashTreeRoot(merkleizer, x, chunks, res)
+
+template chunkedBitListHashTreeRoot(
+    atBottom: var bool, height: Limit, x: openArray[byte], res: var Digest) =
+  atBottom.chunkedBitListHashTreeRoot(
+    height, x, 0.Limit ..< (1.Limit shl height), topLayer = 0, res)
+
+func progressiveBitListHashTreeRoot(x: BitSeq, res: var Digest) =
+  res.reset()
+  let
+    bitlen = x.len.Limit
+    totalChunkCount = (bitlen + 255) div 256
+    hasPartialChunks = bitlen.uint.uint8 != 0x00
+  var
+    (firstIdx, depth) = totalChunkCount.progressiveBottom()
+    atBottom = hasPartialChunks
+  while depth > 0:
+    firstIdx = firstIdx shr 2
+    dec depth
+    var contentsHash {.noinit.}: Digest
+    atBottom.chunkedBitListHashTreeRoot(
+      (depth shl 1) + 1,
+      x.progressiveRange(firstIdx, hasPartialChunks),
+      contentsHash)
     mergeBranches(res, contentsHash, res)
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
@@ -806,8 +859,11 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     var contentsHash {.noinit.}: Digest
     chunkedHashTreeRoot(binaryTreeHeight totalChunks, asSeq x, contentsHash)
     mixInLength(contentsHash, x.len, res)
-  elif T is seq:
-    x.progressiveChunkedHashTreeRoot(res)
+  elif T is BitSeq|seq:
+    when T is BitSeq:
+      x.progressiveBitListHashTreeRoot(res)
+    else:
+      x.progressiveChunkedHashTreeRoot(res)
     mixInLength(res, x.len, res)
   elif T is OptionalType:
     if x.isSome:
@@ -968,8 +1024,11 @@ func hashTreeRootAux[T](
                                    atLayer + chunkLayer)
             i = j
       else: return unsupportedIndex
-  elif T is seq:
-    type E = typeof toSszType(declval ElemType(typeof(x)))
+  elif T is BitSeq|seq:
+    when T is BitSeq:
+      type E = uint8
+    else:
+      type E = typeof toSszType(declval ElemType(typeof(x)))
     var i = slice.a
     while i <= slice.b:
       let
@@ -977,25 +1036,37 @@ func hashTreeRootAux[T](
         indexLayer = log2trunc(index)
       if index == 1.GeneralizedIndex:
         var contentsHash {.noinit.}: Digest
-        progressiveChunkedHashTreeRoot(x, contentsHash)
+        when T is BitSeq:
+          progressiveBitListHashTreeRoot(x, contentsHash)
+        else:
+          progressiveChunkedHashTreeRoot(x, contentsHash)
         mixInLength(contentsHash, x.len, rootAt(i))
         inc i
       elif index == 3.GeneralizedIndex:
         hashTreeRootAux(x.len.uint64, rootAt(i))
         inc i
       elif index == 2.GeneralizedIndex:
-        progressiveChunkedHashTreeRoot(x, rootAt(i))
+        when T is BitSeq:
+          progressiveBitListHashTreeRoot(x, rootAt(i))
+        else:
+          progressiveChunkedHashTreeRoot(x, rootAt(i))
         inc i
       elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
         let atLayer = atLayer + 1
+        when T is BitSeq:
+          let
+            bitlen = x.len.Limit
+            totalChunkCount = (bitlen + 255) div 256
+            hasPartialChunks = bitlen.uint.uint8 != 0x00
+          var atBottom = hasPartialChunks
+        else:
+          let totalChunkCount = x.totalChunkCount
         var
-          needAll = block:
-            let index = indexAt(i)
-            index.countOnes == 1
+          needAll = index.countOnes == 1
           res {.noinit.}: Digest
         if needAll:
           res.reset()
-        var (firstIdx, depth) = x.totalChunkCount.progressiveBottom()
+        var (firstIdx, depth) = totalChunkCount.progressiveBottom()
         while depth > 0 and i <= slice.b:
           firstIdx = firstIdx shr 2
           dec depth
@@ -1023,14 +1094,26 @@ func hashTreeRootAux[T](
                 index = indexAt(i)
                 indexLayer = log2trunc(index)
               if index == 1.GeneralizedIndex:
-                chunkedHashTreeRoot(
-                  (depth shl 1) + 1, x.progressiveRange(firstIdx), rootAt(i))
+                when T is BitSeq:
+                  atBottom.chunkedBitListHashTreeRoot(
+                    (depth shl 1) + 1,
+                    x.progressiveRange(firstIdx, hasPartialChunks),
+                    rootAt(i))
+                else:
+                  chunkedHashTreeRoot(
+                    (depth shl 1) + 1, x.progressiveRange(firstIdx), rootAt(i))
                 inc i
               elif indexLayer <= chunkLayer:
                 let chunks = chunksForIndex(index)
-                chunkedHashTreeRoot(
-                  (depth shl 1) + 1, x.progressiveRange(firstIdx),
-                  chunks, indexLayer, rootAt(i))
+                when T is BitSeq:
+                  atBottom.chunkedBitListHashTreeRoot(
+                    (depth shl 1) + 1,
+                    x.progressiveRange(firstIdx, hasPartialChunks),
+                    chunks, indexLayer, rootAt(i))
+                else:
+                  chunkedHashTreeRoot(
+                    (depth shl 1) + 1, x.progressiveRange(firstIdx),
+                    chunks, indexLayer, rootAt(i))
                 inc i
               else:
                 when E is BasicType:
@@ -1055,9 +1138,17 @@ func hashTreeRootAux[T](
               continue
           if needAll:
             var contentsHash {.noinit.}: Digest
-            chunkedHashTreeRoot(
-              (depth shl 1) + 1, x.progressiveRange(firstIdx), contentsHash)
+            when T is BitSeq:
+              atBottom.chunkedBitListHashTreeRoot(
+                (depth shl 1) + 1,
+                x.progressiveRange(firstIdx, hasPartialChunks),
+                contentsHash)
+            else:
+              chunkedHashTreeRoot(
+                (depth shl 1) + 1, x.progressiveRange(firstIdx), contentsHash)
             mergeBranches(res, contentsHash, res)
+          when T is BitSeq:
+            atBottom = false
         if i <= slice.b:
           return unsupportedIndex
       else:
