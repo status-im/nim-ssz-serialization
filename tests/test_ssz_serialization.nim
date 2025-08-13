@@ -25,7 +25,7 @@ type
 
   Simple = object
     flag: bool
-    # ignored {.dontSerialize.}: string
+    ignored {.dontSerialize.}: string
     data: array[256, bool]
     data2: HashArray[256, bool]
 
@@ -33,6 +33,9 @@ type
     data: HashList[uint64, 1024]
 
   DistinctInt = distinct uint64
+
+  Nested = object
+    simple: Simple
 
 template toSszType*(v: DistinctInt): auto = uint64(v)
 
@@ -121,6 +124,11 @@ type
 
 func toDigest[N: static int](x: array[N, byte]): Digest =
   result.data[0 .. N-1] = x
+
+proc readSszBytes*(
+    data: openArray[byte], val: var Simple) {.raises: [SszError].} =
+  readSszValue(data, val)
+  val.ignored = "overloaded"
 
 suite "SSZ navigator":
   test "simple object fields":
@@ -529,3 +537,8 @@ suite "Distinct":
     readSszBytes(encodedObj, xx)
 
     check xx == obj
+
+  test "readSszBytes overload works in nested objects":
+    check:
+      SSZ.decode(SSZ.encode(Simple()), Simple).ignored != ""
+      SSZ.decode(SSZ.encode(Nested()), Nested).simple.ignored != ""

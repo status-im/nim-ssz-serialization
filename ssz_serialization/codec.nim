@@ -228,7 +228,7 @@ macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
           var fieldCount = 0
           enumInstanceSerializedFields(caseObj, fieldName, field):
             when fieldName != `SelectorFieldNameLit`:
-              readSszValue(`input`.toOpenArray(1, `input`.len - 1), field)
+              readSszBytes(`input`.toOpenArray(1, `input`.len - 1), field)
               fieldCount.inc()
 
           if fieldCount == 0: # This represents a `None` in the Union
@@ -246,7 +246,7 @@ func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
 
 proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
-  mixin fromSszBytes, toSszType, readSszValue
+  mixin fromSszBytes, toSszType, readSszBytes
 
   template readOffsetUnchecked(n: int): uint32 {.used.} =
     fromSszBytes(uint32, input.toOpenArray(n, n + offsetSize - 1))
@@ -276,12 +276,12 @@ proc readSszValue*[T](
       # TODO: Nim doesn't like this simple type coercion,
       #       we'll rely on `cast` for now (see below)
       # https://github.com/nim-lang/Nim/issues/22523
-      readSszValue(input, MatchingListType val)
+      readSszBytes(input, MatchingListType val)
     else:
       static:
         # As a sanity check, we verify that the coercion is accepted by the compiler:
         doAssert MatchingListType(val) is MatchingListType
-      readSszValue(input, cast[ptr MatchingListType](addr val)[])
+      readSszBytes(input, cast[ptr MatchingListType](addr val)[])
 
     let resultBytesCount = len bytes(val)
 
@@ -293,9 +293,9 @@ proc readSszValue*[T](
         checkForForbiddenBits(T, input, val.maxLen + 1)
 
   elif val is Digest:
-    readSszValue(input, val.data)
+    readSszBytes(input, val.data)
   elif val is HashArray:
-    readSszValue(input, toSszType(val.data))
+    readSszBytes(input, toSszType(val.data))
     val.resetCache()
   elif val is HashList|List|array|seq:
     type E = typeof toSszType(declval ElemType(typeof val))
@@ -333,7 +333,7 @@ proc readSszValue*[T](
           let offset = i * elemSize
           when val is HashList:
             assign(prevValue, toSszType(v[i]))
-          readSszValue(
+          readSszBytes(
             input.toOpenArray(offset, offset + elemSize - 1), toSszType(v[i]))
           when val is HashList:
             if prevValue != toSszType(v[i]):
@@ -379,14 +379,14 @@ proc readSszValue*[T](
         else:
           when val is HashList:
             assign(prevValue, toSszType(v[i - 1]))
-          readSszValue(
+          readSszBytes(
             input.toOpenArray(offset, nextOffset - 1), toSszType(v[i - 1]))
           when val is HashList:
             if prevValue != toSszType(v[i - 1]):
               val.clearCaches(i - 1)
         offset = nextOffset
 
-      readSszValue(
+      readSszBytes(
         input.toOpenArray(offset, input.len - 1), toSszType(v[resultLen - 1]))
 
       when val is HashList:
@@ -404,12 +404,12 @@ proc readSszValue*[T](
         val = Opt.none(E)
     else:
       var isSome: uint8
-      readSszValue(input.toOpenArray(0, 0), isSome)
+      readSszBytes(input.toOpenArray(0, 0), isSome)
       if isSome != 1:
         raiseMalformedSszError(
           T, "Unexpected isSome " & $isSome & " (expected: 1)")
       var v: E
-      readSszValue(input.toOpenArray(1, input.len - 1), v)
+      readSszBytes(input.toOpenArray(1, input.len - 1), v)
       when val is Option:
         val = options.some(v)
       else:
@@ -471,7 +471,7 @@ proc readSszValue*[T](
 
         # TODO The extra type escaping here is a work-around for a Nim issue:
         when type(field) is type(SszType):
-          readSszValue(
+          readSszBytes(
             input.toOpenArray(int(startOffset), int(endOffset - 1)),
             field)
         else:
