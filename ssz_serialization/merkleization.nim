@@ -417,18 +417,6 @@ template createMerkleizer2*(
     totalChunks: 0,
     internal: internalParam)
 
-template createMerkleizer*(
-    totalElements: static Limit, topLayer = 0,
-    internalParam = false): auto =
-  const treeHeight = binaryTreeHeight totalElements
-  createMerkleizer2(treeHeight, topLayer, internalParam)
-
-template createMerkleizer*(
-    totalElements: Limit, topLayer = 0,
-    internalParam = false): auto =
-  let treeHeight = binaryTreeHeight totalElements
-  createMerkleizer2(treeHeight, topLayer, internalParam)
-
 func getFinalHash(merkleizer: var SszMerkleizer2, res: var Digest) =
   if merkleizer.totalChunks == 0:
     res = zeroHashes[merkleizer.topIndex]
@@ -520,8 +508,10 @@ template addField(field) =
     chunk = hash_tree_root(field)
   trs "CHUNK ADDED"
 
-template merkleizeFields(totalChunks: static Limit, res: var Digest, body: untyped) =
-  var merkleizer {.inject.} = createMerkleizer(totalChunks, internalParam = true)
+template merkleizeFields(
+    treeHeight: static Limit, res: var Digest, body: untyped) =
+  var merkleizer {.inject.} =
+    createMerkleizer2(treeHeight, internalParam = true)
 
   body
 
@@ -875,8 +865,10 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
     trs "MERKLEIZING FIELDS"
-    const totalChunks = totalSerializedFields(T)
-    merkleizeFields(Limit totalChunks, res):
+    const
+      totalChunks = totalSerializedFields(T)
+      treeHeight = binaryTreeHeight totalChunks
+    merkleizeFields(treeHeight, res):
       x.enumerateSubFields(f):
         addField f
   else:
