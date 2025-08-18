@@ -509,7 +509,7 @@ template addField(field) =
   trs "CHUNK ADDED"
 
 template merkleizeFields(
-    treeHeight: Limit | static Limit, res: var Digest, body: untyped) =
+    treeHeight: static Limit, res: var Digest, body: untyped) =
   var merkleizer {.inject.} =
     createMerkleizer2(treeHeight, internalParam = true)
 
