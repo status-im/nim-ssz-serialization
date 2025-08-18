@@ -76,7 +76,8 @@ template toSszType(v: U): auto = uint64(v)
 suite "Merkleization":
   test "Calculate correct root from provided chunks":
     for testCase in cases.fields:
-      var merk = createMerkleizer(testCase.limit, internalParam = true)
+      var merk = createMerkleizer2(
+        binaryTreeHeight testCase.limit, internalParam = true)
       var i: uint32 = 0
 
       while i < testCase.count:
