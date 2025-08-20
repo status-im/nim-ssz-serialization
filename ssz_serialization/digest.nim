@@ -145,6 +145,3 @@ func digest*(a, b: openArray[byte], res: var Digest) =
 
 func digest*(a, b: openArray[byte]): Digest {.noinit.} =
   digest(a, b, result)
-
-when USE_HASHTREE_SHA256:
-  hashtree_init(nil)
