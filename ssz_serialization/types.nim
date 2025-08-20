@@ -8,7 +8,7 @@
 {.push raises: [].}
 
 import
-  std/[tables, typetraits, strformat],
+  std/[macros, sequtils, tables, typetraits, strformat],
   stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
   results,
   stint,
@@ -35,6 +35,29 @@ type
   Limit* = int64
 
   Digest* = MDigest[32 * 8]
+
+template sszActiveFields*(_: openArray[int]) {.pragma.}
+
+template isProgressiveContainer*(T: typedesc): bool =
+  when compiles(T.hasCustomPragma(sszActiveFields)):
+    T.hasCustomPragma(sszActiveFields)
+  else:
+    false
+
+func activeFields*(T: typedesc): BitArray[256] {.compileTime.} =
+  static: doAssert isProgressiveContainer(T)
+  const activeFields = T.getCustomPragmaVal(sszActiveFields)
+  static:
+    doAssert activeFields.len > 0 and activeFields[^1] == 1
+    doAssert activeFields.allIt it in [0, 1]
+    doAssert activeFields.countIt(it == 1) == T.totalSerializedFields
+    doAssert activeFields.len <= 256
+  const res = block:
+    var res: BitArray[256]
+    for i, it in activeFields:
+      res[i] = it != 0
+    res
+  res
 
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
