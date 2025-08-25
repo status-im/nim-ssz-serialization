@@ -328,6 +328,12 @@ func countOnes*(a: BitArray): int =
   for bit in a:
     if bit: inc result
 
+func bitWidth*(a: BitArray): int =
+  var res = 0
+  for i, bit in a:
+    if bit: res = i + 1
+  res
+
 Json.useCustomSerialization(BitSeq):
   read:
     try:

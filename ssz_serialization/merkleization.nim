@@ -17,7 +17,7 @@
 # and other artefacts of the introduction of hidden temporaries
 
 import
-  std/[algorithm, options, sequtils],
+  std/[algorithm, macros, options, sequtils],
   stew/[assign2, bitops2, endians2, objects, ptrops],
   results,
   nimcrypto/[hash, sha2],
@@ -508,14 +508,104 @@ template addField(field) =
     chunk = hash_tree_root(field)
   trs "CHUNK ADDED"
 
-template merkleizeFields(
-    treeHeight: static Limit, res: var Digest, body: untyped) =
-  var merkleizer {.inject.} =
-    createMerkleizer2(treeHeight, internalParam = true)
+func allFieldNames(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
+  when T.isProgressiveContainer:
+    const
+      activeFields = T.activeFields
+      totalChunks = activeFields.bitWidth
+  else:
+    const totalChunks = T.totalSerializedFields
+  when T is object:
+    var res: array[totalChunks, Opt[string]]
+  else:
+    var res: array[totalChunks, Opt[int]]
+  var i = 0
+  T.enumAllSerializedFields:
+    when T.isProgressiveContainer:
+      while not activeFields[i]:
+        inc i
+    when T is object:
+      res[i].ok realFieldName
+    else:
+      res[i].ok i
+    inc i
+  doAssert i == totalChunks
+  res
 
-  body
+func allFieldValues[F: string|int](
+    fieldNames: openArray[Opt[F]], x: NimNode): seq[NimNode] {.compileTime.} =
+  var res = newSeqOfCap[NimNode](fieldNames.len)
+  for i, fieldName in fieldNames:
+    if fieldName.isSome:
+      when F is string:
+        let fieldName = ident fieldName.get
+        res.add quote do: `x`.`fieldName`
+      else:
+        let fieldName = fieldName.get
+        res.add quote do: `x`[`fieldName`]
+    else:
+      res.add quote do: zeroHashes[0]
+  res
 
-  getFinalHash(merkleizer, res)
+func doMerkleizeFields(
+    allFieldValues: openArray[NimNode],
+    height, x, chunks, topLayer, res: NimNode): NimNode {.compileTime.} =
+  let merkleizer = ident "merkleizer"
+  var body = newStmtList()
+  for i, fieldValue in allFieldValues:
+    body.add quote do:
+      if `i` >= `chunks`.a:
+        if `i` > `chunks`.b:
+          break
+        addField `fieldValue`
+  quote do:
+    block:
+      var merkleizer = createMerkleizer2(
+        `height`, `topLayer`, internalParam = true)
+      template `merkleizer`: auto = merkleizer
+      block: `body`
+      getFinalHash(merkleizer, `res`)
+
+func doMerkleizeFields(
+    allFieldValues: openArray[NimNode],
+    height: NimNode, x: NimNode, res: NimNode): NimNode {.compileTime.} =
+  let merkleizer = ident "merkleizer"
+  var body = newStmtList()
+  for fieldValue in allFieldValues:
+    body.add quote do:
+      addField `fieldValue`
+  quote do:
+    block:
+      var merkleizer = createMerkleizer2(`height`, internalParam = true)
+      template `merkleizer`: untyped = merkleizer
+      `body`
+      getFinalHash(merkleizer, `res`)
+
+template genMerkleizeFieldsImpls(
+    B: typedesc[object|tuple], F: typedesc[string|int]): untyped =
+  macro merkleizeFieldsImpl[T: B](
+      fieldNames: static[openArray[Opt[F]]],
+      height: Limit | static Limit, x: T,
+      chunks: Slice[Limit], topLayer: int, res: var Digest): untyped =
+    fieldNames.allFieldValues(x).doMerkleizeFields(
+      height, x, chunks, topLayer, res)
+
+  macro merkleizeFieldsImpl[T: B](
+      fieldNames: static[openArray[Opt[F]]],
+      height: Limit | static Limit, x: T, res: var Digest): untyped =
+    fieldNames.allFieldValues(x).doMerkleizeFields(height, x, res)
+
+genMerkleizeFieldsImpls(object, string)
+genMerkleizeFieldsImpls(tuple, int)
+
+func merkleizeFields[T: object|tuple](
+    height: Limit | static Limit, x: T,
+    chunks: Slice[Limit], topLayer: int, res: var Digest) =
+  T.allFieldNames.merkleizeFieldsImpl(height, x, chunks, topLayer, res)
+
+func merkleizeFields[T: object|tuple](
+    height: Limit | static Limit, x: T, res: var Digest) =
+  T.allFieldNames.merkleizeFieldsImpl(height, x, res)
 
 template writeBytesLE(chunk: var array[bytesPerChunk, byte], atParam: int,
                       val: UintN) =
@@ -676,15 +766,17 @@ func totalChunkCount[T](x: seq[T]): Limit =
   else:
     x.len
 
+template progressiveRangePreChunked[T](
+    x: openArray[T], firstIdx: Limit): openArray[T] =
+  x.toOpenArray(firstIdx.int, min(firstIdx.int shl 2, x.high))
+
 template progressiveRange[T](x: seq[T], firstIdx: Limit): openArray[T] =
   when T.valuesPerChunk != 1:
     x.toOpenArray(
       T.valuesPerChunk * firstIdx.int,
       min(T.valuesPerChunk * ((firstIdx.int shl 2) or 1) - 1, x.high))
   else:
-    x.toOpenArray(
-      firstIdx.int,
-      min(firstIdx.int shl 2, x.high))
+    x.progressiveRangePreChunked(firstIdx)
 
 template progressiveRange(
     x: BitSeq, firstIdx: Limit, hasPartialChunks: bool): openArray[byte] =
@@ -702,6 +794,37 @@ func progressiveBottom(numChunks: Limit): (Limit, Limit) =
     firstIdx = (firstIdx shl 2) or 1
     inc depth
   (firstIdx, depth)
+
+func doProgressiveMerkleizeFields(
+    allFieldValues: openArray[NimNode],
+    x, res: NimNode): NimNode {.compileTime.} =
+  let contentsHash = nskVar.genSym "contentsHash"
+  var code = newStmtList()
+  code.add quote do:
+    `res`.reset()
+    var `contentsHash` {.noinit.}: Digest
+  let totalChunkCount = allFieldValues.len
+  var (firstIdx, depth) = totalChunkCount.progressiveBottom()
+  while depth > 0:
+    firstIdx = firstIdx shr 2
+    dec depth
+    code.add allFieldValues.progressiveRangePreChunked(firstIdx)
+      .doMerkleizeFields(newLit((depth shl 1) + 1), x, contentsHash)
+    code.add quote do: mergeBranches(`res`, `contentsHash`, `res`)
+  code
+
+template genProgressiveMerkleizeFieldsImpls(
+    B: typedesc[object|tuple], F: typedesc[string|int]): untyped =
+  macro progressiveMerkleizeFieldsImpl[T: B](
+      fieldNames: static[openArray[Opt[F]]],
+      x: T, res: var Digest): untyped =
+    fieldNames.allFieldValues(x).doProgressiveMerkleizeFields(x, res)
+
+genProgressiveMerkleizeFieldsImpls(object, string)
+genProgressiveMerkleizeFieldsImpls(tuple, int)
+
+func progressiveMerkleizeFields[T: object|tuple](x: T, res: var Digest) =
+  T.allFieldNames.progressiveMerkleizeFieldsImpl(x, res)
 
 func progressiveChunkedHashTreeRoot[T](x: seq[T], res: var Digest) =
   res.reset()
@@ -759,6 +882,10 @@ func progressiveBitListHashTreeRoot(x: BitSeq, res: var Digest) =
       contentsHash)
     mergeBranches(res, contentsHash, res)
 
+func mixInActiveFields(root: Digest, T: typedesc, res: var Digest) =
+  const activeFields = static(T.activeFields)
+  mergeBranches(root, activeFields.hash_tree_root(), res)
+
 func maxChunksCount(T: type, maxLen: Limit): Limit =
   when T is BitArray|BitList:
     (maxLen + bitsPerChunk - 1) div bitsPerChunk
@@ -808,6 +935,209 @@ template rootAt(i: int): Digest =
 
 const unsupportedIndex =
   err(Result[void, string], "Generalized index not supported.")
+
+template progressiveBodyImpl(
+    allFieldValues: openArray[NimNode],
+    depthSym: NimNode, body: untyped): untyped =
+  let totalChunkCount = allFieldValues.len
+  var
+    (firstIdx, depth) = totalChunkCount.progressiveBottom()
+    code {.inject.} = nnkCaseStmt.newTree(depthSym)
+  while depth > 0:
+    firstIdx = firstIdx shr 2
+    dec depth
+    let
+      height {.inject, used.} = newLit((depth shl 1) + 1)
+      firstIdx {.inject.} = firstIdx
+      impl = body
+    code.add nnkOfBranch.newTree(newLit(depth), impl)
+  code.add nnkElse.newTree quote do:
+    raiseAssert "Unexpected depth"
+  code
+
+func doProgressiveRoot(
+    allFieldValues: openArray[NimNode],
+    depthSym, x, res: NimNode): NimNode {.compileTime.} =
+  allFieldValues.progressiveBodyImpl(depthSym):
+    allFieldValues.progressiveRangePreChunked(firstIdx)
+      .doMerkleizeFields(height, x, res)
+
+func doProgressiveChunks(
+    allFieldValues: openArray[NimNode],
+    depthSym, x, chunks, indexLayer, res: NimNode): NimNode {.compileTime.} =
+  allFieldValues.progressiveBodyImpl(depthSym):
+    allFieldValues.progressiveRangePreChunked(firstIdx)
+      .doMerkleizeFields(height, x, chunks, indexLayer, res)
+
+func doProgressiveMulti(
+    allFieldValues: openArray[NimNode],
+    depthSym, x, chunk, indices, roots, loopOrder, slice, atLayer: NimNode
+): NimNode {.compileTime.} =
+  allFieldValues.progressiveBodyImpl(depthSym):
+    var body = nnkCaseStmt.newTree(chunk)
+    for i, fieldValue in allFieldValues.progressiveRangePreChunked(firstIdx):
+      body.add nnkOfBranch.newTree(newLit(i), quote do:
+        ? hash_tree_root_multi(
+          `fieldValue`, `indices`, `roots`, `loopOrder`, `slice`, `atLayer`))
+    body.add nnkElse.newTree quote do:
+      return unsupportedIndex
+    body
+
+template genGetProgressiveBodyImpls(
+    B: typedesc[object|tuple], F: typedesc[string|int]): untyped =
+  macro progressiveRoot[T: B](
+      fieldNames: static[openArray[Opt[F]]],
+      depth: Limit, x: T, res: var Digest): untyped =
+    fieldNames.allFieldValues(x).doProgressiveRoot(depth, x, res)
+
+  macro progressiveChunks[T: B](
+      fieldNames: static[openArray[Opt[F]]],
+      depth: Limit, x: T, chunks: Slice[Limit],
+      indexLayer: int, res: var Digest): untyped =
+    fieldNames.allFieldValues(x).doProgressiveChunks(
+      depth, x, chunks, indexLayer, res)
+
+  macro progressiveMulti[T: B](
+      fieldNames: static[openArray[Opt[F]]],
+      depth: Limit, x: T, chunk: Limit,
+      indices: openArray[GeneralizedIndex], roots: var openArray[Digest],
+      loopOrder: seq[int], slice: Slice[int], atLayer: int): untyped =
+    fieldNames.allFieldValues(x).doProgressiveMulti(
+      depth, x, chunk, indices, roots, loopOrder, slice, atLayer)
+
+genGetProgressiveBodyImpls(object, string)
+genGetProgressiveBodyImpls(tuple, int)
+
+func progressive_hash_tree_root_multi[T: BitSeq|seq|object|tuple](
+    x: T,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    loopOrder: seq[int],
+    slice: Slice[int],
+    atLayer: int): Result[void, string] =
+  when T is BitSeq:
+    let
+      bitlen = x.len.Limit
+      totalChunkCount = (bitlen + 255) div 256
+      hasPartialChunks = bitlen.uint.uint8 != 0x00
+    var atBottom = hasPartialChunks
+  elif T is seq:
+    type E = typeof toSszType(declval ElemType(typeof(x)))
+    let totalChunkCount = x.totalChunkCount
+  else:
+    static: doAssert T.isProgressiveContainer
+    const
+      fieldNames = T.allFieldNames
+      totalChunkCount = fieldNames.len
+  var i = slice.a
+  let index = indexAt(i)
+  var
+    needAll = index.countOnes == 1
+    res {.noinit.}: Digest
+  if needAll:
+    res.reset()
+  var (firstIdx, depth) = totalChunkCount.progressiveBottom()
+  while depth > 0 and i <= slice.b:
+    firstIdx = firstIdx shr 2
+    dec depth
+    let
+      index = indexAt(i)
+      indexLayer = log2trunc(index)
+    if indexLayer > depth:
+      let nextProgressivePrefix = (2 shl depth).GeneralizedIndex
+      if index == nextProgressivePrefix:
+        doAssert needAll
+        rootAt(i) = res
+        needAll = false
+        inc i
+        continue
+      let prefix = index shr (indexLayer - 1 - depth)
+      if prefix == nextProgressivePrefix:
+        return unsupportedIndex
+      if prefix == nextProgressivePrefix + 1:
+        doAssert not needAll
+        let
+          totalChunks = ((firstIdx shl 2) or 1) - firstIdx
+          firstChunkIndex = totalChunks.uint64
+          chunkLayer = log2trunc(firstChunkIndex)
+          atLayer = atLayer + depth.int + 1
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+        if index == 1.GeneralizedIndex:
+          let height {.used.} = (depth shl 1) + 1
+          when T is BitSeq:
+            atBottom.chunkedBitListHashTreeRoot(
+              height, x.progressiveRange(firstIdx, hasPartialChunks), rootAt(i))
+          elif T is seq:
+            chunkedHashTreeRoot(height, x.progressiveRange(firstIdx), rootAt(i))
+          else:
+            fieldNames.progressiveRoot(depth, x, rootAt(i))
+          inc i
+        elif indexLayer <= chunkLayer:
+          let
+            height {.used.} = (depth shl 1) + 1
+            chunks = chunksForIndex(index)
+          when T is BitSeq:
+            atBottom.chunkedBitListHashTreeRoot(
+              height, x.progressiveRange(firstIdx, hasPartialChunks),
+              chunks, indexLayer, rootAt(i))
+          elif T is seq:
+            chunkedHashTreeRoot(
+              height, x.progressiveRange(firstIdx),
+              chunks, indexLayer, rootAt(i))
+          else:
+            fieldNames.progressiveChunks(
+              depth, x, chunks, indexLayer, rootAt(i))
+          inc i
+        else:
+          const alwaysError =
+            when T is BitSeq:
+              true
+            elif T is seq:
+              E is BasicType
+            else:
+              false
+          when alwaysError:
+            return unsupportedIndex
+          else:
+            let chunk = chunkContainingIndex(index)
+            if firstIdx + chunk >= totalChunkCount:
+              return unsupportedIndex
+            var j = i + 1
+            while j <= slice.b:
+              let
+                index = indexAt(j)
+                indexLayer = log2trunc(index)
+              if indexLayer <= chunkLayer or
+                  chunkContainingIndex(index) != chunk:
+                break
+              inc j
+            when T is seq:
+              ? hash_tree_root_multi(
+                x[firstIdx + chunk], indices, roots, loopOrder, i ..< j,
+                atLayer + chunkLayer)
+            else:
+              fieldNames.progressiveMulti(
+                depth, x, chunk, indices, roots, loopOrder, i ..< j,
+                atLayer + chunkLayer)
+            i = j
+        continue
+    if needAll:
+      var contentsHash {.noinit.}: Digest
+      let height {.used.} = (depth shl 1) + 1
+      when T is BitSeq:
+        atBottom.chunkedBitListHashTreeRoot(
+          height, x.progressiveRange(firstIdx, hasPartialChunks), contentsHash)
+      elif T is seq:
+        chunkedHashTreeRoot(height, x.progressiveRange(firstIdx), contentsHash)
+      else:
+        fieldNames.progressiveRoot(depth, x, contentsHash)
+      mergeBranches(res, contentsHash, res)
+    when T is BitSeq:
+      atBottom = false
+  if i <= slice.b:
+    return unsupportedIndex
+  ok()
 
 func hashTreeRootAux[T](x: T, res: var Digest) =
   mixin hash_tree_root, toSszType
@@ -861,16 +1191,16 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     else:
       res = zeroHashes[1]
   elif T is object|tuple:
-    # when T.isCaseObject():
+    when T.isProgressiveContainer:
+      x.progressiveMerkleizeFields(res)
+      mixInActiveFields(res, T, res)
+    # elif T.isCaseObject():
     #   # TODO: Need to implement this for case object (SSZ Union)
     #   unsupported T
-    trs "MERKLEIZING FIELDS"
-    const
-      totalChunks = totalSerializedFields(T)
-      treeHeight = binaryTreeHeight totalChunks
-    merkleizeFields(treeHeight, res):
-      x.enumerateSubFields(f):
-        addField f
+    else:
+      trs "MERKLEIZING FIELDS"
+      const totalChunks = totalSerializedFields(T)
+      merkleizeFields(binaryTreeHeight totalChunks, x, res)
   else:
     unsupported T
 
@@ -1016,135 +1346,6 @@ func hashTreeRootAux[T](
                                    atLayer + chunkLayer)
             i = j
       else: return unsupportedIndex
-  elif T is BitSeq|seq:
-    when T is BitSeq:
-      type E = uint8
-    else:
-      type E = typeof toSszType(declval ElemType(typeof(x)))
-    var i = slice.a
-    while i <= slice.b:
-      let
-        index = indexAt(i)
-        indexLayer = log2trunc(index)
-      if index == 1.GeneralizedIndex:
-        var contentsHash {.noinit.}: Digest
-        when T is BitSeq:
-          progressiveBitListHashTreeRoot(x, contentsHash)
-        else:
-          progressiveChunkedHashTreeRoot(x, contentsHash)
-        mixInLength(contentsHash, x.len, rootAt(i))
-        inc i
-      elif index == 3.GeneralizedIndex:
-        hashTreeRootAux(x.len.uint64, rootAt(i))
-        inc i
-      elif index == 2.GeneralizedIndex:
-        when T is BitSeq:
-          progressiveBitListHashTreeRoot(x, rootAt(i))
-        else:
-          progressiveChunkedHashTreeRoot(x, rootAt(i))
-        inc i
-      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
-        let atLayer = atLayer + 1
-        when T is BitSeq:
-          let
-            bitlen = x.len.Limit
-            totalChunkCount = (bitlen + 255) div 256
-            hasPartialChunks = bitlen.uint.uint8 != 0x00
-          var atBottom = hasPartialChunks
-        else:
-          let totalChunkCount = x.totalChunkCount
-        var
-          needAll = index.countOnes == 1
-          res {.noinit.}: Digest
-        if needAll:
-          res.reset()
-        var (firstIdx, depth) = totalChunkCount.progressiveBottom()
-        while depth > 0 and i <= slice.b:
-          firstIdx = firstIdx shr 2
-          dec depth
-          let
-            index = indexAt(i)
-            indexLayer = log2trunc(index)
-          if indexLayer > depth:
-            let nextProgressivePrefix = (2 shl depth).GeneralizedIndex
-            if index == nextProgressivePrefix:
-              doAssert needAll
-              rootAt(i) = res
-              needAll = false
-              inc i
-              continue
-            let prefix = index shr (indexLayer - 1 - depth)
-            if prefix == nextProgressivePrefix:
-              return unsupportedIndex
-            if prefix == nextProgressivePrefix + 1:
-              doAssert not needAll
-              let
-                totalChunks = ((firstIdx shl 2) or 1) - firstIdx
-                firstChunkIndex = totalChunks.uint64
-                chunkLayer = log2trunc(firstChunkIndex)
-                atLayer = atLayer + depth.int + 1
-                index = indexAt(i)
-                indexLayer = log2trunc(index)
-              if index == 1.GeneralizedIndex:
-                when T is BitSeq:
-                  atBottom.chunkedBitListHashTreeRoot(
-                    (depth shl 1) + 1,
-                    x.progressiveRange(firstIdx, hasPartialChunks),
-                    rootAt(i))
-                else:
-                  chunkedHashTreeRoot(
-                    (depth shl 1) + 1, x.progressiveRange(firstIdx), rootAt(i))
-                inc i
-              elif indexLayer <= chunkLayer:
-                let chunks = chunksForIndex(index)
-                when T is BitSeq:
-                  atBottom.chunkedBitListHashTreeRoot(
-                    (depth shl 1) + 1,
-                    x.progressiveRange(firstIdx, hasPartialChunks),
-                    chunks, indexLayer, rootAt(i))
-                else:
-                  chunkedHashTreeRoot(
-                    (depth shl 1) + 1, x.progressiveRange(firstIdx),
-                    chunks, indexLayer, rootAt(i))
-                inc i
-              else:
-                when E is BasicType:
-                  return unsupportedIndex
-                else:
-                  let chunk = chunkContainingIndex(index)
-                  if firstIdx + chunk >= x.len:
-                    return unsupportedIndex
-                  var j = i + 1
-                  while j <= slice.b:
-                    let
-                      index = indexAt(j)
-                      indexLayer = log2trunc(index)
-                    if indexLayer <= chunkLayer or
-                        chunkContainingIndex(index) != chunk:
-                      break
-                    inc j
-                  ? hash_tree_root_multi(
-                    x[firstIdx + chunk], indices, roots, loopOrder, i ..< j,
-                    atLayer + chunkLayer)
-                  i = j
-              continue
-          if needAll:
-            var contentsHash {.noinit.}: Digest
-            when T is BitSeq:
-              atBottom.chunkedBitListHashTreeRoot(
-                (depth shl 1) + 1,
-                x.progressiveRange(firstIdx, hasPartialChunks),
-                contentsHash)
-            else:
-              chunkedHashTreeRoot(
-                (depth shl 1) + 1, x.progressiveRange(firstIdx), contentsHash)
-            mergeBranches(res, contentsHash, res)
-          when T is BitSeq:
-            atBottom = false
-        if i <= slice.b:
-          return unsupportedIndex
-      else:
-        return unsupportedIndex
   elif T is OptionalType:
     const
       totalChunks = Limit 1
@@ -1193,85 +1394,143 @@ func hashTreeRootAux[T](
                                atLayer + chunkLayer)
         i = j
       else: return unsupportedIndex
-  elif T is object|tuple:
-    # when T.isCaseObject():
-    #   # TODO: Need to implement this for case object (SSZ Union)
-    #   unsupported T
-    trs "MERKLEIZING FIELDS"
-    const
-      totalChunks = totalSerializedFields(T)
-      treeHeight = binaryTreeHeight(totalChunks)
-      firstChunkIndex = nextPow2(totalChunks.uint64)
-      chunkLayer = log2trunc(firstChunkIndex)
-    var
-      i = slice.a
-      fieldIndex = 0.Limit
-      isActive = false
-      index {.noinit.}: GeneralizedIndex
-      indexLayer {.noinit.}: int
-      chunks {.noinit.}: Slice[Limit]
-      merkleizer {.noinit.}: SszMerkleizer2[treeHeight]
-      chunk {.noinit.}: Limit
-      nextField {.noinit.}: Limit
-    x.enumerateSubFields(f):
-      if i <= slice.b:
-        if not isActive:
+  elif T is BitSeq|seq|object|tuple:
+    const usesProgressiveShape =
+      when T is BitSeq|seq:
+        true
+      elif T.isProgressiveContainer:
+        true
+      else:
+        false
+    when usesProgressiveShape:
+      var i = slice.a
+      while i <= slice.b:
+        let
           index = indexAt(i)
           indexLayer = log2trunc(index)
-          nextField =
+        if index == 1.GeneralizedIndex:
+          var contentsHash {.noinit.}: Digest
+          when T is BitSeq:
+            x.progressiveBitListHashTreeRoot(contentsHash)
+          elif T is seq:
+            x.progressiveChunkedHashTreeRoot(contentsHash)
+          else:
+            x.progressiveMerkleizeFields(contentsHash)
+          when T is BitSeq|seq:
+            mixInLength(contentsHash, x.len, rootAt(i))
+          else:
+            mixInActiveFields(contentsHash, T, rootAt(i))
+          inc i
+        elif index == 3.GeneralizedIndex:
+          when T is BitSeq|seq:
+            hashTreeRootAux(x.len.uint64, rootAt(i))
+          else:
+            const activeFields = static(T.activeFields)
+            rootAt(i) = activeFields.hash_tree_root()
+          inc i
+        elif index == 2.GeneralizedIndex:
+          when T is BitSeq:
+            x.progressiveBitListHashTreeRoot(rootAt(i))
+          elif T is seq:
+            x.progressiveChunkedHashTreeRoot(rootAt(i))
+          else:
+            x.progressiveMerkleizeFields(rootAt(i))
+          inc i
+        elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+          var j = i + 1
+          while j <= slice.b:
+            let
+              index = indexAt(j)
+              indexLayer = log2trunc(index)
+            if indexLayer <= atLayer + 1 or
+                (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
+              break
+            inc j
+          let atLayer = atLayer + 1
+          ? x.progressive_hash_tree_root_multi(
+            indices, roots, loopOrder, i ..< j, atLayer)
+          i = j
+        else:
+          return unsupportedIndex
+    # elif T.isCaseObject():
+    #   # TODO: Need to implement this for case object (SSZ Union)
+    #   unsupported T
+    else:
+      trs "MERKLEIZING FIELDS"
+      const
+        totalChunks = totalSerializedFields(T)
+        treeHeight = binaryTreeHeight(totalChunks)
+        firstChunkIndex = nextPow2(totalChunks.uint64)
+        chunkLayer = log2trunc(firstChunkIndex)
+      var
+        i = slice.a
+        fieldIndex = 0.Limit
+        isActive = false
+        index {.noinit.}: GeneralizedIndex
+        indexLayer {.noinit.}: int
+        chunks {.noinit.}: Slice[Limit]
+        merkleizer {.noinit.}: SszMerkleizer2[treeHeight]
+        chunk {.noinit.}: Limit
+        nextField {.noinit.}: Limit
+      x.enumerateSubFields(f):
+        if i <= slice.b:
+          if not isActive:
+            index = indexAt(i)
+            indexLayer = log2trunc(index)
+            nextField =
+              if indexLayer == chunkLayer:
+                chunkForIndex(index)
+              elif indexLayer < chunkLayer:
+                chunks = chunksForIndex(index)
+                merkleizer.topIndex = chunkLayer - indexLayer
+                merkleizer.totalChunks = 0
+                chunks.a
+              else:
+                chunk = chunkContainingIndex(index)
+                chunk
+            isActive = true
+          if fieldIndex >= nextField:
             if indexLayer == chunkLayer:
-              chunkForIndex(index)
-            elif indexLayer < chunkLayer:
-              chunks = chunksForIndex(index)
-              merkleizer.topIndex = chunkLayer - indexLayer
-              merkleizer.totalChunks = 0
-              chunks.a
-            else:
-              chunk = chunkContainingIndex(index)
-              chunk
-          isActive = true
-        if fieldIndex >= nextField:
-          if indexLayer == chunkLayer:
-            rootAt(i) = hash_tree_root(f)
-            inc i
-            isActive = false
-          elif indexLayer < chunkLayer:
-            addField f
-            if fieldIndex >= chunks.b:
-              rootAt(i) = getFinalHash(merkleizer)
+              rootAt(i) = hash_tree_root(f)
               inc i
               isActive = false
-          else:
-            var j = i + 1
-            while j <= slice.b:
-              let
-                index = indexAt(j)
-                indexLayer = log2trunc(index)
-              if indexLayer <= chunkLayer or
-                  chunkContainingIndex(index) != chunk:
-                break
-              inc j
-            ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
-                                   atLayer + chunkLayer)
-            i = j
-            isActive = false
-      inc fieldIndex
-    doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
-    while i <= slice.b:
-      index = indexAt(i)
-      indexLayer = log2trunc(index)
-      if indexLayer == chunkLayer:
-        rootAt(i) = static(Digest())
-        inc i
-        isActive = false
-      elif indexLayer < chunkLayer:
-        if not isActive:
-          merkleizer.topIndex = chunkLayer - indexLayer
-          merkleizer.totalChunks = 0
-        rootAt(i) = getFinalHash(merkleizer)
-        inc i
-        isActive = false
-      else: return unsupportedIndex
+            elif indexLayer < chunkLayer:
+              addField f
+              if fieldIndex >= chunks.b:
+                rootAt(i) = getFinalHash(merkleizer)
+                inc i
+                isActive = false
+            else:
+              var j = i + 1
+              while j <= slice.b:
+                let
+                  index = indexAt(j)
+                  indexLayer = log2trunc(index)
+                if indexLayer <= chunkLayer or
+                    chunkContainingIndex(index) != chunk:
+                  break
+                inc j
+              ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
+                                    atLayer + chunkLayer)
+              i = j
+              isActive = false
+        inc fieldIndex
+      doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
+      while i <= slice.b:
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+        if indexLayer == chunkLayer:
+          rootAt(i) = static(Digest())
+          inc i
+          isActive = false
+        elif indexLayer < chunkLayer:
+          if not isActive:
+            merkleizer.topIndex = chunkLayer - indexLayer
+            merkleizer.totalChunks = 0
+          rootAt(i) = getFinalHash(merkleizer)
+          inc i
+          isActive = false
+        else: return unsupportedIndex
   else:
     unsupported T
   ok()
