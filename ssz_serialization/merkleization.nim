@@ -1185,11 +1185,6 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     else:
       x.progressiveChunkedHashTreeRoot(res)
     mixInLength(res, x.len, res)
-  elif T is OptionalType:
-    if x.isSome:
-      mixInLength(hash_tree_root(x.get), length = 1, res)
-    else:
-      res = zeroHashes[1]
   elif T is object|tuple:
     when T.isProgressiveContainer:
       x.progressiveMerkleizeFields(res)
@@ -1345,54 +1340,6 @@ func hashTreeRootAux[T](
             ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                    atLayer + chunkLayer)
             i = j
-      else: return unsupportedIndex
-  elif T is OptionalType:
-    const
-      totalChunks = Limit 1
-      firstChunkIndex = nextPow2(totalChunks.uint64)
-      chunkLayer = log2trunc(firstChunkIndex)
-    var i = slice.a
-    while i <= slice.b:
-      let
-        index = indexAt(i)
-        indexLayer = log2trunc(index)
-      if index == 1.GeneralizedIndex:
-        if x.isSome:
-          mixInLength(hash_tree_root(x.get), length = 1, rootAt(i))
-        else:
-          rootAt(i) = zeroHashes[1]
-        inc i
-      elif index == 3.GeneralizedIndex:
-        if x.isSome:
-          hashTreeRootAux(1.uint64, rootAt(i))
-        else:
-          rootAt(i) = zeroHashes[0]
-        inc i
-      elif index == 2.GeneralizedIndex:
-        if x.isSome:
-          rootAt(i) = hash_tree_root(x.get)
-        else:
-          rootAt(i) = zeroHashes[0]
-        inc i
-      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
-        if x.isNone: return unsupportedIndex
-        let
-          atLayer = atLayer + 1
-          index = indexAt(i)
-          indexLayer = log2trunc(index)
-          chunk = chunkContainingIndex(index)
-        var j = i + 1
-        while j <= slice.b:
-          let
-            index = indexAt(j)
-            indexLayer = log2trunc(index)
-          if indexLayer <= chunkLayer or
-              chunkContainingIndex(index) != chunk:
-            break
-          inc j
-        ? hash_tree_root_multi(x.get, indices, roots, loopOrder, i ..< j,
-                               atLayer + chunkLayer)
-        i = j
       else: return unsupportedIndex
   elif T is BitSeq|seq|object|tuple:
     const usesProgressiveShape =

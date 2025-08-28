@@ -11,7 +11,7 @@
 # https://github.com/ethereum/consensus-specs/blob/v1.0.1/ssz/simple-serialize.md#serialization
 
 import
-  std/[options, typetraits],
+  std/typetraits,
   results,
   stew/[endians2, leb128, objects, ptrops],
   serialization, serialization/testing/tracing,
@@ -161,10 +161,6 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     # ATTENTION! We can reuse `writeSeq` only as long as our BitList type is implemented
     # to internally match the binary representation of SSZ BitLists in memory.
     writeElements(w, bytes value)
-  elif value is OptionalType:
-    if value.isSome:
-      w.writeValue 1'u8
-      w.writeValue value.get
   elif value is object|tuple:
     when isCaseObject(type(value)):
       isUnion(type(value))
@@ -236,12 +232,6 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
 
   elif T is BitList|BitSeq:
     return len(bytes(value))
-
-  elif T is OptionalType:
-    if value.isSome:
-      1 + sszSize(value.unsafeGet)
-    else:
-      0
 
   elif T is object|tuple:
     when T.isCaseObject():
