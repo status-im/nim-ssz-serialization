@@ -30,7 +30,6 @@ type
 
   UintN* = SomeUnsignedInt|UInt128|UInt256
   BasicType* = bool|UintN
-  OptionalType* = Option|Opt
 
   Limit* = int64
 
@@ -517,9 +516,6 @@ macro unsupported*(T: typed): untyped =
   else:
     error "SSZ serialization of the type " & humaneTypeName(T) & " is not supported, overload toSszType and fromSszBytes"
 
-template ElemType*(T0: type OptionalType): untyped =
-  T0.T
-
 template ElemType*(T0: type HashArray): untyped =
   T0.T
 
@@ -559,8 +555,6 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
     return true
   elif T is array|HashArray:
     return isFixedSize(ElemType(T))
-  elif T is OptionalType:
-    return false
   elif T is object|tuple:
     when isCaseObject(T):
       return false

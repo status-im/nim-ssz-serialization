@@ -395,26 +395,6 @@ proc readSszValue*[T](
         val.clearCaches(0)
         val.clearCaches(max(val.len - 1, 0))
 
-  elif val is OptionalType:
-    type E = ElemType(T)
-    if input.len == 0:
-      when val is Option:
-        val = options.none(E)
-      else:
-        val = Opt.none(E)
-    else:
-      var isSome: uint8
-      readSszBytes(input.toOpenArray(0, 0), isSome)
-      if isSome != 1:
-        raiseMalformedSszError(
-          T, "Unexpected isSome " & $isSome & " (expected: 1)")
-      var v: E
-      readSszBytes(input.toOpenArray(1, input.len - 1), v)
-      when val is Option:
-        val = options.some(v)
-      else:
-        val = Opt.some(v)
-
   elif val is BitArray:
     if sizeof(val) != input.len:
       raiseIncorrectSize(T)
