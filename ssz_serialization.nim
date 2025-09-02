@@ -14,7 +14,7 @@ import
   std/typetraits,
   results,
   stew/[endians2, leb128, objects, ptrops],
-  serialization, serialization/testing/tracing,
+  serialization, serialization/[case_objects, testing/tracing],
   ./ssz_serialization/[codec, bitseqs, types]
 
 export
@@ -162,29 +162,17 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     # to internally match the binary representation of SSZ BitLists in memory.
     writeElements(w, bytes value)
   elif value is object|tuple:
-    when isCaseObject(type(value)):
-      isUnion(type(value))
-
+    when isUnion(type(value)):
       trs "WRITING SSZ Union"
-
-      # toSszType for enum is kept local here as we don't want enums to
-      # serialize in general, only for object variants.
-      # TODO: This is not sufficiant as it will still allow to parse enum
-      # fields in the object variant itself. Will probably need some macro
-      # which enumerates the fields instead to take specific action on the
-      # discriminator.
-      template toSszType[E: enum](x: E): uint8 =
-        uint8(x)
-
-      # TODO: At this point, the assumption is a correct `isUnion` as described
-      # above.
-      enumerateSubFields(value, field):
-        type T = type toSszType(field)
-
-        when isFixedSize(T):
-          w.stream.writeFixedSized toSszType(field)
+      value.withFieldPairs(key, val):
+        when key == typeof(value).unionSelectorKey:
+          w.stream.writeFixedSized val.ord.uint8
         else:
-          w.writeVarSizeType toSszType(field)
+          type E = typeof toSszType(val)
+          when isFixedSize(E):
+            w.stream.writeFixedSized toSszType(val)
+          else:
+            w.writeVarSizeType toSszType(val)
     else:
       trs "WRITING OBJECT"
       var ctx = beginRecord(w, type value)
@@ -212,6 +200,13 @@ func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
   for elem in value:
     result += sszSize(toSszType elem)
 
+func sszSizeForUnion[T: object](value: T): int =
+  value.withFieldPairs(key, val):
+    when key == T.unionSelectorKey:
+      result = 1
+    else:
+      result += sszSize(toSszType val)
+
 func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   mixin toSszType
   type T = type toSszType(value)
@@ -234,9 +229,8 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
     return len(bytes(value))
 
   elif T is object|tuple:
-    when T.isCaseObject():
-      isUnion(T)
-      unionSize(value)
+    when T.isUnion:
+      sszSizeForUnion(value)
     else:
       result = anonConst fixedPortionSize(T)
       enumInstanceSerializedFields(value, _{.used.}, field):
