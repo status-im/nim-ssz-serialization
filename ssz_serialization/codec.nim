@@ -1,11 +1,11 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2025 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
-{.push raises: [].}
+{.push raises: [], gcsafe.}
 
 # Coding and decoding of primitive SSZ types - every "simple" type passed to
 # and from the SSZ library must have a `fromSssBytes` and `toSszType` overload.
@@ -47,7 +47,10 @@ func setOutputSize[T](x: var seq[T], length: int) {.raises: [SszError].} =
   # We will overwrite all bytes
   when T is SomeNumber:
     if x.len != length:
-      x = newSeqUninitialized[T](length)
+      when (NimMajor, NimMinor) < (2, 2):
+        x = newSeqUninitialized[T](length)
+      else:
+        x = newSeqUninit[T](length)
   else:
     x.setLen(length)
 
