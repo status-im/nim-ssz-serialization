@@ -21,7 +21,7 @@ import
   stew/[assign2, bitops2, endians2, objects, ptrops],
   results,
   nimcrypto/[hash, sha2],
-  serialization/testing/tracing,
+  serialization/[case_objects, testing/tracing],
   "."/[bitseqs, codec, digest, types]
 
 export
@@ -492,6 +492,13 @@ func mixInLength(root: Digest, length: int, res: var Digest) =
 func mixInLength*(root: Digest, length: int): Digest {.noinit.} =
   mixInLength(root, length, result)
 
+func mixInSelector(root: Digest, selector: uint8, res: var Digest) =
+  var buf {.noinit.}: array[64, byte]
+  assign(buf.toOpenArray(0, root.data.high), root.data)
+  buf[32] = selector
+  zeroMem(addr buf[33], 31)
+  digest(buf, res)
+
 func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [], noinit.}
 
 func hash_tree_root_multi(
@@ -501,6 +508,16 @@ func hash_tree_root_multi(
     loopOrder: seq[int],
     slice: Slice[int],
     atLayer = 0): Result[void, string] {.gcsafe, raises: [].}
+
+func unionHashTreeRoot[T: object](x: T, res: var Digest) =
+  var isSome = false
+  x.withFieldPairs(key, val):
+    when key != T.unionSelectorKey:
+      doAssert not isSome
+      isSome = true
+      res = val.hash_tree_root()
+  if not isSome:
+    res.reset()
 
 template addField(field) =
   trs "MERKLEIZING FIELD ", astToStr(field)
@@ -1185,13 +1202,13 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     else:
       x.progressiveChunkedHashTreeRoot(res)
     mixInLength(res, x.len, res)
+  elif T.isUnion:
+    x.unionHashTreeRoot(res)
+    mixInSelector(res, x.unionSelector.ord.uint8, res)
   elif T is object|tuple:
     when T.isProgressiveContainer:
       x.progressiveMerkleizeFields(res)
       mixInActiveFields(res, T, res)
-    # elif T.isCaseObject():
-    #   # TODO: Need to implement this for case object (SSZ Union)
-    #   unsupported T
     else:
       trs "MERKLEIZING FIELDS"
       const totalChunks = totalSerializedFields(T)
@@ -1341,6 +1358,46 @@ func hashTreeRootAux[T](
                                    atLayer + chunkLayer)
             i = j
       else: return unsupportedIndex
+  elif T.isUnion:
+    var i = slice.a
+    while i <= slice.b:
+      let
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+      if index == 1.GeneralizedIndex:
+        var contentsHash {.noinit.}: Digest
+        x.unionHashTreeRoot(contentsHash)
+        mixInSelector(contentsHash, x.unionSelector.ord.uint8, rootAt(i))
+        inc i
+      elif index == 3.GeneralizedIndex:
+        hashTreeRootAux(x.unionSelector.ord.uint8, rootAt(i))
+        inc i
+      elif index == 2.GeneralizedIndex:
+        x.unionHashTreeRoot(rootAt(i))
+        inc i
+      elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+        var isSome = false
+        x.withFieldPairs(key, val):
+          when key != T.unionSelectorKey:
+            doAssert not isSome
+            isSome = true
+            var j = i + 1
+            while j <= slice.b:
+              let
+                index = indexAt(j)
+                indexLayer = log2trunc(index)
+              if indexLayer <= atLayer + 1 or
+                  (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
+                break
+              inc j
+            let atLayer = atLayer + 1
+            ? val.hash_tree_root_multi(
+              indices, roots, loopOrder, i ..< j, atLayer)
+            i = j
+        if not isSome:
+          return unsupportedIndex
+      else:
+        return unsupportedIndex
   elif T is BitSeq|seq|object|tuple:
     const usesProgressiveShape =
       when T is BitSeq|seq:
@@ -1399,9 +1456,6 @@ func hashTreeRootAux[T](
           i = j
         else:
           return unsupportedIndex
-    # elif T.isCaseObject():
-    #   # TODO: Need to implement this for case object (SSZ Union)
-    #   unsupported T
     else:
       trs "MERKLEIZING FIELDS"
       const
