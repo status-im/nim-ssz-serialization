@@ -15,7 +15,8 @@ requires "nim >= 2.0.10",
          "nimcrypto",
          "blscurve",
          "results",
-         "unittest2"
+         "unittest2",
+         "hashtree_abi"
 
 let nimc = getEnv("NIMC", "nim") # Which nim compiler to use
 let lang = getEnv("NIMLANG", "c") # Which backend (c/cpp/js)
