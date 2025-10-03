@@ -5,7 +5,7 @@
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
-import std/strutils, nimcrypto/[hash, sha2], stew/ptrops, ./types
+import std/strutils, nimcrypto/[hash, sha2], stew/[ptrops,importops], ./types
 
 # Depending on platform, we have several SHA256 implementations to choose from:
 # * nimcrypto is pure nim and used for compile-time evaluation and fallback
@@ -47,11 +47,18 @@ when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
   (defined(macosx) and defined(clang) and defined(arm64))
 ):
   {.hint: "Hashtree SHA256 backend enabled".}
-  const USE_HASHTREE_SHA256 = true
 
-  import ../vendor/hashtree/hashtree_abi
-else:
-  const USE_HASHTREE_SHA256 = false
+  when tryImport ../vendor/hashtree/hashtree_abi:
+    {.hint: "hashtree_abi found in vendor(nimbus build system)".}
+    # import hashtree_abi from vendor
+    const USE_HASHTREE_SHA256 = true
+  elif tryImport hashtree_abi:
+    {.hint: "hashtree_abi nimble package found".}
+    # import hashtree_abi from nimble package
+    const USE_HASHTREE_SHA256 = true
+  else:
+    {.hint: "hashtree_abi not found, disabling hashtree backend".}
+    const USE_HASHTREE_SHA256 = false
 
 template computeDigest*(body: untyped): Digest =
   ## This little helper will init the hash function and return the sliced
