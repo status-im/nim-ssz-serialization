@@ -1,5 +1,5 @@
 [submodule "vendor/hashtree"]
 	path = vendor/hashtree
-	url = https://github.com/prysmaticlabs/hashtree.git
+	url = https://github.com/OffchainLabs/hashtree.git
 	ignore = untracked
 	branch = main
