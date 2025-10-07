@@ -771,6 +771,7 @@ template bitListHashTreeRoot(
     height, x, 0.Limit ..< (1.Limit shl height), topLayer = 0, res)
 
 func valuesPerChunk[T](x: typedesc[T]): int {.compileTime.} =
+  mixin toSszType
   type E = typeof toSszType(declval T)
   when E is BasicType:
     bytesPerChunk div sizeof(E)

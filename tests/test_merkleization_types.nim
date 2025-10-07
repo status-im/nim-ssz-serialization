@@ -1965,3 +1965,42 @@ suite "Merkleization: nested SSZ union":
       ou1 = OuterUnion(kind: ouInner, inner: iuA)
       ou2 = OuterUnion(kind: ouInner, inner: iuB)
     check hash_tree_root(ou1) != hash_tree_root(ou2)
+
+type
+  Bytes32 = array[32, byte]
+  Hash32 = distinct Bytes32
+
+template toSszType(x: Hash32): auto =
+  distinctBase(x)
+
+proc fromSszBytes(
+    T: type Hash32, bytes: openArray[byte]): T {.raises: [SszError].} =
+  readSszValue(bytes, distinctBase(result))
+
+suite "SSZ: Hash32 distinct Bytes32 roundtrip":
+  test "merkleization parity":
+    var
+      h1: Hash32
+      h2: Bytes32
+    for i in 0 ..< 32:
+      distinctBase(h1)[i] = byte(0xA0 + i)
+      h2[i] = byte(0xA0 + i)
+
+    check hash_tree_root(h1) == hash_tree_root(h2)
+    for i in 0 ..< 32:
+      distinctBase(h1)[i] = byte(i)
+      h2[i] = byte(i)
+    check hash_tree_root(h1) == hash_tree_root(h2)
+
+  test "seq[Hash32] root stable and order-sensitive":
+    var h1, h2: Hash32
+    for i in 0 ..< 32:
+      distinctBase(h1)[i] = byte(i)
+      distinctBase(h2)[i] = byte(255 - i)
+    let
+      r1 = hash_tree_root(@[h1, h2])
+      r2 = hash_tree_root(@[h1, h2])
+      r3 = hash_tree_root(@[h2, h1])
+    check:
+      r1 == r2
+      r1 != r3
