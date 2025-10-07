@@ -333,3 +333,35 @@ suite "sszSize test suite":
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
+
+type
+  DataKind* = enum
+    dataTypeA
+    dataTypeB
+
+  PayloadA* = object
+    value*: uint64
+    data*: array[4, byte]
+
+  PayloadB* = object
+    value*: uint64
+    data*: array[4, byte]
+
+  GenericItem* = object
+    case kind*: DataKind
+    of dataTypeA:
+      payloadA*: PayloadA
+    of dataTypeB:
+      payloadB*: PayloadB
+
+suite "SSZ: Union list size parity":
+  test "SSZ: Union list sszSize vs encode length":
+    let items = @[
+      GenericItem(
+        kind: dataTypeA,
+        payloadA: PayloadA(
+          value: 0'u64,
+          data: [0'u8, 0, 0, 0])
+      )
+    ]
+    check sszSize(items) == SSZ.encode(items).len
