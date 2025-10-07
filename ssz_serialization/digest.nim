@@ -38,28 +38,32 @@ else:
   {.hint: "nimcrypto SHA256 backend enabled".}
   type DigestCtx* = sha2.sha256
 
-when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
+const HASHTREE_SUPPORTED* = (defined(arm64) or defined(amd64)) and (
   (defined(linux) and defined(gcc)) or
   # llvm-mingw doesn't support hashtree well even with "-fno-integrated-as"
   # this is true with clang-17(19th June 2024).
   (defined(windows) and defined(gcc) and "clang" notin staticExec("gcc --version")) or
   (defined(linux) and defined(clang)) or
   (defined(macosx) and defined(clang) and defined(arm64))
-):
+)
+when PREFER_HASHTREE_SHA256 and HASHTREE_SUPPORTED:
   {.hint: "Hashtree SHA256 backend enabled".}
   when tryImport ../vendor/hashtree/hashtree_abi:
     {.hint: "hashtree_abi found in vendor".}
-    const USE_HASHTREE_SHA256 = true
-    # import hashtree_abi from vendor
+    const HASHTREE_ABI_FOUND = true
   elif tryImport hashtree_abi:
     {.hint: "hashtree_abi package found".}
-    const USE_HASHTREE_SHA256 = true
-    # import hashtree_abi as a package
+    const HASHTREE_ABI_FOUND = true
   else:
     {.hint: "hashtree_abi not found, disabling hashtree backend".}
-    const USE_HASHTREE_SHA256 = false
+    const HASHTREE_ABI_FOUND = false
 else:
-    const USE_HASHTREE_SHA256 = false
+    const HASHTREE_ABI_FOUND = false
+
+const USE_HASHTREE_SHA256* =
+  PREFER_HASHTREE_SHA256 and HASHTREE_SUPPORTED and HASHTREE_ABI_FOUND
+
+
 
 template computeDigest*(body: untyped): Digest =
   ## This little helper will init the hash function and return the sliced

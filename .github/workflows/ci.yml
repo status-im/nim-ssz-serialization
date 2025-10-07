@@ -181,6 +181,17 @@ jobs:
           nimble install -y --depsOnly
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
+          
+      - name: Remove vendor and run tests with nimble
+        run: |
+          if [[ "${{ matrix.target.os }}" == "windows" ]]; then
+            export NIMFLAGS="-d:nimRawSetjmp"
+          fi
+          echo "=== Removing vendor directory ==="
+          rm -rf vendor
+          echo "=== Testing with nimble (installed dependencies) ==="
+          env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} -d:PREFER_HASHTREE_SHA256" nimble test
+          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} -d:PREFER_HASHTREE_SHA256" nimble test
 
       - name: Fuzz a little
         if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
