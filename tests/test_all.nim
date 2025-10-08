@@ -13,5 +13,4 @@ import
   ./test_ssz_union,
   ./test_merkleization,
   ./test_merkleization_types,
-  ./test_hash_tree_root,
-  ./test_backend_inclusion,
+  ./test_hash_tree_root
