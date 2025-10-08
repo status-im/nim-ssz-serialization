@@ -169,7 +169,7 @@ jobs:
           # Set GCC-14 as the default
           sudo update-alternatives --set gcc /usr/bin/gcc-14
 
-      - name: Run tests
+      - name: Run tests (with vendor)
         run: |
           if [[ "${{ matrix.target.os }}" == "windows" ]]; then
             # https://github.com/status-im/nimbus-eth2/issues/3121
@@ -181,19 +181,30 @@ jobs:
           nimble install -y --depsOnly
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
-          
-      - name: Remove vendor and run tests with nimble
+
+      - name: Fuzz a little (with vendor)
+        if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
+        run: |
+          nimble fuzzHashtree
+
+      - name: Remove vendor directory to force using Nimble package
+        run: |
+          rm -rf vendor
+
+      - name: Run tests (with Nimble package)
         run: |
           if [[ "${{ matrix.target.os }}" == "windows" ]]; then
+            # https://github.com/status-im/nimbus-eth2/issues/3121
             export NIMFLAGS="-d:nimRawSetjmp"
           fi
-          echo "=== Removing vendor directory ==="
-          rm -rf vendor
-          echo "=== Testing with nimble (installed dependencies) ==="
-          env TEST_LANG="c" NIMFLAGS="${NIMFLAGS} -d:PREFER_HASHTREE_SHA256" nimble test
-          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS} -d:PREFER_HASHTREE_SHA256" nimble test
+          nim --version
+          nimble --version
+          gcc --version
+          nimble install -y --depsOnly
+          env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
+          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
 
-      - name: Fuzz a little
+      - name: Fuzz a little (with Nimble package)
         if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
         run: |
           nimble fuzzHashtree
