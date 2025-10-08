@@ -169,7 +169,7 @@ jobs:
           # Set GCC-14 as the default
           sudo update-alternatives --set gcc /usr/bin/gcc-14
 
-      - name: Run tests (hashtree_abi import via vendor directory)
+      - name: Run tests (hashtree_abi via vendor directory import)
         run: |
           if [[ "${{ matrix.target.os }}" == "windows" ]]; then
             # https://github.com/status-im/nimbus-eth2/issues/3121
@@ -182,16 +182,16 @@ jobs:
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
 
-      - name: Fuzz a little (hashtree_abi import via vendor directory)
+      - name: Fuzz a little (hashtree_abi via vendor directory import)
         if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
         run: |
           nimble fuzzHashtree
 
-      - name: Remove vendor directory to force hashtree_abi import via search path
+      - name: Remove vendor directory to force hashtree_abi via search path import
         run: |
           rm -rf vendor
 
-      - name: Run tests (hashtree_abi import via search path)
+      - name: Run tests (hashtree_abi via search path import)
         run: |
           if [[ "${{ matrix.target.os }}" == "windows" ]]; then
             # https://github.com/status-im/nimbus-eth2/issues/3121
@@ -204,7 +204,7 @@ jobs:
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
 
-      - name: Fuzz a little (hashtree_abi import via search path)
+      - name: Fuzz a little (hashtree_abi via search path import)
         if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
         run: |
           nimble fuzzHashtree
