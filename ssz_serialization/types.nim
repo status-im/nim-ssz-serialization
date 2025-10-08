@@ -46,12 +46,11 @@ template isProgressiveContainer*(T: typedesc): bool =
 func activeFields*(T: typedesc): BitArray[256] {.compileTime.} =
   static: doAssert isProgressiveContainer(T)
   const activeFields = T.getCustomPragmaVal(sszActiveFields)
-  static:
-    doAssert activeFields.len > 0 and activeFields[^1] == 1
-    doAssert activeFields.allIt it in [0, 1]
-    doAssert activeFields.countIt(it == 1) == T.totalSerializedFields
-    doAssert activeFields.len <= 256
-  const res = block:
+  doAssert activeFields.len > 0 and activeFields[^1] == 1
+  doAssert activeFields.allIt it in [0, 1]
+  doAssert activeFields.countIt(it == 1) == T.totalSerializedFields
+  doAssert activeFields.len <= 256
+  let res = block:
     var res: BitArray[256]
     for i, it in activeFields:
       res[i] = it != 0
