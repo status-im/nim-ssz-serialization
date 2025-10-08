@@ -54,8 +54,6 @@ when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
     {.hint: "Hashtree SHA256 backend enabled (via nimble package)".}
   const USE_HASHTREE_SHA256 = true
 else:
-  when PREFER_HASHTREE_SHA256:
-    {.hint: "Hashtree SHA256 backend preferred but not supported".}
   const USE_HASHTREE_SHA256 = false
 
 template computeDigest*(body: untyped): Digest =
