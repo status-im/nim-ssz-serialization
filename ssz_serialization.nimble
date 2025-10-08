@@ -8,7 +8,7 @@ license       = "Apache License 2.0"
 skipDirs      = @["tests"]
 
 requires "nim >= 2.0.10",
-         "serialization",
+         "serialization >= 0.5.0",
          "json_serialization",
          "stew",
          "stint >= 0.8.2",
