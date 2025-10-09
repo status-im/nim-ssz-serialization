@@ -46,10 +46,13 @@ when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
   (defined(linux) and defined(clang)) or
   (defined(macosx) and defined(clang) and defined(arm64))
 ):
-  {.hint: "Hashtree SHA256 backend enabled".}
+  import stew/importops
+  when tryImport ../vendor/hashtree/hashtree_abi:
+    {.hint: "Hashtree SHA256 backend enabled via vendor directory import".}
+  else:
+    import hashtree_abi
+    {.hint: "Hashtree SHA256 backend enabled via search path import".}
   const USE_HASHTREE_SHA256 = true
-
-  import ../vendor/hashtree/hashtree_abi
 else:
   const USE_HASHTREE_SHA256 = false
 

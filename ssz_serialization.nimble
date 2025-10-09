@@ -10,12 +10,13 @@ skipDirs      = @["tests"]
 requires "nim >= 2.0.10",
          "serialization >= 0.5.0",
          "json_serialization",
-         "stew",
+         "stew >= 0.4.2",
          "stint >= 0.8.2",
          "nimcrypto",
          "blscurve",
          "results",
-         "unittest2"
+         "unittest2",
+         "hashtree_abi"
 
 let nimc = getEnv("NIMC", "nim") # Which nim compiler to use
 let lang = getEnv("NIMLANG", "c") # Which backend (c/cpp/js)
