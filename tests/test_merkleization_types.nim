@@ -1720,7 +1720,7 @@ let
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
     res
 
-func toBin(x: int): string =
+func toBin(x: int64): string =
   "0b" & x.toBin(len = 100).strip(trailing = false, chars = {'0'})
 
 suite "Merkleization types":
