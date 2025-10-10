@@ -177,13 +177,13 @@ type
     of XYKind.SomeY:
       y: Y
 
-  Bytes32 = array[2, byte]
+  Bytes2 = array[2, byte]
   List32 = List[byte, 32]
 
 suite "Generic union test suite":
   test "T Union":
-    let a = TUnion[Bytes32](kind: UKind.None)
-    let b = TUnion[Bytes32](kind: UKind.Some, val: default(Bytes32))
+    let a = TUnion[Bytes2](kind: UKind.None)
+    let b = TUnion[Bytes2](kind: UKind.Some, val: default(Bytes2))
 
     let abytes = SSZ.encode(a)
     let bbytes = SSZ.encode(b)
@@ -201,9 +201,9 @@ suite "Generic union test suite":
     check bbbytes == bbytes
 
   test "XY Union":
-    let a = XYUnion[Bytes32, List32](kind: XYKind.None)
-    let b = XYUnion[Bytes32, List32](kind: XYKind.SomeX, x: default(Bytes32))
-    let c = XYUnion[Bytes32, List32](kind: XYKind.SomeY, y: List32(@[3.byte]))
+    let a = XYUnion[Bytes2, List32](kind: XYKind.None)
+    let b = XYUnion[Bytes2, List32](kind: XYKind.SomeX, x: default(Bytes2))
+    let c = XYUnion[Bytes2, List32](kind: XYKind.SomeY, y: List32(@[3.byte]))
 
     let aBytes = SSZ.encode(a)
     let bBytes = SSZ.encode(b)
@@ -266,8 +266,8 @@ suite "sszSize test suite":
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "TUnion Bytes32 None":
-    let x = TUnion[Bytes32](kind: UKind.None)
+  test "TUnion Bytes2 None":
+    let x = TUnion[Bytes2](kind: UKind.None)
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
@@ -278,8 +278,8 @@ suite "sszSize test suite":
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "TUnion Bytes32 Some":
-    let x = TUnion[Bytes32](kind: UKind.Some, val: [1.byte, 3.byte])
+  test "TUnion Bytes2 Some":
+    let x = TUnion[Bytes2](kind: UKind.Some, val: [1.byte, 3.byte])
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
@@ -290,44 +290,44 @@ suite "sszSize test suite":
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "XYUnion List32, Bytes32, None":
-    let x = XYUnion[List32, Bytes32](kind: XYKind.None)
+  test "XYUnion List32, Bytes2, None":
+    let x = XYUnion[List32, Bytes2](kind: XYKind.None)
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "XYUnion List32, Bytes32, SomeX":
-    let x = XYUnion[List32, Bytes32](kind: XYKind.SomeX,
+  test "XYUnion List32, Bytes2, SomeX":
+    let x = XYUnion[List32, Bytes2](kind: XYKind.SomeX,
       x: List32(@[1.byte, 5.byte])
     )
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "XYUnion List32, Bytes32, SomeY":
-    let x = XYUnion[List32, Bytes32](kind: XYKind.SomeY,
+  test "XYUnion List32, Bytes2, SomeY":
+    let x = XYUnion[List32, Bytes2](kind: XYKind.SomeY,
       y: [1.byte, 5.byte]
     )
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "XYUnion Bytes32, List32, None":
-    let x = XYUnion[Bytes32, List32](kind: XYKind.None)
+  test "XYUnion Bytes2, List32, None":
+    let x = XYUnion[Bytes2, List32](kind: XYKind.None)
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "XYUnion Bytes32, List32, SomeX":
-    let x = XYUnion[Bytes32, List32](kind: XYKind.SomeX,
+  test "XYUnion Bytes2, List32, SomeX":
+    let x = XYUnion[Bytes2, List32](kind: XYKind.SomeX,
       x: [1.byte, 5.byte]
     )
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
 
-  test "XYUnion Bytes32, List32, SomeY":
-    let x = XYUnion[Bytes32, List32](kind: XYKind.SomeY,
+  test "XYUnion Bytes2, List32, SomeY":
+    let x = XYUnion[Bytes2, List32](kind: XYKind.SomeY,
       y: List32(@[1.byte, 5.byte])
     )
     let size = sszSize(x)
