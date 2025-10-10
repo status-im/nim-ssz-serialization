@@ -411,6 +411,9 @@ proc readSszValue*[T](
     else:
       let inputLen = uint32 input.len
       const minimallyExpectedSize = uint32 fixedPortionSize(T)
+      when isFixedSize(T):
+        if inputLen != minimallyExpectedSize:
+          raiseIncorrectSize(T)
 
       if inputLen < minimallyExpectedSize:
         raiseMalformedSszError(T, "input of insufficient size")
