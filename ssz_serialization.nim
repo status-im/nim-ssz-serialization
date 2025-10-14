@@ -203,7 +203,7 @@ func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
 func sszSizeForUnion[T: object](value: T): int =
   value.withFieldPairs(key, val):
     when key == T.unionSelectorKey:
-      result = 1
+      result += 1
     else:
       result += sszSize(toSszType val)
 
