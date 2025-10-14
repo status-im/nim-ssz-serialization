@@ -676,7 +676,7 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
   mixin toSszType, enumAllSerializedFields
 
   when T0.isUnion:
-    return false
+    return false  # EIP-8016 CompatibleUnion does not have a default value
   else:
     type T = type toSszType(default T0)
 
@@ -696,7 +696,7 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
   mixin enumAllSerializedFields, toSszType
 
   when T0.isUnion:
-    return 1
+    return 1  # EIP-8016 CompatibleUnion does not have a default value
   else:
     type T = type toSszType(declval T0)
 
