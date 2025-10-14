@@ -167,7 +167,8 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
       value.withFieldPairs(key, val):
         when key == typeof(value).unionSelectorKey:
           w.stream.writeFixedSized val.ord.uint8
-        else:
+      value.withFieldPairs(key, val):  # Separate loop as field order undefined
+        when key != typeof(value).unionSelectorKey:
           type E = typeof toSszType(val)
           when isFixedSize(E):
             w.stream.writeFixedSized toSszType(val)
