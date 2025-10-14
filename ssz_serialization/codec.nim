@@ -100,12 +100,12 @@ template checkForForbiddenBits(ResulType: type,
 
 macro doInit[T](
     t: typedesc[T], selectorKey: static string, selector: typed): T =
-  let selectorIdent = ident(selectorKey)
+  let selectorId = ident(selectorKey)
   quote do:
-    when compiles(`t`(`selectorIdent`: `selector`)):
-      `t`(`selectorIdent`: `selector`)
+    when compiles(`t`(`selectorId`: `selector`)):
+      `t`(`selectorId`: `selector`)
     else:
-      `t`.init(`selectorIdent` = `selector`)
+      `t`.init(`selectorId` = `selector`)
 
 func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
   if input.len == 0:
