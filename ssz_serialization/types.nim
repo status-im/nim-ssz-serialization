@@ -649,10 +649,10 @@ template ElemType*(T0: type HashList): untyped =
   T0.T
 
 template ElemType*(T: type array): untyped =
-  type(default(T)[low(T)])
+  type(declval(T)[low(T)])
 
 template ElemType*(T: type seq): untyped =
-  type(default(T)[0])
+  type(declval(T)[0])
 
 template ElemType*(T0: type List): untyped =
   T0.T
@@ -675,46 +675,44 @@ func supportsBulkCopy*(T: type): bool {.compileTime.} =
 func isFixedSize*(T0: type): bool {.compileTime.} =
   mixin toSszType, enumAllSerializedFields
 
-  when T0.isUnion:
-    return false  # EIP-8016 CompatibleUnion does not have a default value
-  else:
-    type T = type toSszType(default T0)
+  type T = type toSszType(declval T0)
 
-    when T is BasicType:
-      return true
-    elif T is array|HashArray:
-      return isFixedSize(ElemType(T))
-    elif T is List:
-      return false
-    elif T is object|tuple:
-      enumAllSerializedFields(T):
-        when not isFixedSize(FieldType):
-          return false
-      return true
+  when T is BasicType:
+    return true
+  elif T is array|HashArray:
+    return isFixedSize(ElemType(T))
+  elif T is List:
+    return false
+  elif T.isUnion:
+    return false
+  elif T is object|tuple:
+    enumAllSerializedFields(T):
+      when not isFixedSize(FieldType):
+        return false
+    return true
 
 func fixedPortionSize*(T0: type): int {.compileTime.} =
   mixin enumAllSerializedFields, toSszType
 
-  when T0.isUnion:
-    return 1  # EIP-8016 CompatibleUnion does not have a default value
-  else:
-    type T = type toSszType(declval T0)
+  type T = type toSszType(declval T0)
 
-    when T is BasicType: sizeof(T)
-    elif T is array|HashArray:
-      type E = ElemType(T)
-      when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
-      else: int(len(T)) * offsetSize
-    elif T is List:
-      0
-    elif T is object|tuple:
-      enumAllSerializedFields(T):
-        when isFixedSize(FieldType):
-          result += fixedPortionSize(FieldType)
-        else:
-          result += offsetSize
-    else:
-      unsupported T0
+  when T is BasicType: sizeof(T)
+  elif T is array|HashArray:
+    type E = ElemType(T)
+    when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
+    else: int(len(T)) * offsetSize
+  elif T is List:
+    0
+  elif T.isUnion:
+    1
+  elif T is object|tuple:
+    enumAllSerializedFields(T):
+      when isFixedSize(FieldType):
+        result += fixedPortionSize(FieldType)
+      else:
+        result += offsetSize
+  else:
+    unsupported T0
 
 func minSize*(T0: type): int {.compileTime.} =
   mixin enumAllSerializedFields, toSszType

@@ -53,7 +53,7 @@ func navigateToField*[T](
     fieldName: static string,
     FieldType: type): SszNavigator[FieldType] {.raises: [SszError].} =
   mixin toSszType
-  type SszFieldType = type toSszType(default FieldType)
+  type SszFieldType = type toSszType(declval FieldType)
 
   const boundingOffsets = getFieldBoundingOffsets(T, fieldName)
   checkBounds(n.m, boundingOffsets[1])
@@ -80,7 +80,7 @@ func navigateToField*[T](
 
 template `.`*[T](n: SszNavigator[T], field: untyped): auto =
   type RecType = T
-  type FieldType = type(default(RecType).field)
+  type FieldType = type(declval(RecType).field)
   navigateToField(n, astToStr(field), FieldType)
 
 func indexVarSizeList(m: MemRange, idx: int): MemRange {.raises: [SszError].} =
