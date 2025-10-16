@@ -105,7 +105,7 @@ macro doInit[T](
     when compiles(`t`(`selectorId`: `selector`)):
       `t`(`selectorId`: `selector`)
     else:
-      `t`.init(`selectorId` = `selector`)
+      #[case_objects.]#init(`t`, `selectorId` = `selector`)
 
 func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
   if input.len == 0:
