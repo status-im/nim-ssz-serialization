@@ -13,7 +13,7 @@ import
   results,
   stint,
   nimcrypto/hash,
-  serialization/[object_serialization, errors],
+  serialization/[case_objects, object_serialization, errors],
   json_serialization,
   "."/bitseqs
 
@@ -56,6 +56,133 @@ func activeFields*(T: typedesc): BitArray[256] {.compileTime.} =
       res[i] = it != 0
     res
   res
+
+func getRealImpl(typ: NimNode): NimNode =
+  let typeDef = typ.getTypeImpl()
+  typeDef.expectKind nnkBracketExpr
+  if typeDef[0].strVal != "typeDesc":
+    error "unexpected typedesc", typeDef
+  var impl = typeDef[1]
+  if impl.kind == nnkBracketExpr and impl[0] != bindSym "array":
+    impl = impl[0]
+  if impl.kind == nnkSym:
+    impl = impl.getImpl()
+  impl
+
+macro doIsUnion(typ: typedesc): bool =
+  ## Indicate if `typ` refers to a tagged SSZ union with a
+  ## single selector field of which each value refers to up to one data field
+  let impl = typ.getRealImpl()
+  if impl.kind != nnkTypeDef:
+    return quote do: false
+  let def = impl[2]
+  if def.kind != nnkObjectTy:
+    return quote do: false
+  let recList = def[2]
+
+  func isUnionCase(recList: NimNode): bool =
+    if recList.kind != nnkRecList:
+      return false  # Object without any fields
+    if recList.len != 1:
+      return false
+    let rec = recList[0]
+    case rec.kind
+    of nnkRecWhen:
+      for branch in rec:
+        let recList =
+          if branch.kind == nnkElifBranch:
+            branch[1]
+          else:
+            doAssert branch.kind == nnkElse
+            branch[0]
+        if not recList.isUnionCase:
+          return false
+      true
+    of nnkRecCase:
+      for i, branch in rec:
+        case branch.kind
+        of nnkIdentDefs:
+          doAssert i == 0
+        of nnkOfBranch, nnkElse:
+          let
+            content =
+              if branch.kind == nnkOfBranch:
+                branch[^1]
+              else:
+                branch[0]
+            field =
+              if content.kind == nnkRecList:
+                if content.len == 0:
+                  continue  # `discard` on separate line
+                if content.len != 1:
+                  return false
+                content[0]
+              else:
+                content  # Content defined on same line as branch label
+          case field.kind
+          of nnkNilLit:
+            continue  # `discard`, i.e., no fields defined for this branch
+          of nnkIdentDefs:
+            if field.len != 3:
+              return false  # Multiple fields of same type
+          else:
+            error "unexpected field", field
+        else:
+          error "unexpected branch", branch
+      true
+    else:
+      false  # Not a case object
+
+  if not recList.isUnionCase:
+    return quote do: false
+
+  quote do: true
+
+func isUnion*[T](t: typedesc[T]): bool =
+  T.doIsUnion
+
+macro doUnionSelectorKey(typ: typedesc): string =
+  func getSelector(recList: NimNode): string =
+    let rec = recList[0]
+    if rec.kind == nnkRecWhen:
+      var name: Opt[string]
+      for branch in rec:
+        let recList =
+          if branch.kind == nnkElifBranch:
+            branch[1]
+          else:
+            doAssert branch.kind == nnkElse
+            branch[0]
+        if name.isNone:
+          name.ok recList.getSelector()
+        else:
+          if recList.getSelector() != name.get:
+            error "inconsistent selector names across when branches", recList
+      doAssert name.isSome
+      name.get
+    else:
+      doAssert rec.kind == nnkRecCase
+      rec[0][0].getOriginalFieldName()
+
+  let name = typ.getRealImpl()[2][2].getSelector()
+  quote do: `name`
+
+func unionSelectorKey*[T](t: typedesc[T]): string =
+  T.doUnionSelectorKey
+
+macro get(x: typed, key: static string): auto =
+  let keyId = ident key
+  quote do: `x`.`keyId`
+
+template unionSelectorType*[T](t: typedesc[T]): typedesc =
+  T.get(T.unionSelectorKey)
+
+template unionSelector*[T: object](x: T): auto =
+  block:
+    let selector = x.get(T.unionSelectorKey)
+    when sizeof(selector) != 1:
+      {.error: "selector out of range: " & $`T` & "." & `key`.}
+    selector
 
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
@@ -522,10 +649,10 @@ template ElemType*(T0: type HashList): untyped =
   T0.T
 
 template ElemType*(T: type array): untyped =
-  type(default(T)[low(T)])
+  type(declval(T)[low(T)])
 
 template ElemType*(T: type seq): untyped =
-  type(default(T)[0])
+  type(declval(T)[0])
 
 template ElemType*(T0: type List): untyped =
   T0.T
@@ -548,20 +675,21 @@ func supportsBulkCopy*(T: type): bool {.compileTime.} =
 func isFixedSize*(T0: type): bool {.compileTime.} =
   mixin toSszType, enumAllSerializedFields
 
-  type T = type toSszType(default T0)
+  type T = type toSszType(declval T0)
 
   when T is BasicType:
     return true
   elif T is array|HashArray:
     return isFixedSize(ElemType(T))
+  elif T is List:
+    return false
+  elif T.isUnion:
+    return false
   elif T is object|tuple:
-    when isCaseObject(T):
-      return false
-    else:
-      enumAllSerializedFields(T):
-        when not isFixedSize(FieldType):
-          return false
-      return true
+    enumAllSerializedFields(T):
+      when not isFixedSize(FieldType):
+        return false
+    return true
 
 func fixedPortionSize*(T0: type): int {.compileTime.} =
   mixin enumAllSerializedFields, toSszType
@@ -573,6 +701,10 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     type E = ElemType(T)
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
+  elif T is List:
+    0
+  elif T.isUnion:
+    1
   elif T is object|tuple:
     enumAllSerializedFields(T):
       when isFixedSize(FieldType):

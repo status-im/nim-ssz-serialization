@@ -86,7 +86,7 @@ proc typeInfo*(T: type): TypeInfo =
 
 func genTypeInfo(T: type): TypeInfo =
   mixin toSszType, enumAllSerializedFields
-  type SszType = type toSszType(default T)
+  type SszType = type toSszType(declval T)
   result = when type(SszType) isnot T:
     TypeInfo(kind: LeafValue)
   elif T is object:

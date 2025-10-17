@@ -14,6 +14,7 @@ import
   std/typetraits,
   results,
   stew/[endians2, objects], stew/shims/macros,
+  serialization/case_objects,
   ./types
 
 from stew/assign2 import assign
@@ -97,155 +98,35 @@ template checkForForbiddenBits(ResulType: type,
     if (input[^1] and forbiddenBitsMask) != 0:
       raiseIncorrectSize ResulType
 
-# Compile time `isUnion` checks if the case object
-# has as first field the discriminator, and that all case branches only
-# have 1 field, and that no additional fields exist outside of the case
-# branches. Also following rules should apply:
-# - enum size range < 127 (or perhaps just max sizeof 1 byte).
-# - Must have at least 1 type option.
-# - Must have at least 2 type options if the first is None.
-# - Empty case branch (No fields) only for first discriminator value (0).
-macro isUnion*(x: type): untyped =
-  let T = x.getType[1]
-  let recList = T.getTypeImpl[2]
-
-  # no additional fields exist outside of the case
-  # branches
-  if recList.len != 1:
-    macros.error("no additional fields can exists outside of the case branches",
-      recList)
-
-  # case object has as first field the discriminator
-  let recCase = recList[0]
-  if recCase.kind != nnkRecCase:
-    macros.error("first field should be union discriminator", recCase)
-
-  # no need to check for this condition:
-  # Must have at least 1 type option.
-  # minus discriminator
-
-  # Must have at least 2 type options if the first is None.
-  let enumVal = recCase[1][0].intVal
-  if enumVal == 0:
-    # minus discriminator
-    if recCase.len - 1 < 2:
-      macros.error("union must have at least 2 type options if the first is None",
-        recCase)
-
-  # begin with 1: skip the discriminator
-  for i in 1..<recCase.len:
-    let branch = recCase[i]
-    let recList = if branch.kind == nnkOfBranch:
-                    branch[1]
-                  else:
-                    branch[0] # else branch
-
-    let enumVal = if branch.kind == nnkOfBranch:
-                    branch[0].intVal
-                  else:
-                    # assume else branch
-                    # have the highest val
-                    recCase.len-1
-
-    # all case branches only have 1 field
-    if recList.len > 1:
-      macros.error("union branches can only have 1 field", recList)
-
-    if enumVal >= 127:
-      macros.error("enum size exceeds 127, got " & $enumVal, branch)
-
-    # Empty case branch (No fields) only for first discriminator value (0).
-    if recList.len == 0 and enumVal != 0:
-      macros.error("only None discriminator can have empty case branch", recList)
-
-  result = newEmptyNode()
-
-macro unionSizeImpl(id: typed, x: type): untyped =
-  let
-    T = x.getType[1]
-    recList = T.getTypeImpl[2]
-    recCase = recList[0]
-    kind = recCase[0][0]
-    TKind = recCase[0][1]
-
-  var hasNull = false
-
-  result = quote do:
-    case `id`.`kind`
-    of `TKind`(0): 1
-
-  # begin with 1: skip the discriminator
-  for i in 1..<recCase.len:
-    let branch = recCase[i]
-    if branch.kind == nnkOfBranch:
-      let recList = branch[1]
-      let enumVal = branch[0].intVal
-      if enumVal == 0:
-        hasNull = true
-      else:
-        let field = recList[0][0]
-        result.add nnkOfBranch.newTree(
-          (quote do: `TKind`(`enumVal`)),
-          quote do: 1 + sszSize(`id`.`field`)
-        )
+macro doInit[T](
+    t: typedesc[T], selectorKey: static string, selector: typed): T =
+  let selectorId = ident(selectorKey)
+  quote do:
+    when compiles(`t`(`selectorId`: `selector`)):
+      `t`(`selectorId`: `selector`)
     else:
-      # else branch
-      let recList = branch[0]
-      let field = recList[0][0]
-      result.add nnkElse.newTree(
-        quote do: 1 + sszSize(`id`.`field`)
-      )
-
-  if not hasNull:
-    macros.error("no null branch detected", recCase)
-
-func unionSize*(val: auto): int {.gcsafe, raises:[].} =
-  type T = type val
-  unionSizeImpl(val, T)
-
-macro initSszUnionImpl(RecordType: type, input: openArray[byte]): untyped =
-  var res = newStmtList()
-  let TInst = RecordType.getTypeInst[1]
-  let T = RecordType.getType[1]
-  var recordDef = getImpl(T)
-
-  for field in recordFields(recordDef):
-    if (field.isDiscriminator):
-      let
-        selectorFieldName = field.name
-        selectorFieldType = field.typ
-        SelectorFieldNameLit = newLit($selectorFieldName)
-
-      res.add quote do:
-        block:
-          if `input`.len == 0:
-            raiseMalformedSszError(`type recordDef`, "empty union not allowed")
-
-          var selector: `selectorFieldType`
-          # `checkedEnumAssign` also checks for holes in an enum.
-          if not checkedEnumAssign(selector, `input`[0]):
-            raiseMalformedSszError(`type recordDef`, "union selector is out of bounds")
-
-          var caseObj = `TInst`(`selectorFieldName`: selector)
-
-          var fieldCount = 0
-          enumInstanceSerializedFields(caseObj, fieldName, field):
-            when fieldName != `SelectorFieldNameLit`:
-              readSszBytes(`input`.toOpenArray(1, `input`.len - 1), field)
-              fieldCount.inc()
-
-          if fieldCount == 0: # This represents a `None` in the Union
-            if `input`.len != 1:
-              raiseMalformedSszError(`type recordDef`, "Union None should have no value")
-
-          caseObj
-
-      break
-
-  res
+      #[case_objects.]#init(`t`, `selectorId` = `selector`)
 
 func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
-  initSszUnionImpl(T, input)
+  if input.len == 0:
+    raiseMalformedSszError(T, "empty union not allowed")
+
+  var selector {.noinit.}: T.unionSelectorType
+  if not selector.checkedEnumAssign(input[0].uint8):
+    raiseMalformedSszError(T, "union selector is out of bounds")
+
+  var
+    isSome = false
+    res = T.doInit(T.unionSelectorKey, selector)
+  res.withFieldPairs(key, val):
+    when key != T.unionSelectorKey:
+      doAssert not isSome
+      isSome = true
+      readSszBytes(input.toOpenArray(1, input.len - 1), val)
+  if not isSome:
+    if input.len != 1:
+      raiseMalformedSszError(T, "Union None should have no value")
+  res
 
 proc readSszValue*[T](
     input: openArray[byte], val: var T) {.raises: [SszError].} =
@@ -405,8 +286,7 @@ proc readSszValue*[T](
     copyMem(addr val.bytes[0], unsafeAddr input[0], input.len)
 
   elif val is object|tuple:
-    when isCaseObject(T):
-      isUnion(type(val))
+    when isUnion(type(val)):
       val = initSszUnion(type(val), input)
     else:
       let inputLen = uint32 input.len

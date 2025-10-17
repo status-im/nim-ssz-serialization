@@ -333,3 +333,82 @@ suite "sszSize test suite":
     let size = sszSize(x)
     let bytes = SSZ.encode(x)
     check bytes.len == size
+
+type
+  DataKind* = enum
+    dataTypeA
+    dataTypeB
+
+  PayloadA* = object
+    value*: uint64
+    data*: array[4, byte]
+
+  PayloadB* = object
+    value*: uint64
+    data*: array[4, byte]
+
+  GenericItem* = object
+    case kind*: DataKind
+    of dataTypeA:
+      payloadA*: PayloadA
+    of dataTypeB:
+      payloadB*: PayloadB
+
+suite "SSZ: Union list size parity":
+  test "SSZ: Union list sszSize vs encode length":
+    let items = @[
+      GenericItem(
+        kind: dataTypeA,
+        payloadA: PayloadA(
+          value: 0'u64,
+          data: [0'u8, 0, 0, 0])
+      )
+    ]
+    check sszSize(items) == SSZ.encode(items).len
+
+type
+  InnerA = object
+    a: uint64
+  InnerB = object
+    b: uint8
+
+  InnerUnionKind = enum
+    iuA, iuB
+
+  InnerUnion = object
+    case kind: InnerUnionKind
+    of iuA:
+      va: InnerA
+    of iuB:
+      vb: InnerB
+
+  OuterX = object
+    x: uint64
+  OuterY = object
+    y: seq[byte]
+
+  OuterUnionKind = enum
+    ouX, ouY, ouInner
+
+  OuterUnion = object
+    case kind: OuterUnionKind
+    of ouX:
+      ox: OuterX
+    of ouY:
+      oy: OuterY
+    of ouInner:
+      inner: InnerUnion
+
+suite "SSZ Union: nested union sanity":
+  test "encode/decode nested union":
+    let
+      iu = InnerUnion(kind: iuA, va: InnerA(a: 12345))
+      ou = OuterUnion(kind: ouInner, inner: iu)
+      enc = SSZ.encode(ou)
+      dec = SSZ.decode(enc, OuterUnion)
+    check:
+      ou.kind == dec.kind and
+        ou.inner.kind == dec.inner.kind and
+        ou.inner.va == dec.inner.va
+      enc.len > 0
+      sszSize(ou) == enc.len
