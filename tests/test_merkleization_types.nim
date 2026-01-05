@@ -1842,7 +1842,10 @@ suite "Merkleization types":
         0b1001011011,
         0b1001011010,
         0b10010110011,
-        0b100100100]
+        0b100100100,
+        0b1010010000,
+        0b1010010001,
+        0b101001001]
       r = i.mapIt(roots.getOrDefault(it.int))
     var roots {.noinit.}: array[i.len, Digest]
     hash_tree_root(x, i, roots).get
@@ -1861,7 +1864,10 @@ suite "Merkleization types":
       0b1001011011,
       0b1001011010,
       0b10010110011,
-      0b100100100]
+      0b100100100,
+      0b1010010000,
+      0b1010010001,
+      0b101001001]
     let r = i.mapIt(roots.getOrDefault(it.int))
     var roots {.noinit.}: array[i.len, Digest]
     hash_tree_root(x, i, roots).get
