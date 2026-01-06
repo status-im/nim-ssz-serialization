@@ -1889,7 +1889,7 @@ suite "Merkleization types":
       let r = helpers.mapIt(roots.getOrDefault(it.int64))
       var roots =
         when (NimMajor, NimMinor) < (2, 2):
-          newSeqUninitialized[Digest](helpers.len)
+          newSeq[Digest](helpers.len)
         else:
           newSeqUninit[Digest](helpers.len)
       hash_tree_root(x, helpers, roots).get
