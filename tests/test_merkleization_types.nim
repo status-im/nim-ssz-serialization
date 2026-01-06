@@ -1887,7 +1887,11 @@ suite "Merkleization types":
       let helpers = get_helper_indices(indices)
       checkpoint $helpers.mapIt(toBin(it.int64))
       let r = helpers.mapIt(roots.getOrDefault(it.int64))
-      var roots = newSeqUninit[Digest](helpers.len)
+      var roots =
+        when (NimMajor, NimMinor) < (2, 2):
+          newSeqUninitialized[Digest](helpers.len)
+        else:
+          newSeqUninit[Digest](helpers.len)
       hash_tree_root(x, helpers, roots).get
       check:
         roots == r
