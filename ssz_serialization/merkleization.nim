@@ -1068,6 +1068,8 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|object|tuple](
         rootAt(i) = res
         needAll = false
         inc i
+        firstIdx = firstIdx shl 2
+        inc depth
         continue
       let prefix = index shr (indexLayer - 1 - depth)
       if prefix == nextProgressivePrefix:
@@ -1387,7 +1389,7 @@ func hashTreeRootAux[T](
               let
                 index = indexAt(j)
                 indexLayer = log2trunc(index)
-              if indexLayer <= atLayer + 1 or
+              if indexLayer <= 1 or
                   (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
                 break
               inc j
@@ -1447,7 +1449,7 @@ func hashTreeRootAux[T](
             let
               index = indexAt(j)
               indexLayer = log2trunc(index)
-            if indexLayer <= atLayer + 1 or
+            if indexLayer <= 1 or
                 (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
               break
             inc j
