@@ -243,7 +243,7 @@ template layer*(vIdx: int64): int =
   log2trunc(vIdx.uint64).int
 
 func hashArrayHashesLen[T](t: typedesc[T], maxLen: Limit | static Limit): int =
-  max(maxChunkIdx(T, maxLen), 2)
+  int(max(maxChunkIdx(T, maxLen), 2))
 
 func hashListIndicesLen[T](t: typedesc[T], maxLen: Limit | static Limit): int =
   int(layer(max(maxChunkIdx(T, maxLen), 2))) + 1
