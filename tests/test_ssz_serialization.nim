@@ -210,7 +210,7 @@ suite "SSZ navigator":
       leaves3.data[0] == b
       hash_tree_root(leaves3) == hash_tree_root(leaves3.data)
 
-  template doBasicTypeTest(listImpl: untyped, maxLen: int) =
+  template doBasicTypeTest(listImpl: untyped, maxLen: int64) =
     template checkType(typ: untyped): untyped =
       var leaves: typ.listImpl
       while leaves.len < maxLen:
