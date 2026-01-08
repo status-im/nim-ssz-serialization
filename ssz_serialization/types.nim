@@ -256,7 +256,7 @@ type
     ## Array implementation that caches the hash of each chunk of data - see
     ## also HashList for more details.
     data*: array[maxLen, T]
-    hashes* {.dontSerialize.}: array[T.hashArrayHashesLen(maxLen), Digest]
+    hashes* {.dontSerialize.}: array[hashArrayHashesLen(T, maxLen), Digest]
 
   HashList*[T; maxLen: static Limit] = object
     ## List implementation that caches the hash of each chunk of data as well
@@ -283,7 +283,7 @@ type
       ## Flattened tree store that skips "empty" branches of the tree - the
       ## starting index in this sequence of each "level" in the tree is found
       ## in `indices`.
-    indices* {.dontSerialize.}: array[T.hashListIndicesLen(maxLen), int64] ##\
+    indices* {.dontSerialize.}: array[hashListIndicesLen(T, maxLen), int64] ##\
       ## Holds the starting index in the hashes list for each level of the tree
 
   HashSeq*[T] = object
