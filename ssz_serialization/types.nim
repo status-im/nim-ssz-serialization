@@ -652,7 +652,7 @@ func resizeHashes*(a: var HashSeq) =
     if maxDepth > 0:
       for depth in 0 ..< maxDepth - 1:
         let
-          maxLen = a.T.valuesPerChunk shl (depth shl 1)
+          maxLen = a.T.valuesPerChunk.Limit shl (depth shl 1)
           hashesLen = a.T.hashArrayHashesLen(maxLen)
         if a.hashes[depth].len != hashesLen:
           a.hashes[depth].reset()
@@ -660,7 +660,7 @@ func resizeHashes*(a: var HashSeq) =
         else:
           clearCache(a.hashes[depth][0])
       a.hashes[^1].reset()
-      let maxLen = a.T.valuesPerChunk shl ((maxDepth - 1) shl 1)
+      let maxLen = a.T.valuesPerChunk.Limit shl ((maxDepth - 1) shl 1)
       a.indices.setLen(a.T.hashListIndicesLen(maxLen))
   if maxDepth > 0:
     let dataLen = a.data.progressiveRange(firstIdx shr 2).len
