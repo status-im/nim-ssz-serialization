@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -151,7 +151,7 @@ proc writeElements[T](w: var SszWriter, value: openArray[T])
 proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
   trs "STARTING VAR SIZE TYPE"
 
-  when value is HashArray|HashList:
+  when value is HashArray|HashList|HashSeq:
     writeVarSizeType(w, value.data)
   elif value is array|seq:
     writeElements(w, value)
@@ -212,7 +212,7 @@ func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   when isFixedSize(T):
     anonConst fixedPortionSize(T)
 
-  elif T is array|List|HashList|HashArray|seq:
+  elif T is array|HashArray|List|HashList|seq|HashSeq:
     type E = ElemType(T)
     when isFixedSize(E):
       len(value) * anonConst(fixedPortionSize(E))

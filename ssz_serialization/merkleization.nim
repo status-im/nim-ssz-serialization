@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2025 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -17,8 +17,8 @@
 # and other artefacts of the introduction of hidden temporaries
 
 import
-  std/[algorithm, macros, options, sequtils],
-  stew/[assign2, bitops2, endians2, objects, ptrops],
+  std/[algorithm, options, sequtils],
+  stew/[assign2, bitops2, endians2, objects, ptrops, shims/macros],
   results,
   nimcrypto/[hash, sha2],
   serialization/[case_objects, testing/tracing],
@@ -770,32 +770,6 @@ template bitListHashTreeRoot(
   bitListHashTreeRoot(
     height, x, 0.Limit ..< (1.Limit shl height), topLayer = 0, res)
 
-func valuesPerChunk[T](x: typedesc[T]): int {.compileTime.} =
-  mixin toSszType
-  type E = typeof toSszType(declval T)
-  when E is BasicType:
-    bytesPerChunk div sizeof(E)
-  else:
-    1
-
-func totalChunkCount[T](x: seq[T]): Limit =
-  when T.valuesPerChunk != 1:
-    (x.len + static(T.valuesPerChunk - 1)) div T.valuesPerChunk
-  else:
-    x.len
-
-template progressiveRangePreChunked[T](
-    x: openArray[T], firstIdx: Limit): openArray[T] =
-  x.toOpenArray(firstIdx.int, min(firstIdx.int shl 2, x.high))
-
-template progressiveRange[T](x: seq[T], firstIdx: Limit): openArray[T] =
-  when T.valuesPerChunk != 1:
-    x.toOpenArray(
-      T.valuesPerChunk * firstIdx.int,
-      min(T.valuesPerChunk * ((firstIdx.int shl 2) or 1) - 1, x.high))
-  else:
-    x.progressiveRangePreChunked(firstIdx)
-
 template progressiveRange(
     x: BitSeq, firstIdx: Limit, hasPartialChunks: bool): openArray[byte] =
   x.bytes.toOpenArray(
@@ -803,15 +777,6 @@ template progressiveRange(
     min(
       32 * ((firstIdx.int shl 2) or 1) - 1,
       x.bytes.high - (if hasPartialChunks: 0 else: 1)))
-
-func progressiveBottom(numChunks: Limit): (Limit, Limit) =
-  var
-    firstIdx = 0.Limit
-    depth = 0.Limit
-  while numChunks > firstIdx:
-    firstIdx = (firstIdx shl 2) or 1
-    inc depth
-  (firstIdx, depth)
 
 func doProgressiveMerkleizeFields(
     allFieldValues: openArray[NimNode],
@@ -1539,38 +1504,39 @@ func hashTreeRootAux[T](
     unsupported T
   ok()
 
-func singleDataHash(x: HashArray|HashList, res: var Digest) =
-  static: doAssert x.maxChunks == 1
-  if x.len == 0:
+func singleDataHash[T](data: openArray[T], res: var Digest) =
+  mixin hash_tree_root, toSszType
+  if data.len == 0:
     res.reset()
   else:
-    type S = typeof toSszType(declval x.T)
+    type S = typeof toSszType(declval T)
     when S is BasicType | Digest:
       when cpuEndian == bigEndian:
-        unsupported typeof(x) # No bigendian support here!
+        unsupported T # No bigendian support here!
 
       let
-        bytes = cast[ptr UncheckedArray[byte]](unsafeAddr x.data[0])
-        byteLen = x.data.len * sizeof(x.T)
+        bytes = cast[ptr UncheckedArray[byte]](unsafeAddr data[0])
+        byteLen = data.len * sizeof(T)
         nbytes = min(byteLen, 32)
       res.data[0 ..< nbytes] = bytes.toOpenArray(0, nbytes - 1)
       res.data[nbytes ..< 32] = zero64.toOpenArray(nbytes, 31)
     else:
-      res = hash_tree_root(x.data[0])
+      res = hash_tree_root(data[0])
 
-func mergedDataHash(x: HashArray|HashList, chunkIdx: int64, res: var Digest) =
+func mergedDataHash[T](
+    data: openArray[T], maxChunks: int64, chunkIdx: int64, res: var Digest) =
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
   mixin hash_tree_root, toSszType
-  trs "DATA HASH ", chunkIdx, " ", x.data.len
-  type S = typeof toSszType(declval x.T)
+  trs "DATA HASH ", chunkIdx, " ", data.len
+  type S = typeof toSszType(declval T)
   when S is BasicType | Digest:
     when cpuEndian == bigEndian:
-      unsupported typeof(x) # No bigendian support here!
+      unsupported T # No bigendian support here!
 
     let
-      bytes = cast[ptr UncheckedArray[byte]](unsafeAddr x.data[0])
+      bytes = cast[ptr UncheckedArray[byte]](unsafeAddr data[0])
       byteIdx = chunkIdx * bytesPerChunk
-      byteLen = x.data.len * sizeof(x.T)
+      byteLen = data.len * sizeof(T)
 
     if byteIdx >= byteLen:
       res = zeroHashes[1]
@@ -1584,45 +1550,65 @@ func mergedDataHash(x: HashArray|HashList, chunkIdx: int64, res: var Digest) =
         toOpenArray(zero64, 0, int(padding - 1)),
         res)
   else:
-    if chunkIdx + 1 > x.data.len():
-      res = zeroHashes[x.maxDepth]
-    elif chunkIdx + 1 == x.data.len():
-      let left {.noinit.} = hash_tree_root(x.data[chunkIdx])
+    if chunkIdx + 1 > data.len():
+      res = zeroHashes[maxChunks.layer]
+    elif chunkIdx + 1 == data.len():
+      let left {.noinit.} = hash_tree_root(data[chunkIdx])
       mergeBranches(left, zeroDigest, res)
     else:
       let
-        left {.noinit.} = hash_tree_root(x.data[chunkIdx])
-        right {.noinit.} = hash_tree_root(x.data[chunkIdx + 1])
+        left {.noinit.} = hash_tree_root(data[chunkIdx])
+        right {.noinit.} = hash_tree_root(data[chunkIdx + 1])
 
       mergeBranches(left, right, res)
 
-template mergedHash(x: HashArray|HashList, vIdxParam: int64, res: var Digest) =
+template refreshHash[T](
+    data: openArray[T],
+    maxChunks: int64,
+    vIdxParam: int64,
+    res: var Digest,
+    cachedPtrImpl: untyped,
+    params: varargs[untyped]): untyped =
   # The merged hash of the data at `vIdx` and `vIdx + 1`
   let vIdx = vIdxParam
-  if vIdx >= x.maxChunks:
-    let dataIdx = vIdx - x.maxChunks
-    mergedDataHash(x, dataIdx, res)
+  if maxChunks == 1:
+    data.singleDataHash(res)
+  elif vIdx >= maxChunks:
+    let dataIdx = vIdx - maxChunks
+    data.mergedDataHash(maxChunks, dataIdx, res)
   else:
     mergeBranches(
-      hashTreeRootCachedPtr(x, vIdx)[], hashTreeRootCachedPtr(x, vIdx + 1)[],
+      unpackArgs(cachedPtrImpl, [data, maxChunks, vIdx, params])[],
+      unpackArgs(cachedPtrImpl, [data, maxChunks, vIdx + 1, params])[],
       res)
 
-func hashTreeRootCachedPtr*(x: HashArray, vIdx: int64): ptr Digest =
+func hashTreeRootCachedPtrArray[T](
+    data: openArray[T],
+    maxChunks: int64,
+    vIdx: int64,
+    hashes: openArray[Digest]): ptr Digest =
   # Return a short-lived pointer to the given digest - a pointer is used because
   # `var` and `lent` returns don't work for the constant zero hashes
   # The instance must not be mutated! This is an internal low-level API.
 
   doAssert vIdx >= 1, "Only valid for flat Merkle tree indices"
-  let px = unsafeAddr x.hashes[vIdx]
-  if not isCached(x.hashes[vIdx]):
+  let px = unsafeAddr hashes[vIdx]
+  if not isCached(hashes[vIdx]):
     # TODO oops. so much for maintaining non-mutability.
-    when x.maxChunks == 1:
-      singleDataHash(x, px[])
-    else:
-      mergedHash(x, vIdx * 2, px[])
+    data.refreshHash(
+      maxChunks, vIdx * 2, px[], hashTreeRootCachedPtrArray, hashes)
   px
 
-func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
+func hashTreeRootCachedPtr(x: HashArray, vIdx: int64): ptr Digest =
+  x.data.hashTreeRootCachedPtrArray(
+    x.maxChunks, vIdx, x.hashes)
+
+func hashTreeRootCachedPtrList[T](
+    data: openArray[T],
+    maxChunks: int64,
+    vIdx: int64,
+    hashes: openArray[Digest],
+    indices: openArray[int64]): ptr Digest =
   # Return a short-lived pointer to the given digest - a pointer is used because
   # `var` and `lent` returns don't work for the constant zero hashes
   # The instance must not be mutated! This is an internal low-level API.
@@ -1632,26 +1618,55 @@ func hashTreeRootCachedPtr*(x: HashList, vIdx: int64): ptr Digest =
   let
     layer = layer(vIdx)
     idxInLayer = vIdx - (1'i64 shl layer)
-    layerIdx = idxInLayer + x.indices[layer]
+    layerIdx = idxInLayer + indices[layer]
 
-  trs "GETTING ", vIdx, " ", layerIdx, " ", layer, " ", x.indices.len
+  trs "GETTING ", vIdx, " ", layerIdx, " ", layer, " ", indices.len
 
-  doAssert layer < x.maxDepth or layer == 0
-  if layerIdx >= x.indices[layer + 1]:
-    trs "ZERO ", x.indices[layer], " ", x.indices[layer + 1]
-    unsafeAddr zeroHashes[x.maxDepth - layer]
+  doAssert layer < maxChunks.layer or layer == 0
+  if layerIdx >= indices[layer + 1]:
+    trs "ZERO ", indices[layer], " ", indices[layer + 1]
+    unsafeAddr zeroHashes[maxChunks.layer - layer]
   else:
-    let px = unsafeAddr x.hashes[layerIdx]
+    let px = unsafeAddr hashes[layerIdx]
     if not isCached(px[]):
       trs "REFRESHING ", vIdx, " ", layerIdx, " ", layer
       # TODO oops. so much for maintaining non-mutability.
-      when x.maxChunks == 1:
-        singleDataHash(x, px[])
-      else:
-        mergedHash(x, vIdx * 2, px[])
+      data.refreshHash(
+        maxChunks, vIdx * 2, px[], hashTreeRootCachedPtrList, hashes, indices)
     else:
       trs "CACHED ", layerIdx
     px
+
+func hashTreeRootCachedPtr(x: HashList, vIdx: int64): ptr Digest =
+  asSeq(x.data).hashTreeRootCachedPtrList(
+    x.maxChunks, vIdx, x.hashes, x.indices)
+
+func hashTreeRootCachedPtr(x: HashSeq, depth: int, vIdx: int64): ptr Digest =
+  # Return a short-lived pointer to the given digest - a pointer is used because
+  # `var` and `lent` returns don't work for the constant zero hashes
+  # The instance must not be mutated! This is an internal low-level API.
+  if vIdx == 0:
+    let px = unsafeAddr x.hashes[depth][0]
+    if not isCached(px[]):
+      # TODO oops. so much for maintaining non-mutability.
+      mergeBranches(
+        if depth < x.hashes.high:
+          x.hashTreeRootCachedPtr(depth + 1, 0)[]
+        else:
+          zeroHashes[0],
+        x.hashTreeRootCachedPtr(depth, 1)[], px[])
+    px
+  else:
+    var firstIdx = 0
+    for _ in 0 ..< depth:
+      firstIdx = (firstIdx shl 2) or 1
+    let maxChunks = 1 shl (depth shl 1)
+    if depth < x.hashes.high:
+      x.data.progressiveRange(firstIdx).hashTreeRootCachedPtrArray(
+        maxChunks, vIdx, x.hashes[depth])
+    else:
+      x.data.progressiveRange(firstIdx).hashTreeRootCachedPtrList(
+        maxChunks, vIdx, x.hashes[depth], x.indices)
 
 func hashTreeRootCached*(x: HashArray): Digest {.noinit.} =
   hashTreeRootCachedPtr(x, 1)[] # Array does not use idx 0
@@ -1668,6 +1683,16 @@ func hashTreeRootCached*(x: HashList): Digest {.noinit.} =
       mixInLength(hashTreeRootCachedPtr(x, 1)[], x.data.len, px[])
 
     result = x.hashes[0]
+
+func hashTreeRootCached*(x: HashSeq): Digest {.noinit.} =
+  if x.data.len == 0:
+    zeroHashes[1]
+  else:
+    if not isCached(x.root):
+      # TODO oops. so much for maintaining non-mutability.
+      let px = unsafeAddr x.root
+      mixInLength(hashTreeRootCachedPtr(x, 0, 0)[], x.data.len, px[])
+    x.root
 
 func hashTreeRootCached*(
     x: HashArray,
@@ -1777,11 +1802,20 @@ func hashTreeRootCached*(
     else: return unsupportedIndex
   ok()
 
+func hashTreeRootCached*(
+    x: HashSeq,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    loopOrder: seq[int],
+    slice: Slice[int],
+    atLayer: int): Result[void, string] =
+  hash_tree_root_multi(toSeq(x), indices, roots, loopOrder, slice, atLayer)
+
 func hash_tree_root*(x: auto): Digest {.noinit.} =
   trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x))
   mixin toSszType
 
-  when x is HashArray|HashList:
+  when x is HashArray|HashList|HashSeq:
     result = hashTreeRootCached(x)
   else:
     hashTreeRootAux(toSszType(x), result)
@@ -1816,7 +1850,7 @@ func hash_tree_root_multi(
     slice.mapIt(indexAt(it))
   mixin toSszType
 
-  when x is HashArray|HashList:
+  when x is HashArray|HashList|HashSeq:
     ? hashTreeRootCached(x, indices, roots, loopOrder, slice, atLayer)
   else:
     ? hashTreeRootAux(toSszType(x), indices, roots, loopOrder, slice, atLayer)

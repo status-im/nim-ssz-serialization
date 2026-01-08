@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2021 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -210,16 +210,31 @@ suite "SSZ navigator":
       leaves3.data[0] == b
       hash_tree_root(leaves3) == hash_tree_root(leaves3.data)
 
-  test "basictype":
+  template doBasicTypeTest(listImpl: untyped, maxLen: int) =
     template checkType(typ: untyped): untyped =
-      var leaves = HashList[typ, 1'i64 shl 3]()
-      while leaves.len < leaves.maxLen:
-        check:
+      var leaves: typ.listImpl
+      while leaves.len < maxLen:
+        checkpoint $typ & " - " & $leaves.len
+        when leaves is HashSeq:
           leaves.add leaves.len.typ
-          hash_tree_root(leaves) == hash_tree_root(leaves.data)
+        else:
+          check leaves.add leaves.len.typ
+        check hash_tree_root(leaves) == hash_tree_root(leaves.data)
 
     checkType uint64
     checkType DistinctInt
+
+  test "basictype - HashList":
+    template listImpl[T](t: typedesc[T]): auto =
+      HashList[T, 1'i64 shl 3]
+
+    doBasicTypeTest listImpl, 1'i64 shl 3
+
+  test "basictype - HashSeq":
+    template listImpl[T](t: typedesc[T]): auto =
+      HashSeq[T]
+
+    doBasicTypeTest listImpl, 1000
 
 suite "SSZ dynamic navigator":
   test "navigating fields":
@@ -289,9 +304,9 @@ suite "hash":
     checkType uint64
     checkType DistinctInt
 
-  test "HashList fixed":
+  template doFixedTest(listImpl: untyped) =
     template checkType(typ: untyped): untyped =
-      type MyList = HashList[typ, 1024]
+      type MyList = typ.listImpl
       var
         small, large: MyList
 
@@ -299,10 +314,16 @@ suite "hash":
         emptyBytes = SSZ.encode(small)
         emptyRoot = hash_tree_root(small)
 
-      check: small.add(10.typ)
+      when MyList is HashSeq:
+        small.add(10.typ)
+      else:
+        check small.add(10.typ)
 
       for i in 0..<100:
-        check: large.add(i.typ)
+        when MyList is HashSeq:
+          large.add(i.typ)
+        else:
+          check large.add(i.typ)
 
       let
         sroot = hash_tree_root(small)
@@ -339,8 +360,19 @@ suite "hash":
     checkType uint64
     checkType DistinctInt
 
-  test "HashList variable":
-    type MyList = HashList[NonFixed, 1024]
+  test "HashList fixed":
+    template listImpl[T](t: typedesc[T]): auto =
+      HashList[T, 1024]
+
+    doFixedTest listImpl
+
+  test "HashSeq fixed":
+    template listImpl[T](t: typedesc[T]): auto =
+      HashSeq[T]
+
+    doFixedTest listImpl
+
+  template doVariableTest[MyList](t: typedesc[MyList]) =
     var
       small, large: MyList
 
@@ -348,10 +380,16 @@ suite "hash":
       emptyBytes = SSZ.encode(small)
       emptyRoot = hash_tree_root(small)
 
-    check: small.add(NonFixed())
+    when MyList is HashSeq:
+      small.add(NonFixed())
+    else:
+      check small.add(NonFixed())
 
     for i in 0..<100:
-      check: large.add(NonFixed())
+      when MyList is HashSeq:
+        large.add(NonFixed())
+      else:
+        check large.add(NonFixed())
 
     let
       sroot = hash_tree_root(small)
@@ -387,6 +425,9 @@ suite "hash":
 
     template checkReject(encoded: string): untyped =
       checkpoint encoded
+      expect(SszError):
+        var x: HashSeq[List[uint64, 1024]]
+        readSszBytes(utils.fromHex(encoded), x)
       expect(SszError):
         var x: HashList[List[uint64, 1024], 1024]
         readSszBytes(utils.fromHex(encoded), x)
@@ -442,6 +483,12 @@ suite "hash":
     checkReject "0B0000000B000000000000"
     checkReject "0B0000000B000000FFFFFF"
 
+  test "HashList variable":
+    doVariableTest HashList[NonFixed, 1024]
+
+  test "HashSeq variable":
+    doVariableTest HashSeq[NonFixed]
+
 suite "underlong values":
   template testit(t: auto) =
     test "Underlong SSZ.decode: " & type(t).name():
@@ -489,6 +536,10 @@ suite "underlong values":
   testit(List[DistinctInt, 32].init(@[42.DistinctInt]))
   testit(HashList[uint64, 32].init(@[42'u64]))
   testit(HashList[DistinctInt, 32].init(@[42.DistinctInt]))
+  testit(@[42'u64])
+  testit(HashSeq[uint64].init(@[42'u64]))
+  testit(@[42.DistinctInt])
+  testit(HashSeq[DistinctInt].init(@[42.DistinctInt]))
   testit(default(BitArray[32]))
   testit(BitList[32].init(10))
   testit(default(Simple))

@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2025 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -181,9 +181,9 @@ proc readSszValue*[T](
   elif val is HashArray:
     readSszBytes(input, toSszType(val.data))
     val.resetCache()
-  elif val is HashList|List|array|seq:
+  elif val is array|List|HashList|seq|HashSeq:
     type E = typeof toSszType(declval ElemType(typeof val))
-    when val is HashList:
+    when val is HashList|HashSeq:
       template v: untyped = val.data
     else:
       template v: untyped = val
@@ -203,27 +203,27 @@ proc readSszValue*[T](
         if v.len > 0:
           copyMem addr v[0], unsafeAddr input[0], input.len
 
-        when val is HashList:
+        when val is HashList|HashSeq:
           # There's no selective invalidation here, because it would require a
           # potential performance tradeoff, either interfering with bulk copy,
           # or involving more verification of changed hash entries.
           val.resetCache()
       else:
-        when val is HashList:
+        when val is HashList|HashSeq:
           val.resizeHashes()
           var prevValue: E
 
         for i in 0 ..< val.len:
           let offset = i * elemSize
-          when val is HashList:
+          when val is HashList|HashSeq:
             assign(prevValue, toSszType(v[i]))
           readSszBytes(
             input.toOpenArray(offset, offset + elemSize - 1), toSszType(v[i]))
-          when val is HashList:
+          when val is HashList|HashSeq:
             if prevValue != toSszType(v[i]):
               val.clearCaches(i)
 
-        when val is HashList:
+        when val is HashList|HashSeq:
           # Unconditionally trigger small, O(1) updates to handle when the list
           # shrinks without otherwise changing.
           val.clearCaches(0)
@@ -234,7 +234,7 @@ proc readSszValue*[T](
         # This is an empty list.
         # The default initialization of the return value is fine.
         v.setOutputSize 0
-        when val is HashList:
+        when val is HashList|HashSeq:
           val.resetCache()
         return
       elif input.len < offsetSize:
@@ -252,7 +252,7 @@ proc readSszValue*[T](
         raiseMalformedSszError(T, "incorrect encoding of zero length")
 
       v.setOutputSize resultLen
-      when val is HashList:
+      when val is HashList|HashSeq:
         val.resizeHashes()
         var prevValue: E
 
@@ -261,11 +261,11 @@ proc readSszValue*[T](
         if nextOffset < offset:
           raiseMalformedSszError(T, "list element offsets are decreasing")
         else:
-          when val is HashList:
+          when val is HashList|HashSeq:
             assign(prevValue, toSszType(v[i - 1]))
           readSszBytes(
             input.toOpenArray(offset, nextOffset - 1), toSszType(v[i - 1]))
-          when val is HashList:
+          when val is HashList|HashSeq:
             if prevValue != toSszType(v[i - 1]):
               val.clearCaches(i - 1)
         offset = nextOffset
@@ -273,7 +273,7 @@ proc readSszValue*[T](
       readSszBytes(
         input.toOpenArray(offset, input.len - 1), toSszType(v[resultLen - 1]))
 
-      when val is HashList:
+      when val is HashList|HashSeq:
         # Unconditionally trigger small, O(1) updates to handle when the list
         # shrinks without otherwise changing.
         val.clearCaches(0)
