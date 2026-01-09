@@ -664,8 +664,6 @@ func resizeHashes*(a: var HashSeq) =
       a.indices.setLen(a.T.hashListIndicesLen(maxLen))
   if maxDepth > 0:
     let dataLen = a.data.progressiveRange(firstIdx shr 2).len
-    when sizeof(int) < sizeof(int64):
-      doAssert maxDepth <= int.high
     a.T.resizeHashes(a.hashes[^1], a.indices, (maxDepth.int - 1) shl 1, dataLen)
 
 func resetCache*(a: var HashSeq) =

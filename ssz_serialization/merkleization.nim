@@ -1034,7 +1034,7 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
       if index == nextProgressivePrefix:
         when T is HashSeq:
           if depth < x.hashes.high:
-            rootAt(i) = hashTreeRootCachedPtr(x, depth + 1, 0)[]
+            rootAt(i) = hashTreeRootCachedPtr(x, depth.int + 1, 0)[]
           else:
             rootAt(i) = zeroHashes[0]
         else:
