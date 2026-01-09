@@ -615,7 +615,7 @@ func totalChunkCount[T](t: typedesc[T], numItems: int): Limit =
   else:
     numItems
 
-func totalChunkCount*[T](x: seq[T]): Limit =
+func totalChunkCount*[T](x: seq[T]|HashSeq[T]): Limit =
   T.totalChunkCount(x.len)
 
 template progressiveRangePreChunked*[T](
@@ -801,6 +801,9 @@ template fill*(a: var HashArray, c: auto) =
 template sum*[maxLen; T](a: var HashArray[maxLen, T]): T =
   mixin sum
   sum(a.data)
+
+template progressiveRange*[T](x: HashSeq[T], firstIdx: Limit): openArray[T] =
+  asSeq(x).progressiveRange(firstIdx)
 
 macro unsupported*(T: typed): untyped =
   # TODO: {.fatal.} breaks compilation even in `compiles()` context,
