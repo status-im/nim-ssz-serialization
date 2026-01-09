@@ -1815,15 +1815,17 @@ func hashTreeRootCached(
       index = indexAt(i)
       indexLayer = log2trunc(index)
     if index == 1.GeneralizedIndex:
-      var contentsHash {.noinit.}: Digest
-      toSeq(x).progressiveChunkedHashTreeRoot(contentsHash)
-      mixInLength(contentsHash, x.len, rootAt(i))
+      rootAt(i) = hashTreeRootCached(x)
       inc i
     elif index == 3.GeneralizedIndex:
       hashTreeRootAux(x.len.uint64, rootAt(i))
       inc i
     elif index == 2.GeneralizedIndex:
-      toSeq(x).progressiveChunkedHashTreeRoot(rootAt(i))
+      rootAt(i) =
+        if x.len > 0:
+          hashTreeRootCachedPtr(x, 0, 0)[]
+        else:
+          zeroHashes[0]
       inc i
     elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
       var j = i + 1
@@ -1836,6 +1838,7 @@ func hashTreeRootCached(
           break
         inc j
       let atLayer = atLayer + 1
+      # TODO Fetch from cache
       ? toSeq(x).progressive_hash_tree_root_multi(
         indices, roots, loopOrder, i ..< j, atLayer)
       i = j
