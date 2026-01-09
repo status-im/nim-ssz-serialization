@@ -1065,7 +1065,7 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
               index == 1.GeneralizedIndex
         if isSpecialCase:
           when T is HashSeq:
-            rootAt(i) = hashTreeRootCachedPtr(x, depth, index.int64)[]
+            rootAt(i) = hashTreeRootCachedPtr(x, depth.int, index.int64)[]
           else:
             let height {.used.} = (depth shl 1) + 1
             when T is BitSeq:
