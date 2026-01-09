@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2021-2025 Status Research & Development GmbH
+# Copyright (c) 2021-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -155,6 +155,10 @@ type
     bk: CompatibleUnionA
     bl: CompatibleUnionBC
     bm: CompatibleUnionABCA
+    bn: HashSeq[E]
+    bo: HashSeq[E]
+    bp: HashSeq[uint64]
+    bq: HashSeq[uint64]
 let
   x = X(
     a: true,
@@ -350,7 +354,12 @@ let
       bData = ProgressiveSingleListContainerTestStruct(c: BitSeq(@[0x29'u8]))),
     bm: CompatibleUnionABCA.init(
       selector = SelectorABCA.a4,
-      aData = ProgressiveSingleFieldContainerTestStruct(a: 0xab)))
+      aData = ProgressiveSingleFieldContainerTestStruct(a: 0xab)),
+    bn: HashSeq[E].init(
+      @[E(x: false, y: true), E(x: true, y: false)]),
+    bo: HashSeq[E].init(@[]),
+    bp: HashSeq[uint64].init(@[1'u64, 2]),
+    bq: HashSeq[uint64].init(@[]))
   roots = block:
     var res = {
       # a
@@ -1152,6 +1161,30 @@ let
       0b11000000001: d(0xab'u8),
       0b1100000001: d(0x01'u256),
       0b110000001: d(0x04'u8),
+
+      # bn
+      0b11000001010: d(0'u8),
+      0b11000001011: d(1'u8),
+      0b11000001001000: d(1'u8),
+      0b11000001001001: d(0'u8),
+      0b1100000100101: d([]),
+      0b1100000100110: d([]),
+      0b1100000100111: d([]),
+      0b11000001000: d([]),
+      0b110000011: d(2'u64),
+
+      # bo
+      0b110000100: d([]),
+      0b110000101: d(0'u64),
+
+      # bp
+      0b1100001101: d([1'u8, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]),
+      0b1100001100: d([]),
+      0b110000111: d(2'u64),
+
+      # bq
+      0b110001000: d([]),
+      0b110001001: d(0'u64),
     }.toOrderedTable
     for i in [
         0b10001000'i64,
@@ -1712,9 +1745,21 @@ let
         0b10111111,
         0b1100000000,
         0b110000000,
-        0b11000000]:
+        0b11000000,
+        0b1100000101,
+        0b1100000100100,
+        0b110000010010,
+        0b110000010011,
+        0b11000001001,
+        0b1100000100,
+        0b110000010,
+        0b11000001,
+        0b11000010,
+        0b110000110,
+        0b11000011,
+        0b11000100]:
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
-    for i in 193 ..< 256:
+    for i in 197 ..< 256:
       res[i] = d([])
     for i in countdown(127, 1):
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
@@ -1978,10 +2023,6 @@ type
 
 template toSszType(x: Hash32): auto =
   distinctBase(x)
-
-proc fromSszBytes(
-    T: type Hash32, bytes: openArray[byte]): T {.raises: [SszError].} =
-  readSszValue(bytes, distinctBase(result))
 
 suite "SSZ: Hash32 distinct Bytes32 roundtrip":
   test "merkleization parity":
