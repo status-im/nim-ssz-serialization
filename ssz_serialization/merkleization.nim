@@ -1668,10 +1668,10 @@ func hashTreeRootCachedPtr(x: HashSeq, depth: int, vIdx: int64): ptr Digest =
       x.data.progressiveRange(firstIdx).hashTreeRootCachedPtrList(
         maxChunks, vIdx, x.hashes[depth], x.indices)
 
-func hashTreeRootCached*(x: HashArray): Digest {.noinit.} =
+func hashTreeRootCached(x: HashArray): Digest {.noinit.} =
   hashTreeRootCachedPtr(x, 1)[] # Array does not use idx 0
 
-func hashTreeRootCached*(x: HashList): Digest {.noinit.} =
+func hashTreeRootCached(x: HashList): Digest {.noinit.} =
   if x.data.len == 0:
     mergeBranches(
       zeroHashes[x.maxDepth], zeroHashes[0],
@@ -1684,7 +1684,7 @@ func hashTreeRootCached*(x: HashList): Digest {.noinit.} =
 
     result = x.hashes[0]
 
-func hashTreeRootCached*(x: HashSeq): Digest {.noinit.} =
+func hashTreeRootCached(x: HashSeq): Digest {.noinit.} =
   if x.data.len == 0:
     zeroHashes[1]
   else:
@@ -1694,7 +1694,7 @@ func hashTreeRootCached*(x: HashSeq): Digest {.noinit.} =
       mixInLength(hashTreeRootCachedPtr(x, 0, 0)[], x.data.len, px[])
     x.root
 
-func hashTreeRootCached*(
+func hashTreeRootCached(
     x: HashArray,
     indices: openArray[GeneralizedIndex],
     roots: var openArray[Digest],
@@ -1742,7 +1742,7 @@ func hashTreeRootCached*(
         i = j
   ok()
 
-func hashTreeRootCached*(
+func hashTreeRootCached(
     x: HashList,
     indices: openArray[GeneralizedIndex],
     roots: var openArray[Digest],
@@ -1802,14 +1802,46 @@ func hashTreeRootCached*(
     else: return unsupportedIndex
   ok()
 
-func hashTreeRootCached*(
+func hashTreeRootCached(
     x: HashSeq,
     indices: openArray[GeneralizedIndex],
     roots: var openArray[Digest],
     loopOrder: seq[int],
     slice: Slice[int],
     atLayer: int): Result[void, string] =
-  hash_tree_root_multi(toSeq(x), indices, roots, loopOrder, slice, atLayer)
+  var i = slice.a
+  while i <= slice.b:
+    let
+      index = indexAt(i)
+      indexLayer = log2trunc(index)
+    if index == 1.GeneralizedIndex:
+      var contentsHash {.noinit.}: Digest
+      toSeq(x).progressiveChunkedHashTreeRoot(contentsHash)
+      mixInLength(contentsHash, x.len, rootAt(i))
+      inc i
+    elif index == 3.GeneralizedIndex:
+      hashTreeRootAux(x.len.uint64, rootAt(i))
+      inc i
+    elif index == 2.GeneralizedIndex:
+      toSeq(x).progressiveChunkedHashTreeRoot(rootAt(i))
+      inc i
+    elif (index shr (indexLayer - 1)) == 2.GeneralizedIndex:
+      var j = i + 1
+      while j <= slice.b:
+        let
+          index = indexAt(j)
+          indexLayer = log2trunc(index)
+        if indexLayer <= 1 or
+            (index shr (indexLayer - 1)) != 2.GeneralizedIndex:
+          break
+        inc j
+      let atLayer = atLayer + 1
+      ? toSeq(x).progressive_hash_tree_root_multi(
+        indices, roots, loopOrder, i ..< j, atLayer)
+      i = j
+    else:
+      return unsupportedIndex
+  ok()
 
 func hash_tree_root*(x: auto): Digest {.noinit.} =
   trs "STARTING HASH TREE ROOT FOR TYPE ", name(typeof(x))
