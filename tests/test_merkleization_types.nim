@@ -1942,6 +1942,20 @@ suite "Merkleization types":
         roots == r
         hash_tree_root(x, helpers).get == roots
 
+  test "Multiproof (all)":
+    let
+      i = roots.keys.toSeq.mapIt(it.GeneralizedIndex)
+      r = i.mapIt(roots.getOrDefault(it.int64))
+    var roots =
+      when (NimMajor, NimMinor) < (2, 2):
+        newSeq[Digest](r.len)
+      else:
+        newSeqUninit[Digest](r.len)
+    hash_tree_root(x, i, roots).get
+    check:
+      roots == r
+      hash_tree_root(x, i).get == roots
+
   test "Multiproof (empty)":
     let
       i: array[0, GeneralizedIndex] = []

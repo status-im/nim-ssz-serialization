@@ -916,8 +916,8 @@ template indexAt(i: int): GeneralizedIndex =
 template rootAt(i: int): Digest =
   roots[loopOrder[i]]
 
-const unsupportedIndex =
-  err(Result[void, string], "Generalized index not supported.")
+func unsupportedIndex(i: static int): auto =
+  err(Result[void, string], "Generalized index not supported (" & $i & ").")
 
 template progressiveBodyImpl(
     allFieldValues: openArray[NimNode],
@@ -953,8 +953,8 @@ func doProgressiveChunks(
       .doMerkleizeFields(height, x, chunks, indexLayer, res)
 
 func doProgressiveMulti(
-    allFieldValues: openArray[NimNode],
-    depthSym, x, chunk, indices, roots, loopOrder, slice, atLayer: NimNode
+    allFieldValues: openArray[NimNode], depthSym,
+    x, chunk, indices, roots, loopOrder, slice, atLayer, topRoot: NimNode
 ): NimNode {.compileTime.} =
   allFieldValues.progressiveBodyImpl(depthSym):
     var body = nnkCaseStmt.newTree(chunk)
@@ -963,7 +963,7 @@ func doProgressiveMulti(
         ? hash_tree_root_multi(
           `fieldValue`, `indices`, `roots`, `loopOrder`, `slice`, `atLayer`))
     body.add nnkElse.newTree quote do:
-      return unsupportedIndex
+      return unsupportedIndex 966
     body
 
 template genGetProgressiveBodyImpls(
@@ -984,9 +984,10 @@ template genGetProgressiveBodyImpls(
       fieldNames: static[openArray[Opt[F]]],
       depth: Limit, x: T, chunk: Limit,
       indices: openArray[GeneralizedIndex], roots: var openArray[Digest],
-      loopOrder: seq[int], slice: Slice[int], atLayer: int): untyped =
+      loopOrder: seq[int], slice: Slice[int], atLayer: int,
+      topRoot: ptr Digest = nil): untyped =
     fieldNames.allFieldValues(x).doProgressiveMulti(
-      depth, x, chunk, indices, roots, loopOrder, slice, atLayer)
+      depth, x, chunk, indices, roots, loopOrder, slice, atLayer, topRoot)
 
 genGetProgressiveBodyImpls(object, string)
 genGetProgressiveBodyImpls(tuple, int)
@@ -999,7 +1000,8 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
     roots: var openArray[Digest],
     loopOrder: seq[int],
     slice: Slice[int],
-    atLayer: int): Result[void, string] =
+    atLayer: int,
+    topRoot: ptr Digest = nil): Result[void, string] =
   when T is BitSeq:
     let
       bitlen = x.len.Limit
@@ -1050,7 +1052,7 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
           else:
             let prefix = index shr (indexLayer - 1 - depth)
             if prefix == nextProgressivePrefix:
-              return unsupportedIndex
+              return unsupportedIndex 1053
             if prefix != nextProgressivePrefix - 1:
               break
           dec i
@@ -1113,11 +1115,11 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
             else:
               false
           when alwaysError:
-            return unsupportedIndex
+            return unsupportedIndex 1116
           else:
             let chunk = chunkContainingIndex(index)
             if firstIdx + chunk >= totalChunkCount:
-              return unsupportedIndex
+              return unsupportedIndex 1120
             var k = i
             while k <= j:
               let
@@ -1155,7 +1157,7 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
     when T is BitSeq:
       atBottom = false
   if j >= slice.a:
-    return unsupportedIndex
+    return unsupportedIndex 1158
   ok()
 
 func hashTreeRootAux[T](x: T, res: var Digest) =
@@ -1224,11 +1226,12 @@ func hashTreeRootAux[T](
     roots: var openArray[Digest],
     loopOrder: seq[int],
     slice: Slice[int],
-    atLayer: int): Result[void, string] =
+    atLayer: int,
+    topRoot: ptr Digest = nil): Result[void, string] =
   mixin hash_tree_root, toSszType
   when T is BasicType:
     for i in slice:
-      if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
+      if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex 1231
       hashTreeRootAux(x, rootAt(i))
   elif T is BitArray:
     ? hashTreeRootAux(x.bytes, indices, roots, loopOrder, slice, atLayer)
@@ -1266,13 +1269,13 @@ func hashTreeRootAux[T](
             binaryTreeHeight totalChunks, BitSeq x,
             chunks, indexLayer, rootAt(i))
           inc i
-        else: return unsupportedIndex
-      else: return unsupportedIndex
+        else: return unsupportedIndex 1269
+      else: return unsupportedIndex 1270
   elif T is array:
     type E = typeof toSszType(declval ElemType(T))
     when E is BasicType and sizeof(T) <= sizeof(roots[0].data):
       for i in slice:
-        if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex
+        if indexAt(i) != 1.GeneralizedIndex: return unsupportedIndex 1275
         hashTreeRootAux(x, rootAt(i))
     else:
       trs "FIXED TYPE; USE CHUNK STREAM"
@@ -1294,10 +1297,10 @@ func hashTreeRootAux[T](
           inc i
         else:
           when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
-            return unsupportedIndex
+            return unsupportedIndex 1297
           else:
             let chunk = chunkContainingIndex(index)
-            if chunk >= x.len: return unsupportedIndex
+            if chunk >= x.len: return unsupportedIndex 1300
             var j = i + 1
             while j <= slice.b:
               let
@@ -1343,10 +1346,10 @@ func hashTreeRootAux[T](
           inc i
         else:
           when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
-            return unsupportedIndex
+            return unsupportedIndex 1346
           else:
             let chunk = chunkContainingIndex(index)
-            if chunk >= x.len: return unsupportedIndex
+            if chunk >= x.len: return unsupportedIndex 1349
             var j = i + 1
             while j <= slice.b:
               let
@@ -1359,7 +1362,7 @@ func hashTreeRootAux[T](
             ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                    atLayer + chunkLayer)
             i = j
-      else: return unsupportedIndex
+      else: return unsupportedIndex 1362
   elif T.isUnion:
     var i = slice.a
     while i <= slice.b:
@@ -1397,9 +1400,9 @@ func hashTreeRootAux[T](
               indices, roots, loopOrder, i ..< j, atLayer)
             i = j
         if not isSome:
-          return unsupportedIndex
+          return unsupportedIndex 1400
       else:
-        return unsupportedIndex
+        return unsupportedIndex 1402
   elif T is BitSeq|seq|object|tuple:
     const usesProgressiveShape =
       when T is BitSeq|seq:
@@ -1457,7 +1460,7 @@ func hashTreeRootAux[T](
             indices, roots, loopOrder, i ..< j, atLayer)
           i = j
         else:
-          return unsupportedIndex
+          return unsupportedIndex 1460
     else:
       trs "MERKLEIZING FIELDS"
       const
@@ -1533,7 +1536,7 @@ func hashTreeRootAux[T](
           rootAt(i) = getFinalHash(merkleizer)
           inc i
           isActive = false
-        else: return unsupportedIndex
+        else: return unsupportedIndex 1536
   else:
     unsupported T
   ok()
@@ -1735,7 +1738,8 @@ func hashTreeRootCached(
     roots: var openArray[Digest],
     loopOrder: seq[int],
     slice: Slice[int],
-    atLayer: int): Result[void, string] =
+    atLayer: int,
+    topRoot: ptr Digest = nil): Result[void, string] =
   mixin toSszType
   const
     totalChunks = x.maxChunks
@@ -1759,10 +1763,10 @@ func hashTreeRootCached(
       inc i
     else:
       when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
-        return unsupportedIndex
+        return unsupportedIndex 1762
       else:
         let chunk = chunkContainingIndex(index)
-        if chunk >= x.len: return unsupportedIndex
+        if chunk >= x.len: return unsupportedIndex 1765
         var j = i + 1
         while j <= slice.b:
           let
@@ -1783,7 +1787,8 @@ func hashTreeRootCached(
     roots: var openArray[Digest],
     loopOrder: seq[int],
     slice: Slice[int],
-    atLayer: int): Result[void, string] =
+    atLayer: int,
+    topRoot: ptr Digest = nil): Result[void, string] =
   mixin toSszType
   const
     totalChunks = x.maxChunks
@@ -1818,10 +1823,10 @@ func hashTreeRootCached(
         inc i
       else:
         when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
-          return unsupportedIndex
+          return unsupportedIndex 1821
         else:
           let chunk = chunkContainingIndex(index)
-          if chunk >= x.len: return unsupportedIndex
+          if chunk >= x.len: return unsupportedIndex 1824
           var j = i + 1
           while j <= slice.b:
             let
@@ -1834,7 +1839,7 @@ func hashTreeRootCached(
           ? hash_tree_root_multi(x[chunk], indices, roots, loopOrder, i ..< j,
                                  atLayer + chunkLayer)
           i = j
-    else: return unsupportedIndex
+    else: return unsupportedIndex 1837
   ok()
 
 func hashTreeRootCached(
@@ -1843,7 +1848,8 @@ func hashTreeRootCached(
     roots: var openArray[Digest],
     loopOrder: seq[int],
     slice: Slice[int],
-    atLayer: int): Result[void, string] =
+    atLayer: int,
+    topRoot: ptr Digest = nil): Result[void, string] =
   var i = slice.a
   while i <= slice.b:
     let
@@ -1877,7 +1883,7 @@ func hashTreeRootCached(
         indices, roots, loopOrder, i ..< j, atLayer)
       i = j
     else:
-      return unsupportedIndex
+      return unsupportedIndex 1880
   ok()
 
 func hash_tree_root*(x: auto): Digest {.noinit.} =
@@ -1928,72 +1934,99 @@ func hash_tree_root_multi(
     slice.mapIt(indexAt(it)), " = ", slice.mapIt("0x" & $rootAt(it))
   ok()
 
-template normalize(v: GeneralizedIndex): GeneralizedIndex =
+func merkleizationCmp(x, y: tuple[index: GeneralizedIndex, down: bool]): int =
   # GeneralizedIndex is 1-based.
   # Looking at their bit patterns, from MSB to LSB, they:
   # - Start with a 1 bit.
   # - Continue with a 0 bit when going left or 1 bit when going right,
   #   from the tree root down to the leaf.
-  # i.e., 0b1_110 is the node after picking right branch twice, then left.
+  # e.g., 0b1_110 is the node after picking right branch twice, then left.
   #
-  # For depth-first ordering, shorter bit-strings are parents of nodes
-  # that include them as their prefix.
-  # i.e., 0b1_110 is parent of 0b1_1100 (left) and 0b1_1101 (right)
-  # An extra 1 bit is added to distinguish parents from their left child.
-  ((v shl 1) or 1) shl leadingZeros(v)
+  #     1      Order: Parent -> Left -> Right -> Parent (emit each index twice)
+  #    / \     - Left/Right must be available to compute Parent (post-order).
+  #   2   3    - Parent must be available to know covered leaves (pre-order);
+  #  / \         `enumAllSerializedFields` requires disjunct requests to be
+  # 4   5        served left to right, so we cannot simply use ^1 of post-order.
+  let xBeforeY =
+    if x.index == y.index:
+      x.down  # First go down then up
+    else:
+      let
+        xZeros = x.index.leadingZeros()
+        yZeros = y.index.leadingZeros()
+      if xZeros == yZeros:  # Same layer
+        x < y
+      elif xZeros < yZeros:  # `x` deeper than `y`
+        let xAtLayerOfY = (x.index shr (yZeros - xZeros))
+        if xAtLayerOfY != y.index:
+          # No shared ancestry
+          xAtLayerOfY < y.index
+        elif x.down != y.down:
+          # `x` descends from `y` -> going down has priority
+          x.down
+        elif x.down:
+          # `x` descends from `y` and going down --> parent before children
+          false
+        else:
+          # `x` descends from `y` and going up --> children before parent
+          true
+      else:  # `y` deeper than `x`
+        let yAtLayerOfX = (y.index shr (xZeros - yZeros))
+        if yAtLayerOfX != x.index:
+          # No shared ancestry
+          x.index < yAtLayerOfX
+        elif x.down != y.down:
+          # `y` descends from `x` -> going down has priority
+          x.down
+        elif x.down:
+          # `y` descends from `x` and going down --> parent before children
+          true
+        else:
+          # `y` descends from `x` and going up --> children before parent
+          false
+  if xBeforeY:
+    -1
+  else:
+    1
 
-# Comparison utility for sorting indices in depth-first order (in-order).
-# This order is needed because `enumInstanceSerializedFields` does not allow
-# random access to specific fields. With depth-first order only a single pass
-# is required to fill in all the roots. `enumAllSerializedFields` cannot be
-# used for pre-computation at compile time, because the generalized indices
-# depend on the specific case values defined by the specific object instance.
-func cmpDepthFirst(x, y: GeneralizedIndex): int =
-  cmp(x.normalize, y.normalize)
-
-func merkleizationLoopOrderNimvm(
-    indices: openArray[GeneralizedIndex]): seq[int] {.compileTime.} =
-  result = toSeq(indices.low .. indices.high)
-  let idx = toSeq(indices)
-  result.sort do (x, y: int) -> int:
-    cmpDepthFirst(idx[x], idx[y])
-
-func merkleizationLoopOrderRegular(
-    indices: openArray[GeneralizedIndex]): seq[int] =
-  result = toSeq(indices.low .. indices.high)
-  let idx = makeUncheckedArray(unsafeAddr indices[0])
-  result.sort do (x, y: int) -> int:
-    cmpDepthFirst(idx[x], idx[y])
+func sortForMerkleization(
+    sortOrder: var seq[tuple[i: int, down: bool]], indices: auto) =
+  sortOrder.sort do (x, y: auto) -> int:
+    merkleizationCmp(
+      (index: indices[x.i], down: x.down),
+      (index: indices[y.i], down: y.down))
 
 func merkleizationLoopOrder(
     indices: openArray[GeneralizedIndex]): seq[int] =
+  var sortOrder = newSeqUninit[tuple[i: int, down: bool]](2 * indices.len)
+  for i in 0 ..< indices.len:
+    sortOrder[2 * i + 0] = (i: i, down: true)
+    sortOrder[2 * i + 1] = (i: i, down: false)
   when nimvm:
-    merkleizationLoopOrderNimvm(indices)
+    sortOrder.sortForMerkleization toSeq(indices)
   else:
-    merkleizationLoopOrderRegular(indices)
+    sortOrder.sortForMerkleization makeUncheckedArray(unsafeAddr indices[0])
+  var loopOrder = newSeqUninit[int](2 * indices.len)
+  for i in 0 ..< sortOrder.len:
+    loopOrder[i] = sortOrder[i].i
+  loopOrder
 
 func validateIndices(
     indices: openArray[GeneralizedIndex],
     loopOrder: seq[int]): Result[void, string] =
-  var
-    prev = indices[loopOrder[0]]
-    prevLayer = log2trunc(prev)
-  if prev < 1.GeneralizedIndex: return err("Invalid generalized index.")
-  for i in 1 .. loopOrder.high:
-    let
-      curr = indices[loopOrder[i]]
-      currLayer = log2trunc(curr)
-      indicesOverlap =
-        if currLayer < prevLayer:
-          (prev shr (prevLayer - currLayer)) == curr
-        elif currLayer > prevLayer:
-          (curr shr (currLayer - prevLayer)) == prev
-        else:
-          curr == prev
-    if indicesOverlap:
-      return err("Given indices cover some leafs multiple times.")
-    prev = curr
-    prevLayer = currLayer
+  if indices[0] < 1.GeneralizedIndex:
+    return err("Invalid generalized index.")
+  for i in 1 ..< loopOrder.high:
+    let curr = indices[loopOrder[i]]
+    if curr == indices[loopOrder[i - 1]]:
+      let
+        next = indices[loopOrder[i + 1]]
+        currZeros = curr.leadingZeros
+        nextZeros = next.leadingZeros
+      if currZeros > nextZeros:
+        let nextAtLayerOfCurr = (next shr (currZeros - nextZeros))
+        if nextAtLayerOfCurr == curr:
+          return err("Duplicate generalized index requested")
   ok()
 
 func hash_tree_root*(
