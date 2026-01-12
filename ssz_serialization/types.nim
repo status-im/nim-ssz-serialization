@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2024 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -212,7 +212,7 @@ func nextPow2Int64(x: int64): int64 =
 
   v + 1
 
-template dataPerChunk(T: type): int =
+template dataPerChunk*(T: type): int =
   # How many data items fit in a chunk
   mixin toSszType
   const isCompressed =
@@ -225,7 +225,7 @@ template dataPerChunk(T: type): int =
   else:
     1
 
-template chunkIdx*(T: type, dataIdx: int64): int64 =
+template chunkIdx(T: type, dataIdx: int64): int64 =
   # Given a data index, which chunk does it belong to?
   dataIdx div dataPerChunk(T)
 
@@ -242,11 +242,11 @@ template layer*(vIdx: int64): int =
   ## index 0 for the mixed-in-length
   log2trunc(vIdx.uint64).int
 
-func hashListIndicesLen(maxChunkIdx: int64): int =
-  # TODO: This exists only to work-around a compilation issue when the complex
-  # expression is used directly in the HastList array size definition below
-  # https://github.com/nim-lang/Nim/issues/22491
-  int(layer(maxChunkIdx)) + 1
+func hashArrayHashesLen[T](t: typedesc[T], maxLen: Limit | static Limit): int =
+  int(max(maxChunkIdx(T, maxLen), 2))
+
+func hashListIndicesLen[T](t: typedesc[T], maxLen: Limit | static Limit): int =
+  int(layer(max(maxChunkIdx(T, maxLen), 2))) + 1
 
 type
   List*[T; maxLen: static Limit] = distinct seq[T]
@@ -256,7 +256,7 @@ type
     ## Array implementation that caches the hash of each chunk of data - see
     ## also HashList for more details.
     data*: array[maxLen, T]
-    hashes* {.dontSerialize.}: array[max(maxChunkIdx(T, maxLen), 2), Digest]
+    hashes* {.dontSerialize.}: array[hashArrayHashesLen(T, maxLen), Digest]
 
   HashList*[T; maxLen: static Limit] = object
     ## List implementation that caches the hash of each chunk of data as well
@@ -283,9 +283,19 @@ type
       ## Flattened tree store that skips "empty" branches of the tree - the
       ## starting index in this sequence of each "level" in the tree is found
       ## in `indices`.
-    indices* {.dontSerialize.}: array[
-        hashListIndicesLen(max(maxChunkIdx(T, maxLen), 2)), int64] ##\
+    indices* {.dontSerialize.}: array[hashListIndicesLen(T, maxLen), int64] ##\
       ## Holds the starting index in the hashes list for each level of the tree
+
+  HashSeq*[T] = object
+    data*: seq[T]
+    root* {.dontSerialize.}: Digest ## \
+      ## Cached root hash of the entire structure.
+    hashes* {.dontSerialize.}: seq[seq[Digest]] ## \
+      ## All entries except the last one follow a HashArray-like structure,
+      ## while the last one follows a HashList-like structure with indices.
+      ## vIdx 0 stores combined hash of current and next tree roots.
+    indices* {.dontSerialize.}: seq[int64] ## \
+      ## Indices corresponding to last `hashes` entry.
 
   # Note for readers:
   # We use `array` for `Vector` and
@@ -304,7 +314,7 @@ type
   # covered here needs to create overloads for toSszType / fromSszBytes
   # (basic types) or writeValue / readValue (complex types)
   SszType* =
-    BasicType | array | HashArray | List | HashList | seq |
+    BasicType | array | HashArray | List | HashList | seq | HashSeq |
     BitArray | BitList | BitSeq | Digest | object | tuple
 
   # Convenience aliases from specification
@@ -326,11 +336,11 @@ template `==`*(a, b: List): bool = distinctBase(a) == distinctBase(b)
 
 template `&`*(a, b: List): auto = (type(a)(distinctBase(a) & distinctBase(b)))
 
-template items* (x: List): untyped = items(distinctBase(x))
-template pairs* (x: List): untyped = pairs(distinctBase(x))
+template items*(x: List): untyped = items(distinctBase(x))
+template pairs*(x: List): untyped = pairs(distinctBase(x))
 template mitems*(x: var List): untyped = mitems(distinctBase(x))
 template mpairs*(x: var List): untyped = mpairs(distinctBase(x))
-template contains* (x: List, val: auto): untyped = contains(distinctBase(x), val)
+template contains*(x: List, val: auto): untyped = contains(distinctBase(x), val)
 
 func add*(x: var List, val: auto): bool =
   if x.len < x.maxLen:
@@ -423,15 +433,19 @@ template maxDepth*(a: HashList|HashArray): int =
   const v = layer(nextPow2(a.maxChunks.uint64).int64) # force compile-time eval
   v
 
-template chunkIdx(a: HashList|HashArray, dataIdx: int64): int64 =
-  chunkIdx(a.T, dataIdx)
+func clearCachesArray[T](
+    t: typedesc[T],
+    hashes: var openArray[Digest],
+    depth: int,
+    dataIdx: auto) =
+  ## Clear all cache entries after data at dataIdx has been modified
+  var idx = 1 shl (depth - 1) + (chunkIdx(t, dataIdx) shr 1)
+  while idx != 0:
+    clearCache(hashes[idx])
+    idx = idx shr 1
 
 func clearCaches*(a: var HashArray, dataIdx: auto) =
-  ## Clear all cache entries after data at dataIdx has been modified
-  var idx = 1 shl (a.maxDepth - 1) + (chunkIdx(a, dataIdx) shr 1)
-  while idx != 0:
-    clearCache(a.hashes[idx])
-    idx = idx shr 1
+  a.T.clearCachesArray(a.hashes, a.maxDepth, dataIdx)
 
 func nodesAtLayer*(layer, depth, leaves: int): int =
   ## Given a number of leaves, how many nodes do you need at a given layer
@@ -466,74 +480,97 @@ static:
   doAssert uninitSentinel != default(Digest)
   doAssert not uninitSentinel.isCached
 
-func clearCaches*(a: var HashList, dataIdx: int64) =
+func clearCachesList[T, I](
+    t: typedesc[T],
+    hashes: var seq[Digest],
+    indices: var I,
+    depth: int,
+    dataIdx: int64) =
   ## Clear each level of the Merkle tree up to the root affected by a data
   ## change at `dataIdx`.
-  if a.hashes.len == 0:
+  if hashes.len == 0:
     return
 
   var
-    idx = 1'i64 shl (a.maxDepth - 1) + (chunkIdx(a, dataIdx) shr 1)
-    layer = a.maxDepth - 1
+    idx = 1'i64 shl (depth - 1) + (chunkIdx(t, dataIdx) shr 1)
+    layer = depth - 1
   while idx > 0:
     let
       idxInLayer = idx - (1'i64 shl layer)
-      layerIdx = idxInLayer + a.indices[layer]
+      layerIdx = idxInLayer + indices[layer]
 
-    if layerIdx < a.indices[layer + 1]:
-      if  (not isCached(a.hashes[layerIdx])) and
-          a.hashes[layerIdx] != uninitSentinel:
+    if layerIdx < indices[layer + 1]:
+      if  (not isCached(hashes[layerIdx])) and
+          hashes[layerIdx] != uninitSentinel:
         return
 
       # Only clear cache when we're actually storing it - ie it hasn't been
       # skipped by the "combined zero hash" optimization
-      clearCache(a.hashes[layerIdx])
+      clearCache(hashes[layerIdx])
 
     idx = idx shr 1
     layer = layer - 1
 
-  clearCache(a.hashes[0])
+  clearCache(hashes[0])
 
-func clearCache*(a: var HashList) =
+func clearCaches*(a: var HashList, dataIdx: int64) =
+  a.T.clearCachesList(a.hashes, a.indices, a.maxDepth, dataIdx)
+
+func clearCache(hashes: var seq[Digest]) =
   # Clear the full Merkle tree, in anticipation of a complete rewrite of the
   # contents
-  for c in a.hashes.mitems(): clearCache(c)
+  for c in hashes.mitems(): clearCache(c)
 
-func resizeHashes*(a: var HashList) =
+func clearCache*(a: var HashList) =
+  clearCache(a.hashes)
+
+func resizeHashes[T, I](
+    t: typedesc[T],
+    hashes: var seq[Digest],
+    indices: var I,
+    depth: int,
+    dataLen: int) =
   ## Ensure the hash cache is the correct size for the data in the list - must
   ## be called whenever `data` shrinks or grows.
   let
     leaves = int(
-      chunkIdx(a, a.data.len() + dataPerChunk(a.T) - 1))
-    newSize = 1 + max(cacheNodes(a.maxDepth, leaves), 1)
+      chunkIdx(T, dataLen + dataPerChunk(T) - 1))
+    newSize = 1 + max(cacheNodes(depth, leaves), 1)
 
   # Growing might be because of add(), addDefault(), or in-place reading of a
   # larger HashList. In-place reading of a smaller HashList causes shrinking.
-  if a.hashes.len == newSize:
+  if hashes.len == newSize:
     return
 
   var
     newHashes = newSeq[Digest](newSize)
-    newIndices = default(type a.indices)
+    newIndices =
+      when I is seq:
+        newSeq[int64](indices.len)
+      else:
+        default(I)
 
   # newSeqWith already does this, just with potentially less efficient `=`
   # rather than assign(): https://github.com/nim-lang/Nim/issues/22554
   for i in 0 ..< newSize:
     assign(newHashes[i], uninitSentinel)
 
-  newIndices[0] = nodesAtLayer(0, a.maxDepth, leaves)
-  for i in 1 .. max(a.maxDepth, 1):
+  newIndices[0] = nodesAtLayer(0, depth, leaves)
+  for i in 1 .. max(depth, 1):
     newIndices[i] =
-      newIndices[i - 1] + nodesAtLayer(i - 1, a.maxDepth, leaves)
+      newIndices[i - 1] + nodesAtLayer(i - 1, depth, leaves)
 
   # When shrinking, truncate each layer
-  for i in 1 ..< max(a.maxDepth, 1):
+  for i in 1 ..< max(depth, 1):
     for j in 0 ..< min(
-        a.indices[i] - a.indices[i-1], newIndices[i] - newIndices[i - 1]):
-      newHashes[newIndices[i - 1] + j] = a.hashes[a.indices[i - 1] + j]
+        indices[i] - indices[i-1], newIndices[i] - newIndices[i - 1]):
+      newHashes[newIndices[i - 1] + j] = hashes[indices[i - 1] + j]
 
-  swap(a.hashes, newHashes)
-  a.indices = newIndices
+  swap(hashes, newHashes)
+  indices = newIndices
+
+func resizeHashes*(a: var HashList) =
+  a.T.resizeHashes(a.hashes, a.indices, a.maxDepth, a.data.len())
 
 func resetCache*(a: var HashList) =
   ## Perform a full reset of the hash cache, for example after data has been
@@ -545,6 +582,97 @@ func resetCache*(a: var HashList) =
 func resetCache*(a: var HashArray) =
   for h in a.hashes.mitems():
     clearCache(h)
+
+func clearCaches*(a: var HashSeq, dataIdx: int64) =
+  ## Clear each level of the Merkle tree up to the root affected by a data
+  ## change at `dataIdx`.
+  var dataLen = 0'i64
+  clearCache(a.root)
+  for depth in 0 ..< a.hashes.len:
+    let maxLen = a.T.valuesPerChunk shl (depth shl 1)
+    clearCache(a.hashes[depth][0])
+    if dataLen + maxLen > dataIdx:
+      if depth < a.hashes.high:
+        a.T.clearCachesArray(
+          a.hashes[depth], max(depth shl 1, 1), dataIdx - dataLen)
+      else:
+        a.T.clearCachesList(
+          a.hashes[depth], a.indices, max(depth shl 1, 1), dataIdx - dataLen)
+      return
+    dataLen += maxLen
+
+func valuesPerChunk*[T](x: typedesc[T]): int {.compileTime.} =
+  mixin toSszType
+  type E = typeof toSszType(declval T)
+  when E is BasicType:
+    bytesPerChunk div sizeof(E)
+  else:
+    1
+
+func totalChunkCount[T](t: typedesc[T], numItems: int): Limit =
+  when T.valuesPerChunk != 1:
+    (numItems + static(T.valuesPerChunk - 1)) div T.valuesPerChunk
+  else:
+    numItems
+
+func totalChunkCount*[T](x: seq[T]|HashSeq[T]): Limit =
+  T.totalChunkCount(x.len)
+
+template progressiveRangePreChunked*[T](
+    x: openArray[T], firstIdx: Limit): openArray[T] =
+  x.toOpenArray(firstIdx.int, min(firstIdx.int shl 2, x.high))
+
+template progressiveRange*[T](x: seq[T], firstIdx: Limit): openArray[T] =
+  when T.valuesPerChunk != 1:
+    x.toOpenArray(
+      T.valuesPerChunk * firstIdx.int,
+      min(T.valuesPerChunk * ((firstIdx.int shl 2) or 1) - 1, x.high))
+  else:
+    x.progressiveRangePreChunked(firstIdx)
+
+func progressiveBottom*(numChunks: Limit): (Limit, Limit) =
+  var
+    firstIdx = 0.Limit
+    depth = 0.Limit
+  while numChunks > firstIdx:
+    firstIdx = (firstIdx shl 2) or 1
+    inc depth
+  (firstIdx, depth)
+
+func resizeHashes*(a: var HashSeq) =
+  ## Ensure the hash cache is the correct size for the data in the list - must
+  ## be called whenever `data` shrinks or grows.
+  let
+    totalChunkCount = a.data.totalChunkCount
+    (firstIdx, maxDepth) = totalChunkCount.progressiveBottom
+  if a.hashes.len != maxDepth:
+    clearCache(a.root)
+    a.hashes.setLen(maxDepth)
+    a.indices.reset()
+    if maxDepth > 0:
+      for depth in 0 ..< maxDepth - 1:
+        let
+          maxLen = a.T.valuesPerChunk.Limit shl (depth shl 1)
+          hashesLen = a.T.hashArrayHashesLen(maxLen)
+        if a.hashes[depth].len != hashesLen:
+          a.hashes[depth].reset()
+          a.hashes[depth].setLen(hashesLen)
+        else:
+          clearCache(a.hashes[depth][0])
+      a.hashes[^1].reset()
+      let maxLen = a.T.valuesPerChunk.Limit shl ((maxDepth - 1) shl 1)
+      a.indices.setLen(a.T.hashListIndicesLen(maxLen))
+  if maxDepth > 0:
+    let dataLen = a.data.progressiveRange(firstIdx shr 2).len
+    a.T.resizeHashes(a.hashes[^1], a.indices, (maxDepth.int - 1) shl 1, dataLen)
+
+func resetCache*(a: var HashSeq) =
+  ## Perform a full reset of the hash cache, for example after data has been
+  ## rewritten "manually" without going through the exported operators
+  a.root.reset()
+  a.hashes.reset()
+  a.indices.reset()
+  a.resizeHashes()
 
 template len*(a: type HashArray): auto = int(a.maxLen)
 
@@ -567,23 +695,44 @@ func addDefault*(x: var HashList): ptr x.T =
   clearCaches(x, x.data.len() - 1)
   addr x.data[^1]
 
+func add*(x: var HashSeq, val: auto) =
+  add(x.data, val)
+  x.resizeHashes()
+  if x.data.len() > 0:
+    # Otherwise, adding an empty list to an empty list fails
+    clearCaches(x, x.data.len() - 1)
+
+func addDefault*(x: var HashSeq): ptr x.T =
+  distinctBase(x.data).setLen(x.data.len + 1)
+  x.resizeHashes()
+  clearCaches(x, x.data.len() - 1)
+  addr x.data[^1]
+
 template init*[T, N](L: type HashList[T, N], x: seq[T]): auto =
   var tmp = HashList[T, N](data: List[T, N].init(x))
   tmp.resizeHashes()
   tmp
 
-template len*(x: HashList|HashArray): auto = len(x.data)
-template low*(x: HashList|HashArray): auto = low(x.data)
-template high*(x: HashList|HashArray): auto = high(x.data)
-template `[]`*(x: HashList|HashArray, idx: auto): auto = x.data[idx]
-template `[]`*(x: var HashList, idx: auto): auto =
-  {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
-  discard
+template init*[T](L: type HashSeq[T], x: seq[T]): auto =
+  var tmp = HashSeq[T](data: x)
+  tmp.resizeHashes()
+  tmp
+
+template len*(x: HashArray|HashList|HashSeq): auto = len(x.data)
+template low*(x: HashArray|HashList|HashSeq): auto = low(x.data)
+template high*(x: HashArray|HashList|HashSeq): auto = high(x.data)
+template `[]`*(x: HashArray|HashList|HashSeq, idx: auto): auto = x.data[idx]
 template `[]`*(x: var HashArray, idx: auto): auto =
   {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
   discard
+template `[]`*(x: var HashList, idx: auto): auto =
+  {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
+  discard
+template `[]`*(x: var HashSeq, idx: auto): auto =
+  {.fatal: "Use item / mitem with `var HashXxx` to differentiate read/write access".}
+  discard
 
-template item*(x: HashList|HashArray, idx: auto): auto =
+template item*(x: HashArray|HashList|HashSeq, idx: auto): auto =
   # We must use a template, or the magic `unsafeAddr x[idx]` won't work, but
   # we don't want to accidentally return a `var` instance that gets mutated
   # so we avoid overloading the `[]` name
@@ -607,17 +756,33 @@ func `[]=`*(x: var HashList, idx: auto, val: auto) =
   clearCaches(x, idx.int64)
   x.data[idx] = val
 
-template `==`*(a, b: HashList|HashArray): bool = a.data == b.data
-template asSeq*(x: HashList): auto = asSeq(x.data)
-template `$`*(x: HashList): auto = $(x.data)
+func mitem*(x: var HashSeq, idx: auto): var x.T =
+  clearCaches(x, idx.int64)
+  x.data[idx]
 
-template items* (x: HashList|HashArray): untyped = items(x.data)
-template pairs* (x: HashList|HashArray): untyped = pairs(x.data)
+func `[]=`*(x: var HashSeq, idx: auto, val: auto) =
+  clearCaches(x, idx.int64)
+  x.data[idx] = val
+
+template `==`*(a, b: HashArray|HashList|HashSeq): bool = a.data == b.data
+template asSeq*(x: HashList): auto = asSeq(x.data)
+template asSeq*(x: HashSeq): auto = x.data
+template `$`*(x: HashList|HashSeq): auto = $(x.data)
+
+template items*(x: HashArray|HashList|HashSeq): untyped = items(x.data)
+template pairs*(x: HashArray|HashList|HashSeq): untyped = pairs(x.data)
 
 template swap*(a, b: var HashList) =
   swap(a.data, b.data)
   swap(a.hashes, b.hashes)
   swap(a.indices, b.indices)
+
+template swap*(a, b: var HashSeq) =
+  swap(a.data, b.data)
+  swap(a.root, b.root)
+  swap(a.stemHashes, b.stemHashes)
+  swap(a.bottomHashes, b.bottomHashes)
+  swap(a.bottomIndices, b.bottomIndices)
 
 template clear*(a: var HashList) =
   if not a.data.setLen(0):
@@ -625,12 +790,18 @@ template clear*(a: var HashList) =
   a.hashes.setLen(0)
   a.indices = default(type a.indices)
 
+template clear*(a: var HashSeq) =
+  a.reset()
+
 template fill*(a: var HashArray, c: auto) =
   mixin fill
   fill(a.data, c)
 template sum*[maxLen; T](a: var HashArray[maxLen, T]): T =
   mixin sum
   sum(a.data)
+
+template progressiveRange*[T](x: HashSeq[T], firstIdx: Limit): openArray[T] =
+  asSeq(x).progressiveRange(firstIdx)
 
 macro unsupported*(T: typed): untyped =
   # TODO: {.fatal.} breaks compilation even in `compiles()` context,
@@ -646,6 +817,9 @@ template ElemType*(T0: type HashArray): untyped =
   T0.T
 
 template ElemType*(T0: type HashList): untyped =
+  T0.T
+
+template ElemType*(T0: type HashSeq): untyped =
   T0.T
 
 template ElemType*(T: type array): untyped =
@@ -879,6 +1053,14 @@ proc writeValue*(
   writeValue(writer, value.data)
 
 proc readValue*(reader: var JsonReader, value: var HashList)
+               {.raises: [IOError, SerializationError].} =
+  readValue(reader, value.data)
+
+proc writeValue*(
+    writer: var JsonWriter, value: HashSeq) {.raises: [IOError].} =
+  writeValue(writer, value.data)
+
+proc readValue*(reader: var JsonReader, value: var HashSeq)
                {.raises: [IOError, SerializationError].} =
   readValue(reader, value.data)
 
