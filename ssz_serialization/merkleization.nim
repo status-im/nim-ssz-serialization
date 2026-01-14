@@ -136,6 +136,10 @@ template addChunkDirect(merkleizer: var SszMerkleizer2, body: untyped) =
 
   inc merkleizer.totalChunks
 
+func addChunk(merkleizer: var SszMerkleizer2, data: Digest) =
+  addChunkDirect(merkleizer):
+    assign(chunk, data)
+
 func addChunk*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
   doAssert data.len > 0 and data.len <= bytesPerChunk
 
@@ -877,6 +881,22 @@ func maxChunksCount(T: type, maxLen: Limit): Limit =
   else:
     unsupported T # This should never happen
 
+template isDescendingFromIndexOf(i, j: int): bool =
+  let
+    curr = indices[loopOrder[i]]
+    prev = indices[loopOrder[j]]
+  if curr == prev:
+    false
+  else:
+    let
+      currZeros = curr.leadingZeros
+      prevZeros = prev.leadingZeros
+    if currZeros < prevZeros:
+      let currAtLayerOfPrev = (curr shr (prevZeros - currZeros))
+      currAtLayerOfPrev == prev
+    else:
+      false
+
 template chunkForIndex(chunkIndex: GeneralizedIndex): Limit =
   block:
     (chunkIndex - firstChunkIndex).Limit
@@ -1471,55 +1491,87 @@ func hashTreeRootAux[T](
       var
         i = slice.a
         fieldIndex = 0.Limit
-        isActive = false
+        topIndex = 0.GeneralizedIndex
         index {.noinit.}: GeneralizedIndex
         indexLayer {.noinit.}: int
         chunks {.noinit.}: Slice[Limit]
         merkleizer {.noinit.}: SszMerkleizer2[treeHeight]
         chunk {.noinit.}: Limit
         nextField {.noinit.}: Limit
+        root {.noinit.}: Digest
+      if topRoot != nil:
+        merkleizer.topIndex = chunkLayer
+        merkleizer.totalChunks = 0
       x.enumerateSubFields(f):
-        if i <= slice.b:
-          if not isActive:
-            index = indexAt(i)
-            indexLayer = log2trunc(index)
-            nextField =
-              if indexLayer == chunkLayer:
-                chunkForIndex(index)
-              elif indexLayer < chunkLayer:
-                chunks = chunksForIndex(index)
-                merkleizer.topIndex = chunkLayer - indexLayer
-                merkleizer.totalChunks = 0
-                chunks.a
+        if topIndex == 0.GeneralizedIndex:
+          merkleizer.topIndex = 0
+          topIndex =
+            if topRoot != nil:
+              1.GeneralizedIndex
+            elif i <= slice.b:
+              indexAt(i)
+            else:
+              0.GeneralizedIndex
+          if topIndex != 0.GeneralizedIndex:
+            let
+              indexLayer = log2trunc(topIndex)
+              nextField =
+                if indexLayer == chunkLayer:
+                  chunkForIndex(index)
+                elif indexLayer < chunkLayer:
+                  chunks = chunksForIndex(index)
+                  merkleizer.topIndex = chunkLayer - indexLayer
+                  merkleizer.totalChunks = 0
+                  chunks.a
+                else:
+                  chunk = chunkContainingIndex(index)
+                  chunk
+            if i <= slice.b:
+              inc i
+        if topIndex != 0.GeneralizedIndex and fieldIndex >= nextField:
+          while i <= slice.b and i.isDescendingFromIndexOf(i - 1):
+            inc i
+          let
+            index =
+              if i <= slice.b:
+                indexAt(i)
               else:
-                chunk = chunkContainingIndex(index)
-                chunk
-            isActive = true
-          if fieldIndex >= nextField:
-            if indexLayer == chunkLayer:
-              rootAt(i) = hash_tree_root(f)
+                topIndex
+            indexLayer = log2trunc(index)
+          if indexLayer == chunkLayer:
+            root = hash_tree_root(f)
+            if i <= slice.b:
+              rootAt(i) = root
+              inc i
+            else:
+              topRoot[] = root
+            if merkleizer.topIndex > 0:
+              merkleizer.addChunk root
+            isActive = false
+          elif indexLayer < chunkLayer:
+            addField f
+            if fieldIndex >= chunks.b:
+              rootAt(i) =
+                merkleizer.combinedChunks[chunkLayer - indexLayer][0]
               inc i
               isActive = false
-            elif indexLayer < chunkLayer:
-              addField f
-              if fieldIndex >= chunks.b:
-                rootAt(i) = getFinalHash(merkleizer)
-                inc i
-                isActive = false
-            else:
-              var j = i + 1
-              while j <= slice.b:
-                let
-                  index = indexAt(j)
-                  indexLayer = log2trunc(index)
-                if indexLayer <= chunkLayer or
-                    chunkContainingIndex(index) != chunk:
-                  break
-                inc j
-              ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
-                                    atLayer + chunkLayer)
-              i = j
-              isActive = false
+          else:
+            var j = i + 1
+            while j <= slice.b:
+              let
+                index = indexAt(j)
+                indexLayer = log2trunc(index)
+              if indexLayer <= chunkLayer or
+                  chunkContainingIndex(index) != chunk:
+                break
+              inc j
+            let topRoot = if topRoot != nil: addr root else: nil
+            ? f.hash_tree_root_multi(
+              indices, roots, loopOrder, i ..< j, atLayer + chunkLayer, topRoot)
+            if topRoot != nil:
+              merkleizer.addChunk(topRoot)
+            i = j
+            isActive = false
         inc fieldIndex
       doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
       while i <= slice.b:
@@ -1952,8 +2004,8 @@ func merkleizationCmp(x, y: tuple[index: GeneralizedIndex, down: bool]): int =
       x.down  # First go down then up
     else:
       let
-        xZeros = x.index.leadingZeros()
-        yZeros = y.index.leadingZeros()
+        xZeros = x.index.leadingZeros
+        yZeros = y.index.leadingZeros
       if xZeros == yZeros:  # Same layer
         x < y
       elif xZeros < yZeros:  # `x` deeper than `y`
