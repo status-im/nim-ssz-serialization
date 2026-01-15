@@ -567,20 +567,22 @@ func allFieldValues[F: string|int](
 func doMerkleizeFields(
     allFieldValues: openArray[NimNode],
     height, x, chunks, topLayer, res: NimNode): NimNode {.compileTime.} =
-  let merkleizer = ident "merkleizer"
+  let
+    merkleizer = ident "merkleizer"
+    merkleize = ident "merkleize"
   var body = newStmtList()
   for i, fieldValue in allFieldValues:
     body.add quote do:
       if `i` >= `chunks`.a:
         if `i` > `chunks`.b:
-          break
+          break `merkleize`
         addField `fieldValue`
   quote do:
     block:
       var merkleizer = createMerkleizer2(
         `height`, `topLayer`, internalParam = true)
       template `merkleizer`: auto = merkleizer
-      block: `body`
+      block `merkleize`: `body`
       getFinalHash(merkleizer, `res`)
 
 func doMerkleizeFields(
@@ -913,7 +915,7 @@ template indexAt(i: int): GeneralizedIndex =
     else:
       v
 
-template rootAt(i: int): Digest =
+template rootAt(i: int): var Digest =
   roots[loopOrder[i]]
 
 const unsupportedIndex =
@@ -952,21 +954,28 @@ func doProgressiveChunks(
     allFieldValues.progressiveRangePreChunked(firstIdx)
       .doMerkleizeFields(height, x, chunks, indexLayer, res)
 
+func doMulti(
+    fieldValues: openArray[NimNode],
+    x, chunk, indices, roots, loopOrder, slice, atLayer: NimNode
+): NimNode {.compileTime.} =
+  var body = nnkCaseStmt.newTree(chunk)
+  for i, fieldValue in fieldValues:
+    body.add nnkOfBranch.newTree(newLit(i), quote do:
+      ? hash_tree_root_multi(
+        `fieldValue`, `indices`, `roots`, `loopOrder`, `slice`, `atLayer`))
+  body.add nnkElse.newTree quote do:
+    return unsupportedIndex
+  body
+
 func doProgressiveMulti(
     allFieldValues: openArray[NimNode],
     depthSym, x, chunk, indices, roots, loopOrder, slice, atLayer: NimNode
 ): NimNode {.compileTime.} =
   allFieldValues.progressiveBodyImpl(depthSym):
-    var body = nnkCaseStmt.newTree(chunk)
-    for i, fieldValue in allFieldValues.progressiveRangePreChunked(firstIdx):
-      body.add nnkOfBranch.newTree(newLit(i), quote do:
-        ? hash_tree_root_multi(
-          `fieldValue`, `indices`, `roots`, `loopOrder`, `slice`, `atLayer`))
-    body.add nnkElse.newTree quote do:
-      return unsupportedIndex
-    body
+    allFieldValues.progressiveRangePreChunked(firstIdx).doMulti(
+      x, chunk, indices, roots, loopOrder, slice, atLayer)
 
-template genGetProgressiveBodyImpls(
+template genGetBodyImpls(
     B: typedesc[object|tuple], F: typedesc[string|int]): untyped =
   macro progressiveRoot[T: B](
       fieldNames: static[openArray[Opt[F]]],
@@ -980,6 +989,14 @@ template genGetProgressiveBodyImpls(
     fieldNames.allFieldValues(x).doProgressiveChunks(
       depth, x, chunks, indexLayer, res)
 
+  macro multi[T: B](
+      fieldNames: static[openArray[Opt[F]]],
+      x: T, chunk: Limit,
+      indices: openArray[GeneralizedIndex], roots: var openArray[Digest],
+      loopOrder: seq[int], slice: Slice[int], atLayer: int): untyped =
+    fieldNames.allFieldValues(x).doMulti(
+      x, chunk, indices, roots, loopOrder, slice, atLayer)
+
   macro progressiveMulti[T: B](
       fieldNames: static[openArray[Opt[F]]],
       depth: Limit, x: T, chunk: Limit,
@@ -988,8 +1005,8 @@ template genGetProgressiveBodyImpls(
     fieldNames.allFieldValues(x).doProgressiveMulti(
       depth, x, chunk, indices, roots, loopOrder, slice, atLayer)
 
-genGetProgressiveBodyImpls(object, string)
-genGetProgressiveBodyImpls(tuple, int)
+genGetBodyImpls(object, string)
+genGetBodyImpls(tuple, int)
 
 func hashTreeRootCachedPtr(x: HashSeq, depth: int, vIdx: int64): ptr Digest
 
@@ -1461,79 +1478,38 @@ func hashTreeRootAux[T](
     else:
       trs "MERKLEIZING FIELDS"
       const
-        totalChunks = totalSerializedFields(T)
-        treeHeight = binaryTreeHeight(totalChunks)
+        fieldNames = T.allFieldNames
+        totalChunks = fieldNames.len
         firstChunkIndex = nextPow2(totalChunks.uint64)
         chunkLayer = log2trunc(firstChunkIndex)
-      var
-        i = slice.a
-        fieldIndex = 0.Limit
-        isActive = false
-        index {.noinit.}: GeneralizedIndex
-        indexLayer {.noinit.}: int
-        chunks {.noinit.}: Slice[Limit]
-        merkleizer {.noinit.}: SszMerkleizer2[treeHeight]
-        chunk {.noinit.}: Limit
-        nextField {.noinit.}: Limit
-      x.enumerateSubFields(f):
-        if i <= slice.b:
-          if not isActive:
-            index = indexAt(i)
-            indexLayer = log2trunc(index)
-            nextField =
-              if indexLayer == chunkLayer:
-                chunkForIndex(index)
-              elif indexLayer < chunkLayer:
-                chunks = chunksForIndex(index)
-                merkleizer.topIndex = chunkLayer - indexLayer
-                merkleizer.totalChunks = 0
-                chunks.a
-              else:
-                chunk = chunkContainingIndex(index)
-                chunk
-            isActive = true
-          if fieldIndex >= nextField:
-            if indexLayer == chunkLayer:
-              rootAt(i) = hash_tree_root(f)
-              inc i
-              isActive = false
-            elif indexLayer < chunkLayer:
-              addField f
-              if fieldIndex >= chunks.b:
-                rootAt(i) = getFinalHash(merkleizer)
-                inc i
-                isActive = false
-            else:
-              var j = i + 1
-              while j <= slice.b:
-                let
-                  index = indexAt(j)
-                  indexLayer = log2trunc(index)
-                if indexLayer <= chunkLayer or
-                    chunkContainingIndex(index) != chunk:
-                  break
-                inc j
-              ? hash_tree_root_multi(f, indices, roots, loopOrder, i ..< j,
-                                    atLayer + chunkLayer)
-              i = j
-              isActive = false
-        inc fieldIndex
-      doAssert log2trunc(fieldIndex.uint64) == log2trunc(totalChunks.uint64)
+        treeHeight = binaryTreeHeight(totalChunks)
+      var i = slice.a
       while i <= slice.b:
-        index = indexAt(i)
-        indexLayer = log2trunc(index)
-        if indexLayer == chunkLayer:
-          rootAt(i) = static(Digest())
+        let
+          index = indexAt(i)
+          indexLayer = log2trunc(index)
+        if index == 1.GeneralizedIndex:
+          rootAt(i) = x.hash_tree_root()
           inc i
-          isActive = false
-        elif indexLayer < chunkLayer:
-          if not isActive:
-            merkleizer.topIndex = chunkLayer - indexLayer
-            merkleizer.totalChunks = 0
-          rootAt(i) = getFinalHash(merkleizer)
+        elif indexLayer <= chunkLayer:
+          let chunks = chunksForIndex(index)
+          merkleizeFields(treeHeight, x, chunks, indexLayer, rootAt(i))
           inc i
-          isActive = false
-        else: return unsupportedIndex
+        else:
+          let chunk = chunkContainingIndex(index)
+          var j = i + 1
+          while j <= slice.b:
+            let
+              index = indexAt(j)
+              indexLayer = log2trunc(index)
+            if indexLayer <= chunkLayer or
+                chunkContainingIndex(index) != chunk:
+              break
+            inc j
+          fieldNames.multi(
+            x, chunk, indices, roots, loopOrder, i ..< j,
+            atLayer + chunkLayer)
+          i = j
   else:
     unsupported T
   ok()
