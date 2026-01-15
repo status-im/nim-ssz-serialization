@@ -795,7 +795,7 @@ func doProgressiveMerkleizeFields(
     dec depth
     code.add allFieldValues.progressiveRangePreChunked(firstIdx)
       .doMerkleizeFields(newLit((depth shl 1) + 1), x, contentsHash)
-    code.add quote do: mergeBranches(`res`, `contentsHash`, `res`)
+    code.add quote do: mergeBranches(`contentsHash`, `res`, `res`)
   code
 
 template genProgressiveMerkleizeFieldsImpls(
@@ -820,7 +820,7 @@ func progressiveChunkedHashTreeRoot[T](x: seq[T], res: var Digest) =
     var contentsHash {.noinit.}: Digest
     chunkedHashTreeRoot(
       (depth shl 1) + 1, x.progressiveRange(firstIdx), contentsHash)
-    mergeBranches(res, contentsHash, res)
+    mergeBranches(contentsHash, res, res)
 
 func chunkedBitListHashTreeRoot(
     atBottom: var bool, merkleizer: var SszMerkleizer2, x: openArray[byte],
@@ -865,7 +865,7 @@ func progressiveBitListHashTreeRoot(x: BitSeq, res: var Digest) =
       (depth shl 1) + 1,
       x.progressiveRange(firstIdx, hasPartialChunks),
       contentsHash)
-    mergeBranches(res, contentsHash, res)
+    mergeBranches(contentsHash, res, res)
 
 func mixInActiveFields(root: Digest, T: typedesc, res: var Digest) =
   const activeFields = static(T.activeFields)
@@ -1031,48 +1031,58 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
     const
       fieldNames = T.allFieldNames
       totalChunkCount = fieldNames.len
-  var i = slice.a
+  var j = slice.b
   when T isnot HashSeq:
-    let index = indexAt(i)
+    let index = indexAt(j)
     var
-      needAll = index.countOnes == 1
+      needAll = (index + 1).countOnes == 1
       res {.noinit.}: Digest
     if needAll:
       res.reset()
   var (firstIdx, depth) = totalChunkCount.progressiveBottom()
-  while depth > 0 and i <= slice.b:
+  while depth > 0 and j >= slice.a:
     firstIdx = firstIdx shr 2
     dec depth
     let
-      index = indexAt(i)
-      indexLayer = log2trunc(index)
-    if indexLayer > depth:
-      let nextProgressivePrefix = (2 shl depth).GeneralizedIndex
-      if index == nextProgressivePrefix:
-        when T is HashSeq:
-          if depth < x.hashes.high:
-            rootAt(i) = hashTreeRootCachedPtr(x, depth.int + 1, 0)[]
+      nextProgressivePrefix = ((2 shl (depth + 1)) - 1).GeneralizedIndex
+      depthSlice = block:
+        var i = j
+        while i >= slice.a:
+          let
+            index = indexAt(i)
+            indexLayer = log2trunc(index)
+          if indexLayer <= depth:
+            break
+          if index == nextProgressivePrefix:
+            when T is HashSeq:
+              if depth < x.hashes.high:
+                rootAt(i) = hashTreeRootCachedPtr(x, depth.int + 1, 0)[]
+              else:
+                rootAt(i) = zeroHashes[0]
+            else:
+              doAssert needAll and i == j
+              rootAt(i) = res
+              needAll = false
+            dec j
           else:
-            rootAt(i) = zeroHashes[0]
-        else:
-          doAssert needAll
-          rootAt(i) = res
-          needAll = false
-        inc i
-        firstIdx = firstIdx shl 2
-        inc depth
-        continue
-      let prefix = index shr (indexLayer - 1 - depth)
-      if prefix == nextProgressivePrefix:
-        return unsupportedIndex
-      if prefix == nextProgressivePrefix + 1:
-        when T isnot HashSeq:
-          doAssert not needAll
+            let prefix = index shr (indexLayer - 1 - depth)
+            if prefix == nextProgressivePrefix:
+              return unsupportedIndex
+            if prefix != nextProgressivePrefix - 1:
+              break
+          dec i
+        i + 1 .. j
+    if depthSlice.a <= depthSlice.b:
+      when T isnot HashSeq:
+        doAssert not needAll
+      let
+        totalChunks = ((firstIdx shl 2) or 1) - firstIdx
+        firstChunkIndex = totalChunks.uint64
+        chunkLayer = log2trunc(firstChunkIndex)
+        atLayer = atLayer + depth.int + 1
+      var i = depthSlice.a
+      while i <= depthSlice.b:
         let
-          totalChunks = ((firstIdx shl 2) or 1) - firstIdx
-          firstChunkIndex = totalChunks.uint64
-          chunkLayer = log2trunc(firstChunkIndex)
-          atLayer = atLayer + depth.int + 1
           index = indexAt(i)
           indexLayer = log2trunc(index)
           isSpecialCase =
@@ -1125,42 +1135,43 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
             let chunk = chunkContainingIndex(index)
             if firstIdx + chunk >= totalChunkCount:
               return unsupportedIndex
-            var j = i + 1
-            while j <= slice.b:
+            var k = i
+            while k <= j:
               let
-                index = indexAt(j)
+                index = indexAt(k)
                 indexLayer = log2trunc(index)
               if indexLayer <= chunkLayer or
                   chunkContainingIndex(index) != chunk:
                 break
-              inc j
+              inc k
             when T is seq|HashSeq:
               ? hash_tree_root_multi(
-                x[firstIdx + chunk], indices, roots, loopOrder, i ..< j,
+                x[firstIdx + chunk], indices, roots, loopOrder, i ..< k,
                 atLayer + chunkLayer)
             else:
               fieldNames.progressiveMulti(
-                depth, x, chunk, indices, roots, loopOrder, i ..< j,
+                depth, x, chunk, indices, roots, loopOrder, i ..< k,
                 atLayer + chunkLayer)
-            i = j
-        continue
-    when T isnot HashSeq:
-      if needAll:
-        var contentsHash {.noinit.}: Digest
-        let height {.used.} = (depth shl 1) + 1
-        when T is BitSeq:
-          atBottom.chunkedBitListHashTreeRoot(
-            height, x.progressiveRange(firstIdx, hasPartialChunks),
-            contentsHash)
-        elif T is seq:
-          chunkedHashTreeRoot(
-            height, x.progressiveRange(firstIdx), contentsHash)
-        else:
-          fieldNames.progressiveRoot(depth, x, contentsHash)
-        mergeBranches(res, contentsHash, res)
+            i = k
+      j = depthSlice.a - 1
+    else:
+      when T isnot HashSeq:
+        if needAll:
+          var contentsHash {.noinit.}: Digest
+          let height {.used.} = (depth shl 1) + 1
+          when T is BitSeq:
+            atBottom.chunkedBitListHashTreeRoot(
+              height, x.progressiveRange(firstIdx, hasPartialChunks), contentsHash)
+          elif T is seq:
+            chunkedHashTreeRoot(height, x.progressiveRange(firstIdx), contentsHash)
+          else:
+            fieldNames.progressiveRoot(depth, x, contentsHash)
+          mergeBranches(contentsHash, res, res)
+      else:
+        discard
     when T is BitSeq:
       atBottom = false
-  if i <= slice.b:
+  if j >= slice.a:
     return unsupportedIndex
   ok()
 
@@ -1649,11 +1660,12 @@ func hashTreeRootCachedPtr(x: HashSeq, depth: int, vIdx: int64): ptr Digest =
     if not isCached(px[]):
       # TODO oops. so much for maintaining non-mutability.
       mergeBranches(
+        x.hashTreeRootCachedPtr(depth, 1)[],
         if depth < x.hashes.high:
           x.hashTreeRootCachedPtr(depth + 1, 0)[]
         else:
           zeroHashes[0],
-        x.hashTreeRootCachedPtr(depth, 1)[], px[])
+        px[])
     px
   else:
     var firstIdx = 0
