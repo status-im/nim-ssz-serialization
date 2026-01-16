@@ -632,62 +632,11 @@ template writeBytesLE(chunk: var array[bytesPerChunk, byte], atParam: int,
   chunk[at ..< at + sizeof(val)] = toBytesLE(val)
 
 func chunkedHashTreeRoot[T: BasicType](
-    merkleizer: var SszMerkleizer2, arr: openArray[T],
-    firstIdx, numFromFirst: Limit, res: var Digest) =
-  static:
-    doAssert bytesPerChunk mod sizeof(T) == 0
-
-  when sizeof(T) == 1 or cpuEndian == littleEndian:
-    let
-      remainingBytes = numFromFirst * sizeof(T)
-      pos = cast[ptr byte](unsafeAddr arr[firstIdx])
-
-    merkleizer.addChunks(makeOpenArray(pos, remainingBytes.int))
-  else:
-    const valuesPerChunk = bytesPerChunk div sizeof(T)
-
-    var writtenValues = 0
-
-    var chunk: array[bytesPerChunk, byte]
-    while writtenValues < numFromFirst - valuesPerChunk:
-      for i in 0 ..< valuesPerChunk:
-        chunk.writeBytesLE(i * sizeof(T), arr[firstIdx + writtenValues + i])
-      addChunk(merkleizer, chunk)
-      inc writtenValues, valuesPerChunk
-
-    let remainingValues = numFromFirst - writtenValues
-    if remainingValues > 0:
-      var lastChunk: array[bytesPerChunk, byte]
-      for i in 0 ..< remainingValues:
-        lastChunk.writeBytesLE(i * sizeof(T), arr[firstIdx + writtenValues + i])
-      addChunk(merkleizer, lastChunk)
-
-  getFinalHash(merkleizer, res)
-
-func chunkedHashTreeRoot[T: not BasicType](
-    merkleizer: var SszMerkleizer2, arr: openArray[T],
-    firstIdx, numFromFirst: Limit, res: var Digest) =
-  mixin hash_tree_root, toSszType
-  type S = typeof toSszType(declval T)
-  when S is BasicType:
-    chunkedHashTreeRoot(
-      merkleizer, openArray[S](arr), firstIdx, numFromFirst, res)
-  else:
-    for i in 0 ..< numFromFirst:
-      addChunkDirect(merkleizer):
-        chunk = hash_tree_root(arr[firstIdx + i])
-    getFinalHash(merkleizer, res)
-
-func chunkedHashTreeRoot[T](
     height: Limit | static Limit, arr: openArray[T],
     chunks: Slice[Limit], topLayer: int, res: var Digest) =
-  mixin toSszType
-  type S = typeof toSszType(declval T)
-  const valuesPerChunk =
-    when S is BasicType:
-      bytesPerChunk div sizeof(T)
-    else:
-      1
+  static:
+    doAssert bytesPerChunk mod sizeof(T) == 0
+  const valuesPerChunk = bytesPerChunk div sizeof(T)
   let firstIdx = chunks.a * valuesPerChunk
   if arr.len <= firstIdx:
     res = zeroHashes[height - 1 - topLayer]
@@ -695,15 +644,59 @@ func chunkedHashTreeRoot[T](
     var merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
     let numFromFirst =
       min((chunks.b - chunks.a + 1) * valuesPerChunk, arr.len - firstIdx)
-    chunkedHashTreeRoot(merkleizer, arr, firstIdx, numFromFirst, res)
+    when sizeof(T) == 1 or cpuEndian == littleEndian:
+      let
+        remainingBytes = numFromFirst * sizeof(T)
+        pos = cast[ptr byte](unsafeAddr arr[firstIdx])
 
-func chunkedHashTreeRoot[T](
-    height: Limit | static Limit, arr: openArray[T], res: var Digest) =
-  if arr.len <= 0:
-    res = zeroHashes[height - 1]
+      merkleizer.addChunks(makeOpenArray(pos, remainingBytes.int))
+    else:
+      const valuesPerChunk = bytesPerChunk div sizeof(T)
+
+      var writtenValues = 0
+
+      var chunk: array[bytesPerChunk, byte]
+      while writtenValues < numFromFirst - valuesPerChunk:
+        for i in 0 ..< valuesPerChunk:
+          chunk.writeBytesLE(
+            i * sizeof(T), arr[firstIdx + writtenValues + i])
+        addChunk(merkleizer, chunk)
+        inc writtenValues, valuesPerChunk
+
+      let remainingValues = numFromFirst - writtenValues
+      if remainingValues > 0:
+        var lastChunk: array[bytesPerChunk, byte]
+        for i in 0 ..< remainingValues:
+          lastChunk.writeBytesLE(
+            i * sizeof(T), arr[firstIdx + writtenValues + i])
+        addChunk(merkleizer, lastChunk)
+
+    getFinalHash(merkleizer, res)
+
+func chunkedHashTreeRoot[T: not BasicType](
+    height: Limit | static Limit, arr: openArray[T],
+    chunks: Slice[Limit], topLayer: int, res: var Digest) =
+  mixin hash_tree_root, toSszType
+  type S = typeof toSszType(declval T)
+  when S is BasicType:
+    chunkedHashTreeRoot(
+      height, openArray[S](arr), chunks, topLayer, res)
   else:
-    var merkleizer = createMerkleizer2(height, internalParam = true)
-    chunkedHashTreeRoot(merkleizer, arr, 0, arr.len, res)
+    let firstIdx = chunks.a
+    if arr.len <= firstIdx:
+      res = zeroHashes[height - 1 - topLayer]
+    else:
+      var merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
+      let numFromFirst = min(chunks.b - chunks.a + 1, arr.len - firstIdx)
+      for i in 0 ..< numFromFirst:
+        addChunkDirect(merkleizer):
+          chunk = hash_tree_root(arr[firstIdx + i])
+      getFinalHash(merkleizer, res)
+
+template chunkedHashTreeRoot[T](
+    height: Limit | static Limit, arr: openArray[T], res: var Digest) =
+  chunkedHashTreeRoot(
+    height, arr, 0.Limit ..< (1.Limit shl height), topLayer = 0, res)
 
 func bitListHashTreeRoot(
     merkleizer: var SszMerkleizer2, x: openArray[byte],
