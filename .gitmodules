@@ -1,5 +1,5 @@
 [submodule "vendor/hashtree"]
 	path = vendor/hashtree
-	url = https://github.com/OffchainLabs/hashtree.git
+	url = https://github.com/siddarthkay/hashtree.git
 	ignore = untracked
-	branch = main
+	branch = skip-macos-from-assembler-check
