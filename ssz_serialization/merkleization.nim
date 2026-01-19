@@ -397,7 +397,7 @@ func addChunks*(
         else:
           let nbytes = min(data.len, first.int + bytesPerChunk) - first.int
           rootAt(i).data[0 ..< nbytes] =
-            data.toOpenArray(first, first + nbytes - 1)
+            data.toOpenArray(first.int, first.int + nbytes - 1)
           rootAt(i).data[nbytes ..< bytesPerChunk] =
             zero64.toOpenArray(nbytes, bytesPerChunk - 1)
       else:
@@ -2032,17 +2032,18 @@ func sortForMerkleization(sortOrder: var seq[int], indices: auto) =
 
 func merkleizationLoopOrder*(
     indices: openArray[GeneralizedIndex]): seq[int] =
-  var sortOrder = newSeqUninit[int](indices.len)
+  var sortOrder =
+    when (NimMajor, NimMinor) < (2, 2):
+      newSeqUninitialized[int](indices.len)
+    else:
+      newSeqUninit[int](indices.len)
   for i in 0 ..< indices.len:
     sortOrder[i] = i
   when nimvm:
     sortOrder.sortForMerkleization toSeq(indices)
   else:
     sortOrder.sortForMerkleization makeUncheckedArray(unsafeAddr indices[0])
-  var loopOrder = newSeqUninit[int](indices.len)
-  for i in 0 ..< sortOrder.len:
-    loopOrder[i] = sortOrder[i]
-  loopOrder
+  sortOrder
 
 func validateIndices(
     indices: openArray[GeneralizedIndex],
