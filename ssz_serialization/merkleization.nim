@@ -30,6 +30,71 @@ export
 when hasSerializationTracing:
   import stew/byteutils, typetraits
 
+type BatchRequest* = object
+  indices: ptr UncheckedArray[GeneralizedIndex]
+  indicesHigh: int
+  roots: ptr UncheckedArray[Digest]
+  rootsHigh: int
+  loopOrder: ptr UncheckedArray[int]
+  loopOrderHigh: int
+
+template init*[T: BatchRequest](
+    t: typedesc[T],
+    indicesParam: openArray[GeneralizedIndex],
+    rootsParam: var openArray[Digest],
+    loopOrderParam: seq[int] | static seq[int]): BatchRequest =
+  BatchRequest(
+    indices: makeUncheckedArray indicesParam.baseAddr,
+    indicesHigh: indicesParam.high,
+    roots: makeUncheckedArray rootsParam.baseAddr,
+    rootsHigh: rootsParam.high,
+    loopOrder: makeUncheckedArray loopOrderParam.baseAddr,
+    loopOrderHigh: loopOrderParam.high)
+
+template indexAt(i: int): GeneralizedIndex =
+  block:
+    let v = batch.indices.toOpenArray(0, batch.indicesHigh)[
+      batch.loopOrder.toOpenArray(0, batch.loopOrderHigh)[i]]
+    if atLayer != 0:
+      let n = leadingZeros(v) + 1 + atLayer
+      if n < 64:
+        let x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
+        rotateRight(x, n)
+      else:  # `v shl 64` doesn't shift and silently becomes a noop
+        doAssert n == 64
+        1.GeneralizedIndex
+    else:
+      v
+
+template rootAt(i: int): var Digest =
+  batch.roots.toOpenArray(0, batch.rootsHigh)[
+    batch.loopOrder.toOpenArray(0, batch.loopOrderHigh)[i]]
+
+const unsupportedIndex =
+  err(Result[void, string], "Generalized index not supported.")
+
+template chunkForIndex(chunkIndex: GeneralizedIndex): Limit =
+  block:
+    (chunkIndex - firstChunkIndex).Limit
+
+template chunksForIndex(index: GeneralizedIndex): Slice[Limit] =
+  block:
+    let
+      numLayersAboveChunks = chunkLayer - indexLayer
+      chunkIndexLow = index shl numLayersAboveChunks
+      chunkIndexHigh = chunkIndexLow or
+        ((1.GeneralizedIndex shl numLayersAboveChunks) - 1.GeneralizedIndex)
+
+    chunkForIndex(chunkIndexLow) .. chunkForIndex(chunkIndexHigh)
+
+template chunkContainingIndex(index: GeneralizedIndex): Limit =
+  block:
+    let
+      numLayersBelowChunks = indexLayer - chunkLayer
+      chunkIndex = index shr numLayersBelowChunks
+
+    chunkForIndex(chunkIndex)
+
 const
   zero64 = default array[64, byte]
   zeroDigest = Digest()
@@ -96,6 +161,76 @@ func computeZeroHashes: array[sizeof(Limit) * 8, Digest] =
 
 const zeroHashes* = computeZeroHashes()
 
+func combineToTop(merkleizer: var SszMerkleizer2, res: var Digest) =
+  let
+    bottomHashIdx = firstOne(max(merkleizer.totalChunks, 1)) - 1
+    submittedChunksHeight = bitWidth(max(merkleizer.totalChunks, 1) - 1)
+    topHashIdx = merkleizer.topIndex
+
+  trs "BOTTOM HASH ", bottomHashIdx
+  trs "SUBMITTED HEIGHT ", submittedChunksHeight
+  trs "TOP HASH IDX ", topHashIdx
+
+  if bottomHashIdx != submittedChunksHeight:
+    # Our tree is not finished. We must complete the work in progress
+    # branches and then extend the tree to the right height.
+    assign(
+      merkleizer.combinedChunks[bottomHashIdx][1],
+      zeroHashes[bottomHashIdx])
+
+    block:
+      mergeBranches(
+        merkleizer.combinedChunks[bottomHashIdx][0],
+        merkleizer.combinedChunks[bottomHashIdx][1],
+        merkleizer.combinedChunks[bottomHashIdx + 1][1])
+
+    for i in bottomHashIdx + 1 ..< topHashIdx:
+      if i == topHashIdx - 1:
+        if getBitLE(merkleizer.totalChunks, i):
+          trs "COMBINED"
+          mergeBranches(
+            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
+            res)
+        else:
+          trs "COMBINED WITH ZERO"
+          mergeBranches(merkleizer.combinedChunks[i][1], zeroHashes[i], res)
+      else:
+        if getBitLE(merkleizer.totalChunks, i):
+          trs "COMBINED"
+          mergeBranches(
+            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
+            merkleizer.combinedChunks[i + 1][1])
+        else:
+          trs "COMBINED WITH ZERO"
+          mergeBranches(
+            merkleizer.combinedChunks[i][1], zeroHashes[i],
+            merkleizer.combinedChunks[i + 1][1])
+
+  elif bottomHashIdx == topHashIdx:
+    # We have a perfect tree (chunks == 2**n) at just the right height!
+    res = merkleizer.combinedChunks[bottomHashIdx][0]
+  else:
+    # We have a perfect tree of user chunks, but we have more work to
+    # do - we must extend it to reach the desired height
+    if bottomHashIdx == topHashIdx - 1:
+      mergeBranches(
+        merkleizer.combinedChunks[topHashIdx - 1][0],
+        zeroHashes[topHashIdx - 1], res)
+    else:
+      mergeBranches(
+        merkleizer.combinedChunks[bottomHashIdx][0],
+        zeroHashes[bottomHashIdx],
+        merkleizer.combinedChunks[bottomHashIdx + 1][1])
+
+      for i in bottomHashIdx + 1 ..< topHashIdx - 1:
+        mergeBranches(
+          merkleizer.combinedChunks[i][1], zeroHashes[i],
+          merkleizer.combinedChunks[i + 1][1])
+
+      mergeBranches(
+        merkleizer.combinedChunks[topHashIdx - 1][1],
+        zeroHashes[topHashIdx - 1], res)
+
 func combineChunks(merkleizer: var SszMerkleizer2, start: int) =
   for i in start..<merkleizer.topIndex:
     trs "CALLING MERGE BRANCHES"
@@ -160,7 +295,14 @@ func addChunk*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
 template isOdd(x: SomeNumber): bool =
   (x and 1) != 0
 
-func addChunks*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
+type OnChunkAdded[height: static[Limit]] =
+  proc (
+    merkleizer: var SszMerkleizer2[height],
+    data: openArray[byte]) {.noSideEffect.}
+
+func doAddChunks[height: static[Limit]](
+    merkleizer: var SszMerkleizer2[height], data: openArray[byte],
+    onChunkAdded: OnChunkAdded[height] = nil) =
   doAssert merkleizer.totalChunks == 0
   doAssert merkleizer.limit * bytesPerChunk >= data.len,
     "Adding chunks would exceed merklelizer limit " & $merkleizer.limit
@@ -198,6 +340,9 @@ func addChunks*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
 
         done += bytesPerChunk * 2
         merkleizer.totalChunks += 2
+
+        if onChunkAdded != nil:
+          onChunkAdded(merkleizer, data)
     else:
       trs "COMPUTING REMAINDER DATA HASH ", remaining
       if remaining > bytesPerChunk:
@@ -205,7 +350,71 @@ func addChunks*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
         done += bytesPerChunk
 
       merkleizer.addChunk(data.toOpenArray(done, data.high))
+
+      if onChunkAdded != nil:
+        onChunkAdded(merkleizer, data)
       break
+
+func addChunks*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
+  doAddChunks[merkleizer.height](merkleizer, data)
+
+func addChunks*(
+    merkleizer: var SszMerkleizer2, data: openArray[byte],
+    batch: BatchRequest, slice: Slice[int], atLayer: int
+): Result[void, string] =
+  let
+    chunkLayer = merkleizer.combinedChunks.len - 1
+    firstChunkIndex = 1.GeneralizedIndex shl chunkLayer
+  var
+    ok = true
+    i = slice.a
+  func collect(
+      merkleizer: var SszMerkleizer2, data: openArray[byte],
+      isComplete = false) =
+    while ok and i <= slice.b:
+      let
+        index = indexAt(i)
+        indexLayer = log2trunc(index)
+      if indexLayer < chunkLayer:
+        let chunks = chunksForIndex(index)
+        if chunks.a * bytesPerChunk >= data.len:
+          rootAt(i) = zeroHashes[chunkLayer - indexLayer]
+        elif chunks.b < merkleizer.totalChunks.Limit:
+          if getBitLE(merkleizer.totalChunks, chunkLayer - indexLayer):
+            rootAt(i) = merkleizer.combinedChunks[chunkLayer - indexLayer][0]
+          else:
+            rootAt(i) = merkleizer.combinedChunks[chunkLayer - indexLayer][1]
+        elif isComplete:
+          rootAt(i) = merkleizer.combinedChunks[chunkLayer - indexLayer][1]
+        else:
+          break
+      elif indexLayer == chunkLayer:
+        let
+          chunk = chunkForIndex(index)
+          first = chunk * bytesPerChunk
+        if first >= data.len:
+          rootAt(i) = zeroHashes[0]
+        else:
+          let nbytes = min(data.len, first.int + bytesPerChunk) - first.int
+          rootAt(i).data[0 ..< nbytes] =
+            data.toOpenArray(first, first + nbytes - 1)
+          rootAt(i).data[nbytes ..< bytesPerChunk] =
+            zero64.toOpenArray(nbytes, bytesPerChunk - 1)
+      else:
+        ok = false
+      inc i
+
+  merkleizer.doAddChunks(data) do (
+      merkleizer: var SszMerkleizer2, data: openArray[byte]):
+    merkleizer.collect(data)
+
+  if ok and i <= slice.b:
+    merkleizer.combineToTop(merkleizer.combinedChunks[merkleizer.topIndex][1])
+    merkleizer.collect(data, isComplete = true)
+
+  if not ok or i <= slice.b:
+    return unsupportedIndex
+  ok()
 
 func addChunkAndGenMerkleProof*(merkleizer: var SszMerkleizer2,
                                 hash: Digest,
@@ -423,62 +632,7 @@ func getFinalHash(merkleizer: var SszMerkleizer2, res: var Digest) =
     res = zeroHashes[merkleizer.topIndex]
     return
 
-  let
-    bottomHashIdx = firstOne(merkleizer.totalChunks) - 1
-    submittedChunksHeight = bitWidth(merkleizer.totalChunks - 1)
-    topHashIdx = merkleizer.topIndex
-
-  trs "BOTTOM HASH ", bottomHashIdx
-  trs "SUBMITTED HEIGHT ", submittedChunksHeight
-  trs "TOP HASH IDX ", topHashIdx
-
-  if bottomHashIdx != submittedChunksHeight:
-    # Our tree is not finished. We must complete the work in progress
-    # branches and then extend the tree to the right height.
-    assign(
-      merkleizer.combinedChunks[bottomHashIdx][1],
-      zeroHashes[bottomHashIdx])
-
-    block:
-      mergeBranches(
-        merkleizer.combinedChunks[bottomHashIdx][0],
-        merkleizer.combinedChunks[bottomHashIdx][1],
-        merkleizer.combinedChunks[bottomHashIdx + 1][1])
-
-    for i in bottomHashIdx + 1 ..< topHashIdx:
-      if i == topHashIdx - 1:
-        if getBitLE(merkleizer.totalChunks, i):
-          trs "COMBINED"
-          mergeBranches(
-            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
-            res)
-        else:
-          trs "COMBINED WITH ZERO"
-          mergeBranches(merkleizer.combinedChunks[i][1], zeroHashes[i], res)
-      else:
-        if getBitLE(merkleizer.totalChunks, i):
-          trs "COMBINED"
-          mergeBranches(
-            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
-            merkleizer.combinedChunks[i + 1][1])
-        else:
-          trs "COMBINED WITH ZERO"
-          mergeBranches(
-            merkleizer.combinedChunks[i][1], zeroHashes[i],
-            merkleizer.combinedChunks[i + 1][1])
-
-  elif bottomHashIdx == topHashIdx:
-    # We have a perfect tree (chunks == 2**n) at just the right height!
-    res = merkleizer.combinedChunks[bottomHashIdx][0]
-  else:
-    # We have a perfect tree of user chunks, but we have more work to
-    # do - we must extend it to reach the desired height
-    mergeBranches(
-      merkleizer.combinedChunks[bottomHashIdx][0], zeroHashes[bottomHashIdx],
-      res)
-
-    for i in bottomHashIdx + 1 ..< topHashIdx:
-      mergeBranches(res, zeroHashes[i], res)
+  merkleizer.combineToTop(res)
 
 func getFinalHash*(merkleizer: var SszMerkleizer2): Digest {.noinit.} =
   getFinalHash(merkleizer, result)
@@ -501,27 +655,6 @@ func mixInSelector(root: Digest, selector: uint8, res: var Digest) =
   digest(buf, res)
 
 func hash_tree_root*(x: auto): Digest {.gcsafe, raises: [], noinit.}
-
-type BatchRequest = object
-  indices: ptr UncheckedArray[GeneralizedIndex]
-  indicesHigh: int
-  roots: ptr UncheckedArray[Digest]
-  rootsHigh: int
-  loopOrder: ptr UncheckedArray[int]
-  loopOrderHigh: int
-
-template init[T: BatchRequest](
-    t: typedesc[T],
-    indices: untyped,  # openArray[GeneralizedIndex]
-    roots: untyped,  # var openArray[Digest]
-    loopOrder: seq[int] | static seq[int]): BatchRequest =
-  BatchRequest(
-    indices: makeUncheckedArray indices.baseAddr,
-    indicesHigh: indices.high,
-    roots: makeUncheckedArray roots.baseAddr,
-    rootsHigh: roots.high,
-    loopOrder: makeUncheckedArray loopOrder.baseAddr,
-    loopOrderHigh: loopOrder.high)
 
 func hash_tree_root_multi(
     x: auto,
@@ -883,50 +1016,6 @@ func maxChunksCount(T: type, maxLen: Limit): Limit =
     maxChunkIdx(ElemType(T), maxLen)
   else:
     unsupported T # This should never happen
-
-template chunkForIndex(chunkIndex: GeneralizedIndex): Limit =
-  block:
-    (chunkIndex - firstChunkIndex).Limit
-
-template chunksForIndex(index: GeneralizedIndex): Slice[Limit] =
-  block:
-    let
-      numLayersAboveChunks = chunkLayer - indexLayer
-      chunkIndexLow = index shl numLayersAboveChunks
-      chunkIndexHigh = chunkIndexLow or
-        ((1.GeneralizedIndex shl numLayersAboveChunks) - 1.GeneralizedIndex)
-
-    chunkForIndex(chunkIndexLow) .. chunkForIndex(chunkIndexHigh)
-
-template chunkContainingIndex(index: GeneralizedIndex): Limit =
-  block:
-    let
-      numLayersBelowChunks = indexLayer - chunkLayer
-      chunkIndex = index shr numLayersBelowChunks
-
-    chunkForIndex(chunkIndex)
-
-template indexAt(i: int): GeneralizedIndex =
-  block:
-    let v = batch.indices.toOpenArray(0, batch.indicesHigh)[
-      batch.loopOrder.toOpenArray(0, batch.loopOrderHigh)[i]]
-    if atLayer != 0:
-      let n = leadingZeros(v) + 1 + atLayer
-      if n < 64:
-        let x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
-        rotateRight(x, n)
-      else:  # `v shl 64` doesn't shift and silently becomes a noop
-        doAssert n == 64
-        1.GeneralizedIndex
-    else:
-      v
-
-template rootAt(i: int): var Digest =
-  batch.roots.toOpenArray(0, batch.rootsHigh)[
-    batch.loopOrder.toOpenArray(0, batch.loopOrderHigh)[i]]
-
-const unsupportedIndex =
-  err(Result[void, string], "Generalized index not supported.")
 
 template progressiveBodyImpl(
     allFieldValues: openArray[NimNode],
@@ -1897,49 +1986,63 @@ func hash_tree_root_multi(
     slice.mapIt(indexAt(it)), " = ", slice.mapIt("0x" & $rootAt(it))
   ok()
 
-template normalize(v: GeneralizedIndex): GeneralizedIndex =
+func merkleizationCmp(x, y: GeneralizedIndex): int =
   # GeneralizedIndex is 1-based.
   # Looking at their bit patterns, from MSB to LSB, they:
   # - Start with a 1 bit.
   # - Continue with a 0 bit when going left or 1 bit when going right,
   #   from the tree root down to the leaf.
-  # i.e., 0b1_110 is the node after picking right branch twice, then left.
+  # e.g., 0b1_110 is the node after picking right branch twice, then left.
   #
-  # For depth-first ordering, shorter bit-strings are parents of nodes
-  # that include them as their prefix.
-  # i.e., 0b1_110 is parent of 0b1_1100 (left) and 0b1_1101 (right)
-  # An extra 1 bit is added to distinguish parents from their left child.
-  ((v shl 1) or 1) shl leadingZeros(v)
-
-# Comparison utility for sorting indices in depth-first order (in-order).
-# This order is needed because `enumInstanceSerializedFields` does not allow
-# random access to specific fields. With depth-first order only a single pass
-# is required to fill in all the roots. `enumAllSerializedFields` cannot be
-# used for pre-computation at compile time, because the generalized indices
-# depend on the specific case values defined by the specific object instance.
-func cmpDepthFirst(x, y: GeneralizedIndex): int =
-  cmp(x.normalize, y.normalize)
-
-func merkleizationLoopOrderNimvm(
-    indices: openArray[GeneralizedIndex]): seq[int] {.compileTime.} =
-  result = toSeq(indices.low .. indices.high)
-  let idx = toSeq(indices)
-  result.sort do (x, y: int) -> int:
-    cmpDepthFirst(idx[x], idx[y])
-
-func merkleizationLoopOrderRegular(
-    indices: openArray[GeneralizedIndex]): seq[int] =
-  result = toSeq(indices.low .. indices.high)
-  let idx = makeUncheckedArray(unsafeAddr indices[0])
-  result.sort do (x, y: int) -> int:
-    cmpDepthFirst(idx[x], idx[y])
-
-func merkleizationLoopOrder(
-    indices: openArray[GeneralizedIndex]): seq[int] =
-  when nimvm:
-    merkleizationLoopOrderNimvm(indices)
+  #     1      Order: Left -> Right -> Parent
+  #    / \     - Left/Right must be available to compute Parent (post-order).
+  #   2   3
+  #  / \
+  # 4   5
+  let xBeforeY = block:
+    let
+      xZeros = x.leadingZeros()
+      yZeros = y.leadingZeros()
+    if xZeros == yZeros:  # Same layer
+      x < y
+    elif xZeros < yZeros:  # `x` deeper than `y`
+      let xAtLayerOfY = (x shr (yZeros - xZeros))
+      if xAtLayerOfY != y:
+        # No shared ancestry
+        xAtLayerOfY < y
+      else:
+        # `x` descends from `y` --> children before parent
+        true
+    else:  # `y` deeper than `x`
+      let yAtLayerOfX = (y shr (xZeros - yZeros))
+      if yAtLayerOfX != x:
+        # No shared ancestry
+        x < yAtLayerOfX
+      else:
+        # `y` descends from `x` --> children before parent
+        false
+  if xBeforeY:
+    -1
   else:
-    merkleizationLoopOrderRegular(indices)
+    1
+
+func sortForMerkleization(sortOrder: var seq[int], indices: auto) =
+  sortOrder.sort do (x, y: auto) -> int:
+    merkleizationCmp(indices[x], indices[y])
+
+func merkleizationLoopOrder*(
+    indices: openArray[GeneralizedIndex]): seq[int] =
+  var sortOrder = newSeqUninit[int](indices.len)
+  for i in 0 ..< indices.len:
+    sortOrder[i] = i
+  when nimvm:
+    sortOrder.sortForMerkleization toSeq(indices)
+  else:
+    sortOrder.sortForMerkleization makeUncheckedArray(unsafeAddr indices[0])
+  var loopOrder = newSeqUninit[int](indices.len)
+  for i in 0 ..< sortOrder.len:
+    loopOrder[i] = sortOrder[i]
+  loopOrder
 
 func validateIndices(
     indices: openArray[GeneralizedIndex],

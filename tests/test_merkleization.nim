@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2021-2024 Status Research & Development GmbH
+# Copyright (c) 2021-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -92,3 +92,35 @@ suite "Merkleization":
   test "Calculate correct root using distinct BasicType":
     check: hash_tree_root(default(List[U, 2])) ==
       hash_tree_root(default(List[uint64, 2]))
+
+  test "All chunks":
+    for testCase in cases.fields:
+      checkpoint $testCase.count & " / " & $testCase.limit
+      var
+        data: seq[byte]
+        roots: Table[GeneralizedIndex, Digest]
+      for i in 0 ..< testCase.count:
+        data.add e(i)
+        var root: Digest
+        root.data[0 ..< 32] = e(i).toOpenArray(0, 31)
+        roots[(testCase.limit + i.int64).GeneralizedIndex] = root
+      for i in testCase.count ..< testCase.limit:
+        roots[(testCase.limit + i.int64).GeneralizedIndex] = zeroHashes[0]
+      for i in countdown(testCase.limit - 1, 1):
+        var root: Digest
+        root.data[0 ..< 32] = h(
+          roots[i.GeneralizedIndex * 2 + 0].data,
+          roots[i.GeneralizedIndex * 2 + 1].data).toOpenArray(0, 31)
+        roots[i.GeneralizedIndex] = root
+
+      if testCase.limit > 0:
+        let
+          i = (1 ..< 2 * testCase.limit).mapIt(it.GeneralizedIndex)
+          r = i.mapIt(roots.getOrDefault(it))
+        var roots = newSeq[Digest](i.len)
+        let loopOrder = merkleizationLoopOrder(i)
+        var merk = createMerkleizer2(
+          binaryTreeHeight testCase.limit, internalParam = true)
+        let batch = BatchRequest.init(i, roots, loopOrder)
+        merk.addChunks(data, batch, 0 ..< loopOrder.len, atLayer = 0).get
+        check roots == r
