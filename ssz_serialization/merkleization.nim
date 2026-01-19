@@ -2027,7 +2027,10 @@ func merkleizationLoopOrder*(
     indices: openArray[GeneralizedIndex]): seq[int] =
   var sortOrder =
     when (NimMajor, NimMinor) < (2, 2):
-      newSeqUninitialized[int](indices.len)
+      when nimvm:
+        newSeq[int](indices.len)
+      else:
+        newSeqUninitialized[int](indices.len)
     else:
       newSeqUninit[int](indices.len)
   for i in 0 ..< indices.len:
