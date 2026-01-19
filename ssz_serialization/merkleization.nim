@@ -13,8 +13,8 @@
 
 # TODO https://github.com/nim-lang/Nim/issues/19357 and general pointer aliasing
 # misdetection means we use output parameters rather than return values for a
-# large part of the internal implemenation thus avoiding spurious `zeroMem` calls
-# and other artefacts of the introduction of hidden temporaries
+# large part of the internal implemenation thus avoiding spurious `zeroMem`
+# calls and other artefacts of the introduction of hidden temporaries
 
 import
   std/[algorithm, options, sequtils],
@@ -80,7 +80,8 @@ template getChunkCount*(m: SszMerkleizer2): uint64 =
 func getCombinedChunks*(m: SszMerkleizer2): seq[Digest] =
   mapIt(toOpenArray(m.combinedChunks, 0, m.topIndex), it[0])
 
-template mergeBranches(existing: Digest, newData: array[32, byte], res: var Digest) =
+template mergeBranches(
+    existing: Digest, newData: array[32, byte], res: var Digest) =
   trs "MERGING BRANCHES ARRAY"
   digest(existing.data, newData, res)
 
@@ -725,11 +726,12 @@ func chunkedHashTreeRoot[T](
     chunkedHashTreeRoot(merkleizer, arr, 0, arr.len, res)
 
 func bitListHashTreeRoot(
-    merkleizer: var SszMerkleizer2, x: openArray[byte],
-    chunks: Slice[Limit], res: var Digest) =
+    height: Limit | static Limit, x: openArray[byte],
+    chunks: Slice[Limit], topLayer: int, res: var Digest) =
   # TODO: Switch to a simpler BitList representation and
   #       replace this with `chunkedHashTreeRoot`
   var
+    merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
     totalBytes = x.len
     lastCorrectedByte = x[^1]
 
@@ -776,15 +778,9 @@ func bitListHashTreeRoot(
   getFinalHash(merkleizer, res)
 
 func bitListHashTreeRoot(
-    merkleizer: var SszMerkleizer2, x: BitSeq,
-    chunks: Slice[Limit], res: var Digest) =
-  bitListHashTreeRoot(merkleizer, bytes(x), chunks, res)
-
-template bitListHashTreeRoot(
-    height: Limit | static Limit, x: BitSeq | openArray[byte],
+    height: Limit | static Limit, x: BitSeq,
     chunks: Slice[Limit], topLayer: int, res: var Digest) =
-  var merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
-  bitListHashTreeRoot(merkleizer, x, chunks, res)
+  bitListHashTreeRoot(height, bytes(x), chunks, topLayer, res)
 
 template bitListHashTreeRoot(
     height: Limit | static Limit, x: BitSeq | openArray[byte], res: var Digest) =
@@ -842,25 +838,15 @@ func progressiveChunkedHashTreeRoot[T](x: seq[T], res: var Digest) =
     mergeBranches(contentsHash, res, res)
 
 func chunkedBitListHashTreeRoot(
-    atBottom: var bool, merkleizer: var SszMerkleizer2, x: openArray[byte],
-    chunks: Slice[Limit], res: var Digest) =
-  if atBottom:
-    bitListHashTreeRoot(merkleizer, x, chunks, res)
-    atBottom = false
-  else:
-    let
-      firstIdx = chunks.a * 32
-      numFromFirst = min((chunks.b - chunks.a + 1) * 32, x.len - firstIdx)
-    chunkedHashTreeRoot(merkleizer, x, firstIdx, numFromFirst, res)
-
-template chunkedBitListHashTreeRoot(
     atBottom: var bool, height: Limit, x: openArray[byte],
     chunks: Slice[Limit], topLayer: int, res: var Digest) =
   if x.len <= chunks.a * 32:
     res = zeroHashes[height - 1 - topLayer]
+  elif atBottom:
+    bitListHashTreeRoot(height, x, chunks, topLayer, res)
   else:
-    var merkleizer = createMerkleizer2(height, topLayer, internalParam = true)
-    atBottom.chunkedBitListHashTreeRoot(merkleizer, x, chunks, res)
+    chunkedHashTreeRoot(height, x, chunks, topLayer, res)
+  atBottom = false
 
 template chunkedBitListHashTreeRoot(
     atBottom: var bool, height: Limit, x: openArray[byte], res: var Digest) =
