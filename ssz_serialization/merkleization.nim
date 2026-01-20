@@ -1134,7 +1134,7 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
     static: doAssert T.isProgressiveContainer
     const
       fieldNames = T.allFieldNames
-      totalChunkCount = fieldNames.len
+      totalChunkCount = fieldNames.len.Limit
   var j = slice.b
   when T isnot HashSeq:
     let index = indexAt(j)
@@ -1238,7 +1238,7 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
           else:
             let (chunk, slice) = ? subSliceForChunk(
               batch, i .. j, atLayer, chunkLayer,
-              totalChunkCount - firstIdx.int)
+              (totalChunkCount - firstIdx).int)
             when T is seq|HashSeq:
               ? hash_tree_root_multi(
                 x[firstIdx + chunk], batch, slice, atLayer + chunkLayer)
