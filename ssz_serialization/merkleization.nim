@@ -95,10 +95,11 @@ func subSliceForChunk(
     chunkLayer: int, numUsedChunks: int
 ): Result[(tuple[chunk: int, slice: Slice[int]]), string] =
   let
+    firstChunkIndex = 1.GeneralizedIndex shl chunkLayer
     index = indexAt(slice.a)
     indexLayer = log2trunc(index)
     chunk = index shr (indexLayer - chunkLayer)
-  if chunk >= numUsedChunks.GeneralizedIndex:
+  if chunk - firstChunkIndex >= numUsedChunks.GeneralizedIndex:
     return err unsupportedIndexString
 
   var after = slice.a + 1
@@ -111,7 +112,7 @@ func subSliceForChunk(
     if index shr (indexLayer - chunkLayer) != chunk:
       break
     inc after
-  ok (chunk: chunk.int, slice: slice.a ..< after)
+  ok (chunk: (chunk - firstChunkIndex).int, slice: slice.a ..< after)
 
 const
   zero64 = default array[64, byte]
@@ -1236,7 +1237,7 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
             return unsupportedIndex
           else:
             let (chunk, slice) = ? subSliceForChunk(
-              batch, slice, atLayer, chunkLayer, totalChunkCount)
+              batch, i .. j, atLayer, chunkLayer, totalChunkCount - firstIdx)
             when T is seq|HashSeq:
               ? hash_tree_root_multi(
                 x[firstIdx + chunk], batch, slice, atLayer + chunkLayer)
@@ -1403,7 +1404,7 @@ func hashTreeRootAux[T](
             return unsupportedIndex
           else:
             let (chunk, slice) = ? subSliceForChunk(
-              batch, slice, atLayer, chunkLayer, x.len)
+              batch, i .. slice.b, atLayer, chunkLayer, x.len)
             ? hash_tree_root_multi(
               x[chunk], batch, slice, atLayer + chunkLayer)
             i += slice.len
@@ -1443,7 +1444,7 @@ func hashTreeRootAux[T](
             return unsupportedIndex
           else:
             let (chunk, slice) = ? subSliceForChunk(
-              batch, slice, atLayer, chunkLayer, x.len)
+              batch, i .. slice.b, atLayer, chunkLayer, x.len)
             ? hash_tree_root_multi(
               x[chunk], batch, slice, atLayer + chunkLayer)
             i += slice.len
@@ -1568,7 +1569,7 @@ func hashTreeRootAux[T](
           inc i
         else:
           let (chunk, slice) = ? subSliceForChunk(
-            batch, slice, atLayer, chunkLayer, totalChunkCount)
+            batch, i .. slice.b, atLayer, chunkLayer, totalChunkCount)
           fieldNames.multi(
             x, chunk, batch, slice, atLayer + chunkLayer)
           i += slice.len
@@ -1798,7 +1799,7 @@ func hashTreeRootCached(
         return unsupportedIndex
       else:
         let (chunk, slice) = ? subSliceForChunk(
-          batch, slice, atLayer, chunkLayer, x.len)
+          batch, i .. slice.b, atLayer, chunkLayer, x.len)
         ? hash_tree_root_multi(
           x[chunk], batch, slice, atLayer + chunkLayer)
         i += slice.len
@@ -1846,7 +1847,7 @@ func hashTreeRootCached(
           return unsupportedIndex
         else:
           let (chunk, slice) = ? subSliceForChunk(
-            batch, slice, atLayer, chunkLayer, x.len)
+            batch, i .. slice.b, atLayer, chunkLayer, x.len)
           ? hash_tree_root_multi(
             x[chunk], batch, slice, atLayer + chunkLayer)
           i += slice.len
