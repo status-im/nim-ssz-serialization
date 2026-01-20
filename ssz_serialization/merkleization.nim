@@ -72,8 +72,9 @@ template rootAt(i: int): var Digest =
   batch.roots.toOpenArray(0, batch.rootsHigh)[
     batch.loopOrder.toOpenArray(0, batch.loopOrderHigh)[i]]
 
-const unsupportedIndex =
-  err(Result[void, string], "Generalized index not supported.")
+const
+  unsupportedIndexString = "Generalized index not supported."
+  unsupportedIndex = err(Result[void, string], unsupportedIndexString)
 
 template chunkForIndex(chunkIndex: GeneralizedIndex): Limit =
   block:
@@ -89,13 +90,28 @@ template chunksForIndex(index: GeneralizedIndex): Slice[Limit] =
 
     chunkForIndex(chunkIndexLow) .. chunkForIndex(chunkIndexHigh)
 
-template chunkContainingIndex(index: GeneralizedIndex): Limit =
-  block:
-    let
-      numLayersBelowChunks = indexLayer - chunkLayer
-      chunkIndex = index shr numLayersBelowChunks
+func subSliceForChunk(
+    batch: BatchRequest, slice: Slice[int], atLayer: int,
+    chunkLayer: int, numUsedChunks: int
+): Result[(tuple[chunk: int, slice: Slice[int]]), string] =
+  let
+    index = indexAt(slice.a)
+    indexLayer = log2trunc(index)
+    chunk = index shr (indexLayer - chunkLayer)
+  if chunk >= numUsedChunks.GeneralizedIndex:
+    return err unsupportedIndexString
 
-    chunkForIndex(chunkIndex)
+  var after = slice.a + 1
+  while after <= slice.b:
+    let
+      index = indexAt(after)
+      indexLayer = log2trunc(index)
+    if indexLayer <= chunkLayer:
+      break
+    if index shr (indexLayer - chunkLayer) != chunk:
+      break
+    inc after
+  ok (chunk: chunk.int, slice: slice.a ..< after)
 
 const
   zero64 = default array[64, byte]
@@ -1219,27 +1235,15 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
           when alwaysError:
             return unsupportedIndex
           else:
-            let chunk = chunkContainingIndex(index)
-            if firstIdx + chunk >= totalChunkCount:
-              return unsupportedIndex
-            var k = i
-            while k <= j:
-              let
-                index = indexAt(k)
-                indexLayer = log2trunc(index)
-              if indexLayer <= chunkLayer or
-                  chunkContainingIndex(index) != chunk:
-                break
-              inc k
+            let (chunk, slice) = ? subSliceForChunk(
+              batch, slice, atLayer, chunkLayer, totalChunkCount)
             when T is seq|HashSeq:
               ? hash_tree_root_multi(
-                x[firstIdx + chunk], batch, i ..< k,
-                atLayer + chunkLayer)
+                x[firstIdx + chunk], batch, slice, atLayer + chunkLayer)
             else:
               fieldNames.progressiveMulti(
-                depth, x, chunk, batch, i ..< k,
-                atLayer + chunkLayer)
-            i = k
+                depth, x, chunk, batch, slice, atLayer + chunkLayer)
+            i += slice.len
       j = depthSlice.a - 1
     else:
       when T isnot HashSeq:
@@ -1398,20 +1402,11 @@ func hashTreeRootAux[T](
           when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
             return unsupportedIndex
           else:
-            let chunk = chunkContainingIndex(index)
-            if chunk >= x.len: return unsupportedIndex
-            var j = i + 1
-            while j <= slice.b:
-              let
-                index = indexAt(j)
-                indexLayer = log2trunc(index)
-              if indexLayer <= chunkLayer or
-                  chunkContainingIndex(index) != chunk:
-                break
-              inc j
-            ? hash_tree_root_multi(x[chunk], batch, i ..< j,
-                                   atLayer + chunkLayer)
-            i = j
+            let (chunk, slice) = ? subSliceForChunk(
+              batch, slice, atLayer, chunkLayer, x.len)
+            ? hash_tree_root_multi(
+              x[chunk], batch, slice, atLayer + chunkLayer)
+            i += slice.len
   elif T is List:
     const
       totalChunks = maxChunksCount(T, x.maxLen)
@@ -1447,20 +1442,11 @@ func hashTreeRootAux[T](
           when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
             return unsupportedIndex
           else:
-            let chunk = chunkContainingIndex(index)
-            if chunk >= x.len: return unsupportedIndex
-            var j = i + 1
-            while j <= slice.b:
-              let
-                index = indexAt(j)
-                indexLayer = log2trunc(index)
-              if indexLayer <= chunkLayer or
-                  chunkContainingIndex(index) != chunk:
-                break
-              inc j
-            ? hash_tree_root_multi(x[chunk], batch, i ..< j,
-                                   atLayer + chunkLayer)
-            i = j
+            let (chunk, slice) = ? subSliceForChunk(
+              batch, slice, atLayer, chunkLayer, x.len)
+            ? hash_tree_root_multi(
+              x[chunk], batch, slice, atLayer + chunkLayer)
+            i += slice.len
       else: return unsupportedIndex
   elif T.isUnion:
     var i = slice.a
@@ -1564,10 +1550,10 @@ func hashTreeRootAux[T](
       trs "MERKLEIZING FIELDS"
       const
         fieldNames = T.allFieldNames
-        totalChunks = fieldNames.len
-        firstChunkIndex = nextPow2(totalChunks.uint64)
+        totalChunkCount = fieldNames.len
+        firstChunkIndex = nextPow2(totalChunkCount.uint64)
         chunkLayer = log2trunc(firstChunkIndex)
-        treeHeight = binaryTreeHeight(totalChunks)
+        treeHeight = binaryTreeHeight(totalChunkCount)
       var i = slice.a
       while i <= slice.b:
         let
@@ -1581,20 +1567,11 @@ func hashTreeRootAux[T](
           merkleizeFields(treeHeight, x, chunks, indexLayer, rootAt(i))
           inc i
         else:
-          let chunk = chunkContainingIndex(index)
-          var j = i + 1
-          while j <= slice.b:
-            let
-              index = indexAt(j)
-              indexLayer = log2trunc(index)
-            if indexLayer <= chunkLayer or
-                chunkContainingIndex(index) != chunk:
-              break
-            inc j
+          let (chunk, slice) = ? subSliceForChunk(
+            batch, slice, atLayer, chunkLayer, totalChunkCount)
           fieldNames.multi(
-            x, chunk, batch, i ..< j,
-            atLayer + chunkLayer)
-          i = j
+            x, chunk, batch, slice, atLayer + chunkLayer)
+          i += slice.len
   else:
     unsupported T
   ok()
@@ -1820,20 +1797,11 @@ func hashTreeRootCached(
       when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
         return unsupportedIndex
       else:
-        let chunk = chunkContainingIndex(index)
-        if chunk >= x.len: return unsupportedIndex
-        var j = i + 1
-        while j <= slice.b:
-          let
-            index = indexAt(j)
-            indexLayer = log2trunc(index)
-          if indexLayer <= chunkLayer or
-              chunkContainingIndex(index) != chunk:
-            break
-          inc j
-        ? hash_tree_root_multi(x[chunk], batch, i ..< j,
-                               atLayer + chunkLayer)
-        i = j
+        let (chunk, slice) = ? subSliceForChunk(
+          batch, slice, atLayer, chunkLayer, x.len)
+        ? hash_tree_root_multi(
+          x[chunk], batch, slice, atLayer + chunkLayer)
+        i += slice.len
   ok()
 
 func hashTreeRootCached(
@@ -1877,20 +1845,11 @@ func hashTreeRootCached(
         when (typeof toSszType(declval ElemType(typeof(x)))) is BasicType:
           return unsupportedIndex
         else:
-          let chunk = chunkContainingIndex(index)
-          if chunk >= x.len: return unsupportedIndex
-          var j = i + 1
-          while j <= slice.b:
-            let
-              index = indexAt(j)
-              indexLayer = log2trunc(index)
-            if indexLayer <= chunkLayer or
-                chunkContainingIndex(index) != chunk:
-              break
-            inc j
-          ? hash_tree_root_multi(x[chunk], batch, i ..< j,
-                                 atLayer + chunkLayer)
-          i = j
+          let (chunk, slice) = ? subSliceForChunk(
+            batch, slice, atLayer, chunkLayer, x.len)
+          ? hash_tree_root_multi(
+            x[chunk], batch, slice, atLayer + chunkLayer)
+          i += slice.len
     else: return unsupportedIndex
   ok()
 
