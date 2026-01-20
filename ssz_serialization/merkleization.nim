@@ -51,20 +51,22 @@ template init*[T: BatchRequest](
     loopOrder: makeUncheckedArray loopOrderParam.baseAddr,
     loopOrderHigh: loopOrderParam.high)
 
+func moveToLayer(index: GeneralizedIndex, atLayer: int): GeneralizedIndex =
+  if atLayer != 0:
+    let n = leadingZeros(index) + 1 + atLayer
+    if n < 64:
+      let x = ((index shl n) or 1.GeneralizedIndex).GeneralizedIndex
+      rotateRight(x, n)
+    else:  # `index shl 64` doesn't shift and silently becomes a noop
+      doAssert n == 64
+      1.GeneralizedIndex
+  else:
+    index
+
 template indexAt(i: int): GeneralizedIndex =
-  block:
-    let v = batch.indices.toOpenArray(0, batch.indicesHigh)[
-      batch.loopOrder.toOpenArray(0, batch.loopOrderHigh)[i]]
-    if atLayer != 0:
-      let n = leadingZeros(v) + 1 + atLayer
-      if n < 64:
-        let x = ((v shl n) or 1.GeneralizedIndex).GeneralizedIndex
-        rotateRight(x, n)
-      else:  # `v shl 64` doesn't shift and silently becomes a noop
-        doAssert n == 64
-        1.GeneralizedIndex
-    else:
-      v
+  batch.indices.toOpenArray(0, batch.indicesHigh)[
+    batch.loopOrder.toOpenArray(0, batch.loopOrderHigh)[i]]
+      .moveToLayer(atLayer)
 
 template rootAt(i: int): var Digest =
   batch.roots.toOpenArray(0, batch.rootsHigh)[
