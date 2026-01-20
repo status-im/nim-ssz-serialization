@@ -2019,7 +2019,7 @@ func merkleizationCmp(x, y: GeneralizedIndex): int =
   else:
     1
 
-func sortForMerkleization(sortOrder: var seq[int], indices: auto) =
+func sortForMerkleization(sortOrder: var openArray[int], indices: auto) =
   sortOrder.sort do (x, y: auto) -> int:
     merkleizationCmp(indices[x], indices[y])
 
