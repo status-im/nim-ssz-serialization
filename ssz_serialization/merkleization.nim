@@ -1237,7 +1237,8 @@ func progressive_hash_tree_root_multi[T: BitSeq|seq|HashSeq|object|tuple](
             return unsupportedIndex
           else:
             let (chunk, slice) = ? subSliceForChunk(
-              batch, i .. j, atLayer, chunkLayer, totalChunkCount - firstIdx)
+              batch, i .. j, atLayer, chunkLayer,
+              totalChunkCount - firstIdx.int)
             when T is seq|HashSeq:
               ? hash_tree_root_multi(
                 x[firstIdx + chunk], batch, slice, atLayer + chunkLayer)
