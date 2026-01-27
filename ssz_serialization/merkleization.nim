@@ -1417,7 +1417,7 @@ func hashTreeRootAux[T](
       else:
         let numUsedChunks = T.maxChunksCount(x.len)
         batch.fulfill(
-          first, atLayer, needTopRoot, height.int, numUsedChunks,
+          first, atLayer, needTopRoot, height, numUsedChunks.int,
           getTopDataRoot, getNestedDataRoot)
 
     batch.fulfill(
