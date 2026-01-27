@@ -8,7 +8,7 @@
 {.used.}
 
 import
-  std/[random, strutils, tables],
+  std/[random, sets, strutils, tables],
   results,
   unittest2,
   stew/endians2,
@@ -1976,18 +1976,77 @@ suite "Merkleization types":
       hash_tree_root(x, i).isErr
 
   test "Multiproof (invalid indices)":
-    let i = [1.GeneralizedIndex, 2, 3]
+    let i = [1.GeneralizedIndex, 2, 3, 3]
     var roots {.noinit.}: array[i.len, Digest]
     check:
       hash_tree_root(x, i, roots).isErr
       hash_tree_root(x, i).isErr
 
   test "Multiproof (invalid indices - static)":
-    const i = [1.GeneralizedIndex, 2, 3]
+    const i = [1.GeneralizedIndex, 2, 3, 3]
     var roots {.noinit.}: array[i.len, Digest]
     check:
       hash_tree_root(x, i, roots).isErr
       hash_tree_root(x, i).isErr
+
+  test "Multiproof (overlapped)":
+    let tests = [
+      @[0b10001000.GeneralizedIndex, 0b100010000],
+      @[0b10001000.GeneralizedIndex, 0b100010001],
+      @[0b10001000.GeneralizedIndex, 0b100010000, 0b100010001],
+      @[0b10001001.GeneralizedIndex, 0b100010010],
+      @[0b10001001.GeneralizedIndex, 0b100010011],
+      @[0b100010000.GeneralizedIndex, 0b100010010],
+      @[0b1000100.GeneralizedIndex, 0b10001000, 0b100010000],
+      @[0b101100010.GeneralizedIndex, 0b10110001],
+      @[0b1011110101101101.GeneralizedIndex, 0b10111101],
+      @[0b10111101011010000001001010011100.GeneralizedIndex, 0b10111],
+      @[0b1.GeneralizedIndex, 0b10111110000],
+      @[0b1100000101010.GeneralizedIndex, 0b11],
+      @[0b110.GeneralizedIndex, 0b11000100],
+      @[0b10111101011010000.GeneralizedIndex, 0b101111010110100000010011],
+      @[0b101111010110100000010000100100.GeneralizedIndex, 0b110001001,
+        0b1100000101, 0b1100000101001, 0b110000, 0b101110100100101,
+        0b101111010110011],
+    ]
+    for i in tests:
+      checkpoint $i.mapIt(toBin(it.int64))
+      let r = i.mapIt(roots.getOrDefault(it.int64))
+      var roots =
+        when (NimMajor, NimMinor) < (2, 2):
+          newSeq[Digest](i.len)
+        else:
+          newSeqUninit[Digest](i.len)
+      for x in roots.mitems:
+        x.data[0] = 0xba
+        x.data[1] = 0xad
+      hash_tree_root(x, i, roots).get
+      check:
+        roots == r
+        hash_tree_root(x, i).get == roots
+
+  test "Multiproof (overlapped - random)":
+    randomize()
+    const numRandomTests = 1 shl 13
+    let allIndices = roots.keys.toSeq
+    for _ in 0 ..< numRandomTests:
+      var i: seq[GeneralizedIndex] = block:
+        var i: HashSet[GeneralizedIndex]
+        let numIndices = rand(1 .. (allIndices.len + 1) div 2)
+        for _ in 0 ..< numIndices:
+          i.incl sample(allIndices).GeneralizedIndex
+        i.toSeq
+      checkpoint $i.mapIt(toBin(it.int64))
+      let r = i.mapIt(roots.getOrDefault(it.int64))
+      var roots =
+        when (NimMajor, NimMinor) < (2, 2):
+          newSeq[Digest](i.len)
+        else:
+          newSeqUninit[Digest](i.len)
+      hash_tree_root(x, i, roots).get
+      check:
+        roots == r
+        hash_tree_root(x, i).get == roots
 
 type
   InnerA = object
