@@ -1960,7 +1960,7 @@ func hashTreeRootCached(
     let height = (depth shl 1) + 1
     chunkedHashTreeRoot(
       height, x.progressiveRange(firstIdx),
-      chunk .. chunk, height - 1, res)
+      chunk .. chunk, height.int - 1, res)
 
   func getNestedDataRoot(
       chunk: Limit, firstIdx: Limit, depth: Limit, atBottom: bool,
