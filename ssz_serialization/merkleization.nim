@@ -1211,7 +1211,7 @@ func fulfill(
               chunk.getTopRoot(depth, outChunk)
             inc chunk
           i += (? subChunk.getNestedRoot(
-            depth, batch, i, atLayer + chunkLayer, needTopRoot = true))
+            depth, batch, i, atLayer + chunkLayer.int, needTopRoot = true))
           merkleizer.addChunkDirect:
             assign(outChunk, batch.topRoot)
           inc chunk
