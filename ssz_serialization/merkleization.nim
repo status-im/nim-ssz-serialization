@@ -1277,7 +1277,7 @@ func fulfill(
           if subChunk >= totalChunkCount:
             return err()
           i += (? subChunk.getNestedRoot(
-            depth, batch, i, atLayer + chunkLayer, needTopRoot = true))
+            depth, batch, i, atLayer + chunkLayer.int, needTopRoot = true))
           if not needTopRoot:
             assign(rootAt(i), batch.topRoot)
             inc i
@@ -1287,7 +1287,7 @@ func fulfill(
       if subChunk >= totalChunkCount:
         return err()
       i += (? subChunk.getNestedRoot(
-        depth, batch, i, atLayer + chunkLayer))
+        depth, batch, i, atLayer + chunkLayer.int))
   ok(i - first)
 
 type
