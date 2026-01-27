@@ -1453,7 +1453,7 @@ func hashTreeRootAux[T](
             batch, first, atLayer, needTopRoot)
 
       batch.fulfill(
-        first, atLayer, needTopRoot, height, numUsedChunks,
+        first, atLayer, needTopRoot, height, numUsedChunks.int,
         getTopRoot, getNestedRoot)
   elif T is List:
     type E = typeof toSszType(declval ElemType(T))
@@ -1491,7 +1491,7 @@ func hashTreeRootAux[T](
       else:
         let numUsedChunks = E.totalChunkCount(x.len)
         batch.fulfill(
-          first, atLayer, needTopRoot, height, numUsedChunks,
+          first, atLayer, needTopRoot, height, numUsedChunks.int,
           getTopDataRoot, getNestedDataRoot)
 
     batch.fulfill(
@@ -1539,7 +1539,7 @@ func hashTreeRootAux[T](
       err()
 
     batch.fulfillProgressive(
-      first, atLayer, needTopRoot, totalUsedChunks,
+      first, atLayer, needTopRoot, totalUsedChunks.int,
       getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot)
   elif T is seq:
     type E = typeof toSszType(declval ElemType(T))
@@ -1575,7 +1575,7 @@ func hashTreeRootAux[T](
           batch, first, atLayer, needTopRoot)
 
     batch.fulfillProgressive(
-      first, atLayer, needTopRoot, totalUsedChunks,
+      first, atLayer, needTopRoot, totalUsedChunks.int,
       getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot)
   elif T.isUnion:
     func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1880,7 +1880,7 @@ func hashTreeRootCached(
         batch, first, atLayer, needTopRoot)
 
   assign(result, batch.fulfill(
-    first, atLayer, needTopRoot = false, height, numUsedChunks,
+    first, atLayer, needTopRoot = false, height, numUsedChunks.int,
     getTopRoot, getNestedRoot))
   if needTopRoot and result.isOk:
     batch.topRoot = x.hashTreeRootCached()
@@ -1925,7 +1925,7 @@ func hashTreeRootCached(
     else:
       let numUsedChunks = E.totalChunkCount(x.len)
       batch.fulfill(
-        first, atLayer, needTopRoot, height, numUsedChunks,
+        first, atLayer, needTopRoot, height, numUsedChunks.int,
         getTopDataRoot, getNestedDataRoot)
 
   assign(result, batch.fulfill(
@@ -1973,7 +1973,7 @@ func hashTreeRootCached(
         batch, first, atLayer, needTopRoot)
 
   assign(result, batch.fulfillProgressive(
-    first, atLayer, needTopRoot = false, totalUsedChunks,
+    first, atLayer, needTopRoot = false, totalUsedChunks.int,
     getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot))
   if needTopRoot and result.isOk:
     batch.topRoot = x.hashTreeRootCached()
