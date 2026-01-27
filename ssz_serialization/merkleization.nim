@@ -1462,7 +1462,7 @@ func hashTreeRootAux[T](
     func getTopDataRoot(chunk: Limit, depth: int, res: var Digest) =
       when E is BasicType:
         chunkedHashTreeRoot(
-          height, asSeq x, chunk .. chunk, height - 1, res)
+          height, asSeq x, chunk .. chunk, height.int - 1, res)
       else:
         x[chunk].hash_tree_root(res)
 
@@ -1491,7 +1491,7 @@ func hashTreeRootAux[T](
       else:
         let numUsedChunks = E.totalChunkCount(x.len)
         batch.fulfill(
-          first, atLayer, needTopRoot, height, numUsedChunks.int,
+          first, atLayer, needTopRoot, height.int, numUsedChunks.int,
           getTopDataRoot, getNestedDataRoot)
 
     batch.fulfill(
