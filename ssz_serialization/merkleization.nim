@@ -1352,7 +1352,7 @@ func fulfillProgressive(
         height = (depth shl 1) + 1
         numUsedChunks = min((firstIdx shl 2) or 1, totalUsedChunks) - firstIdx
       batch.fulfill(
-        first, atLayer, needTopRoot, height.Limit, numUsedChunks,
+        first, atLayer, needTopRoot, height.Limit, numUsedChunks.int,
         getTopDataRootWrapper, getNestedDataRootWrapper, depth)
     elif depth == afterDepth - 1:
       err()
