@@ -1526,11 +1526,11 @@ func hashTreeRootAux[T](
       if atBottom and hasPartialChunks:
         bitListHashTreeRoot(
           height, x.progressiveRange(firstIdx, hasPartialChunks),
-          chunk .. chunk, height - 1, res)
+          chunk .. chunk, height.int - 1, res)
       else:
         chunkedHashTreeRoot(
           height, x.progressiveRange(firstIdx, hasPartialChunks),
-          chunk .. chunk, height - 1, res)
+          chunk .. chunk, height.int - 1, res)
 
     func getNestedDataRoot(
         chunk: Limit, firstIdx: Limit, depth: Limit, atBottom: bool,
