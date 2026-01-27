@@ -1394,7 +1394,7 @@ func hashTreeRootAux[T](
 
     func getTopDataRoot(chunk: Limit, depth: int, res: var Digest) =
       bitListHashTreeRoot(
-        height, BitSeq x, chunk .. chunk, height - 1, res)
+        height, BitSeq x, chunk .. chunk, height.int - 1, res)
 
     func getNestedDataRoot(
         chunk: Limit, depth: int,
@@ -1417,7 +1417,7 @@ func hashTreeRootAux[T](
       else:
         let numUsedChunks = T.maxChunksCount(x.len)
         batch.fulfill(
-          first, atLayer, needTopRoot, height, numUsedChunks,
+          first, atLayer, needTopRoot, height.int, numUsedChunks,
           getTopDataRoot, getNestedDataRoot)
 
     batch.fulfill(
