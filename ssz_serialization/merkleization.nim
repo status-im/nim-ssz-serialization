@@ -99,7 +99,7 @@ template rootAt(i: int): var Digest =
   batch.roots.toOpenArray(0, batch.rootsHigh)[infoAt(i) shr 8]
 
 template shouldSkip(i: int): bool =
-  i == 0 or ((infoAt(i) and 0x80) != 0)
+  (i == 0) or ((infoAt(i) and 0x80) != 0)
 
 template shouldStop(): bool =
   (stem != topStem) or (index == 1.GeneralizedIndex)
@@ -318,14 +318,8 @@ func addChunk*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
 template isOdd(x: SomeNumber): bool =
   (x and 1) != 0
 
-type OnChunkAdded[height: static[Limit]] =
-  proc (
-    merkleizer: var SszMerkleizer2[height],
-    data: openArray[byte]) {.noSideEffect.}
-
 func doAddChunks[height: static[Limit]](
-    merkleizer: var SszMerkleizer2[height], data: openArray[byte],
-    onChunkAdded: OnChunkAdded[height] = nil) =
+    merkleizer: var SszMerkleizer2[height], data: openArray[byte]) =
   doAssert merkleizer.totalChunks == 0
   doAssert merkleizer.limit * bytesPerChunk >= data.len,
     "Adding chunks would exceed merklelizer limit " & $merkleizer.limit
@@ -363,9 +357,6 @@ func doAddChunks[height: static[Limit]](
 
         done += bytesPerChunk * 2
         merkleizer.totalChunks += 2
-
-        if onChunkAdded != nil:
-          onChunkAdded(merkleizer, data)
     else:
       trs "COMPUTING REMAINDER DATA HASH ", remaining
       if remaining > bytesPerChunk:
@@ -373,9 +364,6 @@ func doAddChunks[height: static[Limit]](
         done += bytesPerChunk
 
       merkleizer.addChunk(data.toOpenArray(done, data.high))
-
-      if onChunkAdded != nil:
-        onChunkAdded(merkleizer, data)
       break
 
 func addChunks*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
