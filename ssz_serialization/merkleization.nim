@@ -1625,7 +1625,7 @@ func hashTreeRootAux[T](
         res: var Digest) =
       let height = (depth shl 1) + 1
       fieldNames.progressiveChunks(
-        depth, x, chunk .. chunk, height - 1, res)
+        depth, x, chunk .. chunk, height.int - 1, res)
 
     func getNestedDataRoot(
         chunk: Limit, firstIdx: Limit, depth: Limit, atBottom: bool,
