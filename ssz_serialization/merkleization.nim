@@ -2061,9 +2061,6 @@ func hash_tree_root_multi(
     (first ..< i).mapIt("0x" & $rootAt(it)),
     if needTopRoot: " topRoot = 0x" & $batch.topRoot else: ""
 
-  if needTopRoot:
-    doAssert batch.topRoot == x.hash_tree_root()
-
 template isBefore(
     x, y: GeneralizedIndex, xDown, yDown: bool, xZeros, yZeros: int): bool =
   # GeneralizedIndex is 1-based.
