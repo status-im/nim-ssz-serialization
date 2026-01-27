@@ -1896,7 +1896,7 @@ func hashTreeRootCached(
   func getTopDataRoot(chunk: Limit, depth: int, res: var Digest) =
     when E is BasicType:
       chunkedHashTreeRoot(
-        height, asSeq x, chunk .. chunk, height - 1, res)
+        height, asSeq x, chunk .. chunk, height.int - 1, res)
     else:
       x[chunk].hash_tree_root(res)
 
