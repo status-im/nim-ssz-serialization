@@ -66,7 +66,7 @@ template toLayer(
       (
         stem: x and (mask - 1),
         index: ((x shr 1) or highestBit) shr (n - 1),
-        indexLayer: maxBits - n,
+        indexLayer: maxBits - n
       )
     else:
       (
@@ -1210,10 +1210,8 @@ func fulfill(
             merkleizer.addChunkDirect:
               chunk.getTopRoot(depth, outChunk)
             inc chunk
-          let inc = (? subChunk.getNestedRoot(
+          i += (? subChunk.getNestedRoot(
             depth, batch, i, atLayer + chunkLayer, needTopRoot = true))
-          doAssert (inc > 0) and (inc mod 2 == 0)
-          i += inc
           merkleizer.addChunkDirect:
             assign(outChunk, batch.topRoot)
           inc chunk
@@ -1288,11 +1286,8 @@ func fulfill(
       let subChunk = chunkForIndex(index shr (indexLayer - chunkLayer))
       if subChunk >= totalChunkCount:
         return err()
-      let inc = (? subChunk.getNestedRoot(
+      i += (? subChunk.getNestedRoot(
         depth, batch, i, atLayer + chunkLayer))
-      doAssert (inc > 0) and (inc mod 2 == 0)
-      i += inc
-  doAssert i > first
   ok(i - first)
 
 type
@@ -2102,8 +2097,7 @@ func sortForMerkleization(
     else:
       1
 
-func merkleizationLoopOrder*(
-    indices: openArray[GeneralizedIndex]): seq[int] =
+func merkleizationLoopOrder(indices: openArray[GeneralizedIndex]): seq[int] =
   var sortOrder =
     when (NimMajor, NimMinor) < (2, 2):
       when nimvm:
@@ -2242,7 +2236,7 @@ func hash_tree_root*(
   else:
     let indices = [index]
     var roots {.noinit.}: array[1, Digest]
-    const loopOrder = @[0, 0]
+    let loopOrder = merkleizationLoopOrder(indices)
     var batch = BatchRequest.init(indices, roots, loopOrder)
     let numFulfilled = hash_tree_root_multi(x, addr batch).valueOr:
       return err(unsupportedIndex)
@@ -2260,7 +2254,7 @@ func hash_tree_root*(
   else:
     const indices = [index]
     var roots {.noinit.}: array[1, Digest]
-    const loopOrder = @[0, 0]
+    const loopOrder = merkleizationLoopOrder(indices)
     var batch = BatchRequest.init(indices, roots, loopOrder)
     let numFulfilled = hash_tree_root_multi(x, addr batch).valueOr:
       return err(unsupportedIndex)
