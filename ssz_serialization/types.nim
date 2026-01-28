@@ -609,7 +609,7 @@ func valuesPerChunk*[T](x: typedesc[T]): int {.compileTime.} =
   else:
     1
 
-func totalChunkCount[T](t: typedesc[T], numItems: int): Limit =
+func totalChunkCount*[T](t: typedesc[T], numItems: int): Limit =
   when T.valuesPerChunk != 1:
     (numItems + static(T.valuesPerChunk - 1)) div T.valuesPerChunk
   else:
