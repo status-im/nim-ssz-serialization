@@ -2086,28 +2086,18 @@ func sortForMerkleization(
       1
 
 func merkleizationLoopOrder(indices: openArray[GeneralizedIndex]): seq[int] =
-  var sortOrder =
-    when (NimMajor, NimMinor) < (2, 2):
-      when nimvm:
-        newSeq[int](indices.len * 2)
-      else:
-        newSeqUninitialized[int](indices.len * 2)
-    else:
-      newSeqUninit[int](indices.len * 2)
+  result.setLen(2 * indices.len)
   for i in 0 ..< indices.len:
     # bit 0-6: leading zeroes of the indices entry
     # bit 7:   whether this is first occurrence of the indices entry
     # bit 8+:  index into the indices array
     let info = (i shl 8) or indices[i].leadingZeros()
-    assign(sortOrder[2 * i + 0], info)
-    assign(sortOrder[2 * i + 1], info or 0x80)
+    assign(result[2 * i + 0], info)
+    assign(result[2 * i + 1], info or 0x80)
   when nimvm:
-    sortOrder.sortForMerkleization toSeq(indices)
+    result.sortForMerkleization toSeq(indices)
   else:
-    sortOrder.sortForMerkleization makeUncheckedArray(unsafeAddr indices[0])
-  result.setLen(2 * indices.len)
-  for i in 0 ..< sortOrder.len:
-    assign(result[i], sortOrder[i])
+    result.sortForMerkleization makeUncheckedArray(unsafeAddr indices[0])
 
 func validateIndices(
     indices: openArray[GeneralizedIndex],
