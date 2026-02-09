@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - master
+      - cache-nim
   pull_request:
   workflow_dispatch:
 
