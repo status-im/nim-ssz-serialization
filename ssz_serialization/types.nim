@@ -560,11 +560,19 @@ func resizeHashes[T, I](
     newIndices[i] =
       newIndices[i - 1] + nodesAtLayer(i - 1, depth, leaves)
 
-  # When shrinking, truncate each layer
+  # When resizing, copy each layer (truncating when shrinking)
   for i in 1 ..< max(depth, 1):
-    for j in 0 ..< min(
-        indices[i] - indices[i-1], newIndices[i] - newIndices[i - 1]):
+    let copyLen = min(
+      indices[i] - indices[i-1], newIndices[i] - newIndices[i - 1])
+    for j in 0 ..< copyLen:
       newHashes[newIndices[i - 1] + j] = hashes[indices[i - 1] + j]
+
+    # When shrinking or growing, the last entry at each layer may cover a
+    # subtree that straddles the boundary between retained and changed elements
+    # (removed when shrinking, newly added when growing), making its cached
+    # hash stale - reset it to force recomputation
+    if copyLen > 0:
+      newHashes[newIndices[i - 1] + copyLen - 1] = uninitSentinel
 
   swap(hashes, newHashes)
   indices = newIndices
