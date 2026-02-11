@@ -17,37 +17,62 @@ import
 
 type Foo = object
   x: Digest
+  y: uint64
 
-let foo = Foo(x: Digest(data: array[32, byte].fromHex(
-  "0x4175371111cef0d13cb836c17dba708f026f2ddbf057b91384bb78b1ba42343c")))
+let foo = Foo(
+  x: Digest(data: array[32, byte].fromHex(
+    "0x4175371111cef0d13cb836c17dba708f026f2ddbf057b91384bb78b1ba42343c")),
+  y: 42)
 
-proc checkResize(counts: openArray[int]) =
-  var items: HashList[Foo, 2048]
+proc checkResize(items: var HashList, counts: varargs[int]) =
   for count in counts:
-    try:
-      readSszBytes(SSZ.encode((0 ..< count).mapIt(foo)), items)
-    except SszError:
-      raiseAssert "Valid SSZ"
-    check items.hash_tree_root() == items.data.hash_tree_root()
+    for data in [
+        SSZ.encode((0 ..< count).mapIt(foo)),
+        SSZ.encode((0 ..< count).mapIt(foo) & (0 ..< 4).mapIt(default(Foo)))]:
+      try:
+        readSszBytes(data, items)
+      except SszError:
+        raiseAssert "Valid SSZ"
+      check items.hash_tree_root() == items.data.hash_tree_root()
 
 suite "HashList":
+  setup:
+    var items: HashList[Foo, 8192]
+
   test "Shrink to smaller cache depth":
-    checkResize([1074, 1018])
+    items.checkResize(1074, 1018)
 
   test "Grow to larger cache depth":
-    checkResize([1018, 1074])
+    items.checkResize(1018, 1074)
 
   test "Grow within same cache depth":
-    checkResize([500, 600])
+    items.checkResize(500, 600)
 
   test "Shrink within same cache depth":
-    checkResize([600, 500])
+    items.checkResize(600, 500)
 
   test "Grow from empty":
-    checkResize([0, 100])
+    items.checkResize(0, 100)
 
   test "Shrink to empty":
-    checkResize([100, 0])
+    items.checkResize(100, 0)
 
   test "Multiple resizes in sequence":
-    checkResize([100, 500, 1074, 1018, 200, 2000, 50, 0, 300])
+    items.checkResize(100, 500, 1074, 1018, 200, 2000, 50, 0, 300)
+
+  test "Incremental add":
+    for i in 0 ..< 100:
+      check:
+        items.add(foo)
+        items.hash_tree_root() == items.data.hash_tree_root()
+
+  test "Incremental add across cache depth boundary":
+    items.checkResize(1020)
+    for i in 1020 ..< 1080:
+      check:
+        items.add(foo)
+        items.hash_tree_root() == items.data.hash_tree_root()
+
+  test "Incremental decrease":
+    for i in countdown(1050, 0):
+      items.checkResize(i)
