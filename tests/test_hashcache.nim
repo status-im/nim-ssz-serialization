@@ -21,7 +21,7 @@ type Foo = object
 let foo = Foo(x: Digest(data: array[32, byte].fromHex(
   "0x4175371111cef0d13cb836c17dba708f026f2ddbf057b91384bb78b1ba42343c")))
 
-proc checkResize(items: var HashList[Foo, 8192], counts: varargs[int]) =
+proc checkResize(items: var HashList, counts: varargs[int]) =
   for count in counts:
     try:
       readSszBytes(SSZ.encode((0 ..< count).mapIt(foo)), items)
