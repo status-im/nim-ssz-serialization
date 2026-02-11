@@ -447,13 +447,13 @@ func clearCachesArray[T](
 func clearCaches*(a: var HashArray, dataIdx: auto) =
   a.T.clearCachesArray(a.hashes, a.maxDepth, dataIdx)
 
-func nodesAtLayer*(layer, depth, leaves: int): int =
+func nodesAtLayer(layer, depth, leaves: int): int =
   ## Given a number of leaves, how many nodes do you need at a given layer
   ## in a binary tree structure?
   let leavesPerNode = 1'i64 shl (depth - layer)
   int((leaves + leavesPerNode - 1) div leavesPerNode)
 
-func cacheNodes*(depth, leaves: int): int =
+func cacheNodes(depth, leaves: int): int =
   ## Total number of nodes needed to cache a tree of a given depth with
   ## `leaves` items in it - chunks that are zero-filled have well-known hash
   ## trees and don't need to be stored in the tree.
@@ -533,8 +533,7 @@ func resizeHashes[T, I](
   ## Ensure the hash cache is the correct size for the data in the list - must
   ## be called whenever `data` shrinks or grows.
   let
-    leaves = int(
-      chunkIdx(T, dataLen + dataPerChunk(T) - 1))
+    leaves = int(chunkIdx(T, dataLen + dataPerChunk(T) - 1))
     newSize = 1 + max(cacheNodes(depth, leaves), 1)
 
   # Growing might be because of add(), addDefault(), or in-place reading of a
@@ -557,22 +556,20 @@ func resizeHashes[T, I](
 
   newIndices[0] = nodesAtLayer(0, depth, leaves)
   for i in 1 .. max(depth, 1):
-    newIndices[i] =
-      newIndices[i - 1] + nodesAtLayer(i - 1, depth, leaves)
+    newIndices[i] = newIndices[i - 1] + nodesAtLayer(i - 1, depth, leaves)
 
   # When resizing, copy each layer (truncating when shrinking)
-  for i in 1 ..< max(depth, 1):
-    let copyLen = min(
-      indices[i] - indices[i-1], newIndices[i] - newIndices[i - 1])
-    for j in 0 ..< copyLen:
-      newHashes[newIndices[i - 1] + j] = hashes[indices[i - 1] + j]
+  var didChangeDepth = false
+  for i in countdown(depth - 1, 1):
+    for j in 0 ..< min(
+        indices[i] - indices[i-1], newIndices[i] - newIndices[i - 1]):
+      assign(newHashes[newIndices[i - 1] + j], hashes[indices[i - 1] + j])
 
-    # When shrinking or growing, the last entry at each layer may cover a
-    # subtree that straddles the boundary between retained and changed elements
-    # (removed when shrinking, newly added when growing), making its cached
-    # hash stale - reset it to force recomputation
-    if copyLen > 0:
-      newHashes[newIndices[i - 1] + copyLen - 1] = uninitSentinel
+    # When resizing to a different depth, clear stale hash of last node subtree
+    if didChangeDepth or (newIndices[i] - newIndices[i - 1] == 1 and
+        indices[i] - indices[i - 1] != 1):
+      assign(newHashes[newIndices[i - 1]], uninitSentinel)
+      didChangeDepth = true
 
   swap(hashes, newHashes)
   indices = newIndices
