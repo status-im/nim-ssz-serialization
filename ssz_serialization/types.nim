@@ -533,8 +533,7 @@ func resizeHashes[T, I](
   ## Ensure the hash cache is the correct size for the data in the list - must
   ## be called whenever `data` shrinks or grows.
   let
-    leaves = int(
-      chunkIdx(T, dataLen + dataPerChunk(T) - 1))
+    leaves = int(chunkIdx(T, dataLen + dataPerChunk(T) - 1))
     newSize = 1 + max(cacheNodes(depth, leaves), 1)
 
   # Growing might be because of add(), addDefault(), or in-place reading of a
@@ -557,22 +556,14 @@ func resizeHashes[T, I](
 
   newIndices[0] = nodesAtLayer(0, depth, leaves)
   for i in 1 .. max(depth, 1):
-    newIndices[i] =
-      newIndices[i - 1] + nodesAtLayer(i - 1, depth, leaves)
+    newIndices[i] = newIndices[i - 1] + nodesAtLayer(i - 1, depth, leaves)
 
-  # When resizing, copy each layer (truncating when shrinking)
+  # When resizing, copy each layer (truncating when shrinking).
   for i in 1 ..< max(depth, 1):
     let copyLen = min(
       indices[i] - indices[i-1], newIndices[i] - newIndices[i - 1])
     for j in 0 ..< copyLen:
-      newHashes[newIndices[i - 1] + j] = hashes[indices[i - 1] + j]
-
-    # When shrinking or growing, the last entry at each layer may cover a
-    # subtree that straddles the boundary between retained and changed elements
-    # (removed when shrinking, newly added when growing), making its cached
-    # hash stale - reset it to force recomputation
-    if copyLen > 0:
-      newHashes[newIndices[i - 1] + copyLen - 1] = uninitSentinel
+      assign(newHashes[newIndices[i - 1] + j], hashes[indices[i - 1] + j])
 
   swap(hashes, newHashes)
   indices = newIndices
@@ -653,7 +644,8 @@ func resizeHashes*(a: var HashSeq) =
   let
     totalChunkCount = a.data.totalChunkCount
     (firstIdx, maxDepth) = totalChunkCount.progressiveBottom
-  if a.hashes.len != maxDepth:
+    oldMaxDepth = a.hashes.len
+  if maxDepth != oldMaxDepth:
     clearCache(a.root)
     a.hashes.setLen(maxDepth)
     a.indices.reset()
@@ -667,6 +659,11 @@ func resizeHashes*(a: var HashSeq) =
           a.hashes[depth].setLen(hashesLen)
         else:
           clearCache(a.hashes[depth][0])
+          if maxDepth > oldMaxDepth and
+              oldMaxDepth > 0 and depth == oldMaxDepth - 1:
+            # Convert bottom `HashList` to intermediate `HashArray`
+            a.T.clearCachesArray(
+              a.hashes[depth], max(depth shl 1, 1), maxLen - 1)
       a.hashes[^1].reset()
       let maxLen = a.T.valuesPerChunk.Limit shl ((maxDepth - 1) shl 1)
       a.indices.setLen(a.T.hashListIndicesLen(maxLen))
@@ -788,9 +785,8 @@ template swap*(a, b: var HashList) =
 template swap*(a, b: var HashSeq) =
   swap(a.data, b.data)
   swap(a.root, b.root)
-  swap(a.stemHashes, b.stemHashes)
-  swap(a.bottomHashes, b.bottomHashes)
-  swap(a.bottomIndices, b.bottomIndices)
+  swap(a.hashes, b.hashes)
+  swap(a.indices, b.indices)
 
 template clear*(a: var HashList) =
   if not a.data.setLen(0):

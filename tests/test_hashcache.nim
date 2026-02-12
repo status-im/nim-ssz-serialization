@@ -9,11 +9,11 @@
 {.used.}
 
 import
-  std/sequtils,
+  std/[random, sequtils],
   stew/byteutils,
   unittest2,
   ../ssz_serialization,
-  ../ssz_serialization/[merkleization, types]
+  ../ssz_serialization/merkleization
 
 type Foo = object
   x: Digest
@@ -24,8 +24,11 @@ let foo = Foo(
     "0x4175371111cef0d13cb836c17dba708f026f2ddbf057b91384bb78b1ba42343c")),
   y: 42)
 
-proc checkResize(items: var HashList, counts: varargs[int]) =
+proc checkResize[T](items: var T, counts: varargs[int]) =
   for count in counts:
+    when T is HashList:
+      if count + 4 > int(T.maxLen):
+        continue
     for data in [
         SSZ.encode((0 ..< count).mapIt(foo)),
         SSZ.encode((0 ..< count).mapIt(foo) & (0 ..< 4).mapIt(default(Foo)))]:
@@ -35,9 +38,10 @@ proc checkResize(items: var HashList, counts: varargs[int]) =
         raiseAssert "Valid SSZ"
       check items.hash_tree_root() == items.data.hash_tree_root()
 
-suite "HashList":
+template runHashCacheTests[T](_: typedesc[T]): untyped =
   setup:
-    var items: HashList[Foo, 8192]
+    randomize(42)
+    var items: T
 
   test "Shrink to smaller cache depth":
     items.checkResize(1074, 1018)
@@ -58,21 +62,86 @@ suite "HashList":
     items.checkResize(100, 0)
 
   test "Multiple resizes in sequence":
-    items.checkResize(100, 500, 1074, 1018, 200, 2000, 50, 0, 300)
+    items.checkResize(
+      100, 500, 1074, 1018, 200, 2000, 50, 0, 300, 304, 309, 314)
 
   test "Incremental add":
     for i in 0 ..< 100:
-      check:
+      when items is HashList:
+        check items.add(foo)
+      else:
         items.add(foo)
-        items.hash_tree_root() == items.data.hash_tree_root()
+      check items.hash_tree_root() == items.data.hash_tree_root()
 
   test "Incremental add across cache depth boundary":
     items.checkResize(1020)
     for i in 1020 ..< 1080:
-      check:
+      when items is HashList:
+        check items.add(foo)
+      else:
         items.add(foo)
-        items.hash_tree_root() == items.data.hash_tree_root()
+      check items.hash_tree_root() == items.data.hash_tree_root()
 
   test "Incremental decrease":
     for i in countdown(1050, 0):
       items.checkResize(i)
+
+  test "Progressive depth boundaries":
+    items.checkResize(21844, 340, 20, 84, 1, 340)
+
+  test "Random resize sequence":
+    for _ in 0 ..< 50:
+      let count =
+        when items is HashList:
+          rand(int(items.maxLen) - 4)
+        else:
+          rand(4000)
+      items.checkResize(count)
+
+  test "Random add/resize mix":
+    for _ in 0 ..< 100:
+      let canAdd =
+        when items is HashList:
+          items.data.len < int(items.maxLen)
+        else:
+          true
+      if canAdd and rand(1) == 0:
+        when items is HashList:
+          check items.add(foo)
+        else:
+          items.add(foo)
+        check items.hash_tree_root() == items.data.hash_tree_root()
+      else:
+        let count =
+          when items is HashList:
+            rand(int(items.maxLen) - 4)
+          else:
+            rand(4000)
+        items.checkResize(count)
+
+suite "HashList":
+  runHashCacheTests(HashList[Foo, 8192])
+
+suite "HashSeq":
+  runHashCacheTests(HashSeq[Foo])
+
+suite "Cache layout equivalence (for HashSeq)":
+  template checkEquivalence(maxLen: static Limit) =
+    test $maxLen:
+      var
+        ha: HashArray[maxLen, Foo]
+        hl: HashList[Foo, maxLen]
+      for i in 0 ..< int(maxLen):
+        ha.data[i] = foo
+        check hl.add(foo)
+      discard ha.hash_tree_root()
+      discard hl.hash_tree_root()
+      check hl.hashes.len == ha.hashes.len
+      for i in 1 ..< hl.hashes.len:
+        check hl.hashes[i] == ha.hashes[i]
+
+  checkEquivalence(1)
+  checkEquivalence(4)
+  checkEquivalence(16)
+  checkEquivalence(64)
+  checkEquivalence(256)
