@@ -185,6 +185,8 @@ proc readSszValue*[T](
     type E = typeof toSszType(declval ElemType(typeof val))
     when val is HashList|HashSeq:
       template v: untyped = val.data
+      when not supportsBulkCopy(type v[0]):
+        let oldDataLen = v.len
     else:
       template v: untyped = val
 
@@ -225,9 +227,8 @@ proc readSszValue*[T](
 
         when val is HashList|HashSeq:
           # Unconditionally trigger small, O(1) updates to handle when the list
-          # shrinks without otherwise changing.
-          val.clearCaches(0)
-          val.clearCaches(max(val.len - 1, 0))
+          # resizes without otherwise changing.
+          val.clearCaches(max(min(val.len, oldDataLen) - 1, 0))
 
     else:
       if input.len == 0:
@@ -275,9 +276,8 @@ proc readSszValue*[T](
 
       when val is HashList|HashSeq:
         # Unconditionally trigger small, O(1) updates to handle when the list
-        # shrinks without otherwise changing.
-        val.clearCaches(0)
-        val.clearCaches(max(val.len - 1, 0))
+        # resizes without otherwise changing.
+        val.clearCaches(max(min(val.len, oldDataLen) - 1, 0))
 
   elif val is BitArray:
     if sizeof(val) != input.len:
