@@ -663,7 +663,7 @@ func resizeHashes*(a: var HashSeq) =
               oldMaxDepth > 0 and depth == oldMaxDepth - 1:
             # Convert bottom `HashList` to intermediate `HashArray`
             a.T.clearCachesArray(
-              a.hashes[depth], max(depth shl 1, 1), maxLen - 1)
+              a.hashes[depth], max(depth.int shl 1, 1), maxLen - 1)
       a.hashes[^1].reset()
       let maxLen = a.T.valuesPerChunk.Limit shl ((maxDepth - 1) shl 1)
       a.indices.setLen(a.T.hashListIndicesLen(maxLen))
