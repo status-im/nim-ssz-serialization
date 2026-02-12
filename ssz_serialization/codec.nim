@@ -228,9 +228,7 @@ proc readSszValue*[T](
         when val is HashList|HashSeq:
           # Unconditionally trigger small, O(1) updates to handle when the list
           # resizes without otherwise changing.
-          if oldDataLen > 0 and val.len > oldDataLen + 1:
-            val.clearCaches(oldDataLen - 1)
-          val.clearCaches(max(val.len - 1, 0))
+          val.clearCaches(max(min(val.len, oldDataLen) - 1, 0))
 
     else:
       if input.len == 0:
@@ -279,9 +277,7 @@ proc readSszValue*[T](
       when val is HashList|HashSeq:
         # Unconditionally trigger small, O(1) updates to handle when the list
         # resizes without otherwise changing.
-        if oldDataLen > 0 and val.len > oldDataLen + 1:
-          val.clearCaches(oldDataLen - 1)
-        val.clearCaches(max(val.len - 1, 0))
+        val.clearCaches(max(min(val.len, oldDataLen) - 1, 0))
 
   elif val is BitArray:
     if sizeof(val) != input.len:
