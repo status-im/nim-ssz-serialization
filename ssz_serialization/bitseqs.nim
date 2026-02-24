@@ -294,6 +294,14 @@ func countZeros*(x: BitSeq): int =
 template bytes*(x: BitSeq): untyped =
   seq[byte](x)
 
+iterator items*(x: BitSeq): bool =
+  for i in 0 ..< x.len:
+    yield x[i]
+
+iterator pairs*(x: BitSeq): (int, bool) =
+  for i in 0 ..< x.len:
+    yield (i, x[i])
+
 iterator items*(x: BitArray): bool =
   for i in 0..<x.bits:
     yield x[i]
