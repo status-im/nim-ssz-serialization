@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2023 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -15,12 +15,22 @@ import
 
 export digest, merkleization
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/specs/altair/sync-protocol.md#get_subtree_index
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/specs/altair/light-client/sync-protocol.md#get_subtree_index
 func get_subtree_index*(idx: GeneralizedIndex): uint64 =
   doAssert idx > 0
   uint64(idx mod (type(idx)(1) shl log2trunc(idx)))
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#generalized_index_sibling
+# https://github.com/ethereum/consensus-specs/blob/v1.6.0-alpha.4/ssz/merkle-proofs.md#concat_generalized_indices
+func concat_generalized_indices*(
+    indices: varargs[GeneralizedIndex]): GeneralizedIndex =
+  ## Given generalized indices i1 for A -> B, i2 for B -> C .... i_n for Y -> Z,
+  ## returns the generalized index for A -> Z.
+  result = 1.GeneralizedIndex
+  for i in indices:
+    let depth = log2trunc(i)
+    result = (result shl depth) + i - (1.GeneralizedIndex shl depth)
+
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#generalized_index_sibling
 template generalized_index_sibling*(
     index: GeneralizedIndex): GeneralizedIndex =
   index xor 1.GeneralizedIndex
@@ -33,12 +43,12 @@ template generalized_index_sibling_right(
     index: GeneralizedIndex): GeneralizedIndex =
   index or 1.GeneralizedIndex
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#generalized_index_parent
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#generalized_index_parent
 template generalized_index_parent*(
     index: GeneralizedIndex): GeneralizedIndex =
   index shr 1
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 iterator get_branch_indices*(
     tree_index: GeneralizedIndex): GeneralizedIndex =
   ## Get the generalized indices of the sister chunks along the path
@@ -48,7 +58,7 @@ iterator get_branch_indices*(
     yield generalized_index_sibling(index)
     index = generalized_index_parent(index)
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 iterator get_path_indices*(
     tree_index: GeneralizedIndex): GeneralizedIndex =
   ## Get the generalized indices of the chunks along the path
@@ -58,7 +68,7 @@ iterator get_path_indices*(
     yield index
     index = generalized_index_parent(index)
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 func get_helper_indices*(
     indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
   ## Get the generalized indices of all "extra" chunks in the tree needed
@@ -79,7 +89,7 @@ func get_helper_indices*(
   res.sort(SortOrder.Descending)
   res
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 func check_multiproof_acceptable*(
     indices: varargs[GeneralizedIndex]): Result[void, string] =
   # Check that proof verification won't allocate excessive amounts of memory.
@@ -242,7 +252,7 @@ func calculate_multi_merkle_root*(
   const helper_indices = get_helper_indices(indices)
   calculate_multi_merkle_root_impl(leaves, proof, indices, helper_indices)
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/ssz/merkle-proofs.md#merkle-multiproofs
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 func verify_merkle_multiproof*(
     leaves: openArray[Digest],
     proof: openArray[Digest],
@@ -272,7 +282,7 @@ func verify_merkle_multiproof*(
   if calc.isErr: return false
   calc.get == root
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/tests/core/pyspec/eth2spec/test/helpers/merkle.py#L4-L21
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/tests/core/pyspec/eth_consensus_specs/test/helpers/merkle.py#L4-L21
 func build_proof*(
     anchor: auto,
     indices: openArray[GeneralizedIndex],
@@ -362,7 +372,7 @@ func build_proof*(
     const helper_indices = get_helper_indices(index)
     hash_tree_root(anchor, helper_indices)
 
-# https://github.com/ethereum/consensus-specs/blob/v1.1.6/specs/phase0/beacon-chain.md#is_valid_merkle_branch
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/specs/phase0/beacon-chain.md#is_valid_merkle_branch
 func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
                              depth: int, index: uint64,
                              root: Digest): bool =

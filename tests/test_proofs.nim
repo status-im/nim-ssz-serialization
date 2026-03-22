@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018, 2021 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -14,6 +14,28 @@ import
   ../ssz_serialization/proofs
 
 suite "Merkle proofs":
+  test "concat_generalized_indices":
+    template checkConcat(indices_int: openArray[int], expected: int) =
+      check concat_generalized_indices(
+        indices_int.mapIt(it.GeneralizedIndex)) == expected.GeneralizedIndex
+
+    checkConcat(newSeq[int](), 0b1)
+
+    checkConcat([0b1, 0b1], 0b1)
+    checkConcat([0b1, 0b1_0], 0b1_0)
+    checkConcat([0b1, 0b1_1], 0b1_1)
+    checkConcat([0b1, 0b1_111], 0b1_111)
+
+    checkConcat([0b1_0, 0b1_1], 0b1_0_1)
+    checkConcat([0b1_1, 0b1_0], 0b1_1_0)
+    checkConcat([0b1_00, 0b1_1], 0b1_00_1)
+    checkConcat([0b1_000, 0b1_01], 0b1_000_01)
+
+    checkConcat([0b1_0, 0b1_0, 0b1_1], 0b1_0_0_1)
+    checkConcat([0b1, 0b1_00, 0b1_1], 0b1_00_1)
+
+    checkConcat([0b1_01010], 0b1_01010)
+
   test "get_branch_indices":
     check:
       toSeq(get_branch_indices(1.GeneralizedIndex)) == []
