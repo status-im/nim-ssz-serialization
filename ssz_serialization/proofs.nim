@@ -8,10 +8,11 @@
 {.push raises: [].}
 
 import
-  std/[algorithm, math, sequtils, sets, tables],
+  std/[algorithm, macros, math, sequtils, sets, tables],
+  stew/[bitops2, objects],
   results,
-  stew/[bitops2],
-  "."/[digest, merkleization]
+  serialization/case_objects,
+  "."/[codec, digest, merkleization]
 
 export digest, merkleization
 
@@ -415,6 +416,50 @@ func progressiveIndexForChunk*(chunkIdx: Limit): GeneralizedIndex =
     chunkIdx -= numChunks
     depth += 2
 
+macro unionMemberType*(T: typedesc, selector: static int): untyped =
+  # Resolve the field type for a given selector value in a union.
+  # The AST has OfBranch nodes with DotExpr enum values.
+  let typeImpl = T.getType[1].getImpl
+  let recList = typeImpl[2][2]
+  for child in recList:
+    if child.kind == nnkRecCase:
+      let enumType = child[0][1]  # discriminator's type sym
+      let enumImpl = enumType.getImpl
+      # Build a map from enum field name to ordinal value
+      var enumValues: seq[(string, int)]
+      for entry in enumImpl[2]:  # enumTy children
+        if entry.kind == nnkEnumFieldDef:
+          enumValues.add(($entry[0], entry[1].intVal.int))
+        elif entry.kind == nnkSym:
+          enumValues.add(($entry, enumValues.len))
+      # Find which branch contains the selector value
+      for i in 1 ..< child.len:
+        let branch = child[i]
+        if branch.kind == nnkOfBranch:
+          for j in 0 ..< branch.len - 1:
+            let val = branch[j]
+            var ordVal = -1
+            if val.kind == nnkDotExpr:
+              let name = $val[1]
+              for (n, v) in enumValues:
+                if n == name:
+                  ordVal = v
+                  break
+            elif val.kind in {nnkIntLit, nnkCharLit}:
+              ordVal = val.intVal.int
+            if ordVal == selector:
+              let body = branch[^1]
+              let field =
+                if body.kind == nnkRecList and body.len > 0:
+                  if body[0].kind == nnkIdentDefs: body[0][0]
+                  else: body[0]
+                elif body.kind == nnkIdentDefs: body[0]
+                else: continue
+              return newCall(
+                bindSym"type",
+                newDotExpr(newCall(bindSym"declval", T), field))
+  error("Selector " & $selector & " not found in " & $T, T)
+
 func get_generalized_index_impl(
     T: typedesc, field: string): Result[GeneralizedIndex, string] =
   when T is bool|char:
@@ -524,3 +569,92 @@ func get_generalized_index_impl(
     err T.indexNotSupported(idx)
   else:
     unsupported T
+
+func get_generalized_index*(
+    T: typedesc, field: string): Result[GeneralizedIndex, string] =
+  mixin toSszType
+  template S: untyped = typeof toSszType(declval T)
+  S.get_generalized_index_impl(field)
+
+# func get_generalized_index*(
+#     T: typedesc, field: static string): GeneralizedIndex =
+#   mixin toSszType
+#   template S: untyped = typeof toSszType(declval T)
+#   const res = S.get_generalized_index_impl(field)
+#   when res.isErr:
+#     {.error: res.error.}
+#   else:
+#     res.unsafeGet
+
+func get_generalized_index*(
+    T: typedesc, idx: Limit): Result[GeneralizedIndex, string] =
+  mixin toSszType
+  template S: untyped = typeof toSszType(declval T)
+  S.get_generalized_index_impl(idx)
+
+func get_generalized_index*(
+    T: typedesc, idx: static string | static Limit): GeneralizedIndex =
+  mixin toSszType
+  template S: untyped = typeof toSszType(declval T)
+  const res = S.get_generalized_index_impl(idx)
+  when res.isErr:
+    {.error: res.error.}
+  else:
+    res.unsafeGet
+
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#ssz-object-to-index
+macro get_generalized_index*(
+    T: typedesc, path: varargs[untyped]): untyped =
+  ## Converts a path (eg. `[7, "foo", 3]` for `x[7].foo[3]`,
+  ## `[12, "bar", "__len__"]` for `len(x[12].bar)`) into the generalized index
+  ## representing its position in the Merkle tree.
+  if path.len == 0:
+    return quote do: 1.GeneralizedIndex
+  if path.len == 1:
+    let p = path[0]
+    case p.kind
+    of nnkStrLit:
+      let field = p.strVal
+      return quote do:
+        get_generalized_index(`T`, `field`)
+    of nnkIntLit:
+      let idx = p.intVal.int
+      return quote do:
+        get_generalized_index(`T`, `idx`)
+    else:
+      error("Path element must be a string or int literal, got: " &
+            $p.kind, p)
+
+  # Multi-step: concat first step with recursive rest
+  let p = path[0]
+  var rest: NimNode
+  case p.kind
+  of nnkStrLit:
+    let
+      fieldName = p.strVal
+      fieldIdent = ident(fieldName)
+      nextType = newCall(
+        bindSym"type",
+        newCall(bindSym"declval", T).newDotExpr(fieldIdent))
+    rest = newCall(bindSym"get_generalized_index", nextType)
+    for i in 1 ..< path.len:
+      rest.add path[i]
+    result = quote do:
+      concat_generalized_indices(
+        get_generalized_index(`T`, `fieldName`), `rest`)
+  of nnkIntLit:
+    let idx = p.intVal.int
+    let nextType = quote do:
+      when `T`.isUnion:
+        unionMemberType(`T`, `idx`)
+      else:
+        ElemType(`T`)
+    rest = newCall(bindSym"get_generalized_index", nextType)
+    for i in 1 ..< path.len:
+      rest.add path[i]
+    result = quote do:
+      concat_generalized_indices(
+        get_generalized_index(`T`, `idx`), `rest`)
+  else:
+    error("Path element must be a string or int literal, got: " &
+          $p.kind, p)

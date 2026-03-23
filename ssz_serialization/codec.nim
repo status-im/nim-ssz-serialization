@@ -98,7 +98,7 @@ template checkForForbiddenBits(ResulType: type,
     if (input[^1] and forbiddenBitsMask) != 0:
       raiseIncorrectSize ResulType
 
-macro doInit[T](
+macro doInit*[T](
     t: typedesc[T], selectorKey: static string, selector: typed): T =
   let selectorId = ident(selectorKey)
   quote do:
