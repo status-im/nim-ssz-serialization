@@ -597,7 +597,7 @@ func clearCaches*(a: var HashSeq, dataIdx: int64) =
 
 func valuesPerChunk*[T](x: typedesc[T]): int {.compileTime.} =
   mixin toSszType
-  type E = typeof toSszType(declval T)
+  template E: untyped = typeof toSszType(declval T)
   when E is BasicType:
     bytesPerChunk div sizeof(E)
   else:
@@ -871,7 +871,7 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
 
   when T is BasicType: sizeof(T)
   elif T is array|HashArray:
-    type E = ElemType(T)
+    template E: untyped = ElemType(T)
     when isFixedSize(E): int(len(T)) * fixedPortionSize(E)
     else: int(len(T)) * offsetSize
   elif T is List:
@@ -895,7 +895,7 @@ func minSize*(T0: type): int {.compileTime.} =
   when isFixedSize(T):
     fixedPortionSize(T)
   elif T is array|HashArray:
-    type E = ElemType(T)
+    template E: untyped = ElemType(T)
     static: doAssert not isFixedSize(E)
     T.len * (offsetSize + minSize(E))
   elif T is List|HashList:
@@ -919,11 +919,11 @@ func maxSize*(T0: type): int {.compileTime.} =
   when isFixedSize(T):
     fixedPortionSize(T)
   elif T is array|HashArray:
-    type E = ElemType(T)
+    template E: untyped = ElemType(T)
     static: doAssert not isFixedSize(E)
     T.len * (offsetSize + maxSize(E))
   elif T is List|HashList:
-    type E = ElemType(T)
+    template E: untyped = ElemType(T)
     when isFixedSize(E):
       T.maxLen * fixedPortionSize(E)
     else:

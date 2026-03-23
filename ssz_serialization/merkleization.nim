@@ -123,6 +123,9 @@ const
   zeroDigest = Digest()
   bitsPerChunk = bytesPerChunk * 8
 
+func bitChunkCount*(maxBits: Limit): Limit =
+  (maxBits + bitsPerChunk - 1) div bitsPerChunk
+
 func binaryTreeHeight*(totalElements: Limit): Limit =
   bitWidth(nextPow2(uint64 totalElements)).Limit
 
@@ -783,7 +786,7 @@ func chunkedHashTreeRoot[T: not BasicType](
     height: Limit | static Limit, arr: openArray[T],
     chunks: Slice[Limit], topLayer: int, res: var Digest) =
   mixin hash_tree_root, toSszType
-  type S = typeof toSszType(declval T)
+  template S: untyped = typeof toSszType(declval T)
   when S is BasicType:
     chunkedHashTreeRoot(
       height, openArray[S](arr), chunks, topLayer, res)
@@ -936,7 +939,7 @@ func progressiveBitListHashTreeRoot(x: BitSeq, res: var Digest) =
   res.reset()
   let
     bitlen = x.len.Limit
-    totalChunkCount = (bitlen + 255) div 256
+    totalChunkCount = bitlen.bitChunkCount
     hasPartialChunks = bitlen.uint.uint8 != 0x00
   var
     (firstIdx, depth) = totalChunkCount.progressiveBottom()
@@ -957,7 +960,7 @@ func mixInActiveFields(root: Digest, T: typedesc, res: var Digest) =
 
 func maxChunksCount(T: type, maxLen: Limit): Limit =
   when T is BitArray|BitList:
-    (maxLen + bitsPerChunk - 1) div bitsPerChunk
+    maxLen.bitChunkCount
   elif T is array|List:
     maxChunkIdx(ElemType(T), maxLen)
   else:
@@ -1092,7 +1095,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     bitListHashTreeRoot(binaryTreeHeight totalChunks, BitSeq x, contentsHash)
     mixInLength(contentsHash, x.len, res)
   elif T is array:
-    type E = ElemType(T)
+    template E: untyped = ElemType(T)
     when E is BasicType and sizeof(T) <= sizeof(res.data):
       x.hashTreeRootSingleChunkBasicArray(res)
     else:
@@ -1412,7 +1415,7 @@ func hashTreeRootAux[T](
       first, atLayer, needTopRoot, height = 2, numUsedChunks = 2,
       getTopRoot, getNestedRoot)
   elif T is array:
-    type E = typeof toSszType(declval ElemType(T))
+    template E: untyped = typeof toSszType(declval ElemType(T))
     when E is BasicType and sizeof(T) <= bytesPerChunk:
       err()
     else:
@@ -1444,7 +1447,7 @@ func hashTreeRootAux[T](
         first, atLayer, needTopRoot, height, numUsedChunks.int,
         getTopRoot, getNestedRoot)
   elif T is List:
-    type E = typeof toSszType(declval ElemType(T))
+    template E: untyped = typeof toSszType(declval ElemType(T))
     const height = T.maxChunksCount(x.maxLen).binaryTreeHeight
 
     func getTopDataRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1488,7 +1491,7 @@ func hashTreeRootAux[T](
   elif T is BitSeq:
     let
       bitlen = x.len.Limit
-      totalUsedChunks = (bitlen + 255) div 256
+      totalUsedChunks = bitlen.bitChunkCount
       hasPartialChunks = bitlen.uint.uint8 != 0x00
 
     func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1530,7 +1533,7 @@ func hashTreeRootAux[T](
       first, atLayer, needTopRoot, totalUsedChunks.int,
       getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot)
   elif T is seq:
-    type E = typeof toSszType(declval ElemType(T))
+    template E: untyped = typeof toSszType(declval ElemType(T))
     let totalUsedChunks = x.totalChunkCount
 
     func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1654,7 +1657,7 @@ func singleDataHash[T](data: openArray[T], res: var Digest) =
   if data.len == 0:
     res.reset()
   else:
-    type S = typeof toSszType(declval T)
+    template S: untyped = typeof toSszType(declval T)
     when S is BasicType | Digest:
       when cpuEndian == bigEndian:
         unsupported T # No bigendian support here!
@@ -1673,7 +1676,7 @@ func mergedDataHash[T](
   # The merged hash of the data at `chunkIdx` and `chunkIdx + 1`
   mixin hash_tree_root, toSszType
   trs "DATA HASH ", chunkIdx, " ", data.len
-  type S = typeof toSszType(declval T)
+  template S: untyped = typeof toSszType(declval T)
   when S is BasicType | Digest:
     when cpuEndian == bigEndian:
       unsupported T # No bigendian support here!
@@ -1843,7 +1846,7 @@ func hashTreeRootCached(
     batch: ptr BatchRequest, first: int,
     atLayer: int, needTopRoot = false): Opt[int] =
   mixin toSszType
-  type E = typeof toSszType(declval ElemType(typeof(x)))
+  template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
   const
     numUsedChunks = x.maxChunks
     height = numUsedChunks.binaryTreeHeight
@@ -1878,7 +1881,7 @@ func hashTreeRootCached(
     batch: ptr BatchRequest, first: int,
     atLayer: int, needTopRoot = false): Opt[int] =
   mixin toSszType
-  type E = typeof toSszType(declval ElemType(typeof(x)))
+  template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
   const height = x.maxChunks.binaryTreeHeight
 
   func getTopDataRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1927,7 +1930,7 @@ func hashTreeRootCached(
     batch: ptr BatchRequest, first: int,
     atLayer: int, needTopRoot = false): Opt[int] =
   mixin toSszType
-  type E = typeof toSszType(declval ElemType(typeof(x)))
+  template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
   let totalUsedChunks = x.totalChunkCount
 
   func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
