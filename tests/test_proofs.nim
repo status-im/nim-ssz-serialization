@@ -232,3 +232,15 @@ suite "Merkle proofs":
         check valid
       else:
         check (not valid)
+
+  test "progressiveIndexForChunk":
+    check:
+      progressiveIndexForChunk(0) == 0b1_0.GeneralizedIndex
+
+      progressiveIndexForChunk(1) == 0b1_10_00.GeneralizedIndex
+      progressiveIndexForChunk(2) == 0b1_10_01.GeneralizedIndex
+      progressiveIndexForChunk(3) == 0b1_10_10.GeneralizedIndex
+      progressiveIndexForChunk(4) == 0b1_10_11.GeneralizedIndex
+
+      progressiveIndexForChunk(5) == 0b1_110_0000.GeneralizedIndex
+      progressiveIndexForChunk(20) == 0b1_110_1111.GeneralizedIndex

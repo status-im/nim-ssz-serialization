@@ -225,9 +225,13 @@ template dataPerChunk*(T: type): int =
   else:
     1
 
-template chunkIdx(T: type, dataIdx: int64): int64 =
+template chunkIdx*(T: type, dataIdx: int64): int64 =
   # Given a data index, which chunk does it belong to?
   dataIdx div dataPerChunk(T)
+
+template bitChunkIdx*(dataIdx: int64): int64 =
+  # Given a bit index, which chunk does it belong to?
+  dataIdx div (bytesPerChunk * 8)
 
 template maxChunkIdx*(T: type, maxLen: Limit): int64 =
   # Given a number of data items, how many chunks are needed?

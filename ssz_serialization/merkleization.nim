@@ -628,7 +628,7 @@ func unionHashTreeRoot[T: object](x: T, res: var Digest) =
   if not isSome:
     res.reset()
 
-func allFieldNames(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
+func allFieldNames*(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
   when T.isProgressiveContainer:
     const
       activeFields = T.activeFields

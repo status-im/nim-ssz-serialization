@@ -391,3 +391,136 @@ func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
       buf[32..63] = branch[i].data
     value = digest(buf)
   value == root
+
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#ssz-object-to-index
+func fieldNotSupported(T: typedesc, field: string): string =
+  "Field '" & field & "' is not supported for " & $T
+
+func indexNotSupported(T: typedesc, idx: Limit): string =
+  "Index " & $idx & " is not supported for " & $T
+
+func indexForChunk(numChunks: Limit, chunkIdx: Limit): GeneralizedIndex =
+  nextPow2(numChunks.uint64).GeneralizedIndex + chunkIdx.GeneralizedIndex
+
+func progressiveIndexForChunk*(chunkIdx: Limit): GeneralizedIndex =
+  var
+    gindex = 1.GeneralizedIndex
+    chunkIdx = chunkIdx
+    depth = 0.Limit
+  while true:
+    let numChunks = 1.Limit shl depth
+    if chunkIdx < numChunks:
+      return (gindex shl (depth + 1)) + chunkIdx.GeneralizedIndex
+    gindex = (gindex shl 1) or 1
+    chunkIdx -= numChunks
+    depth += 2
+
+func get_generalized_index_impl(
+    T: typedesc, field: string): Result[GeneralizedIndex, string] =
+  when T is bool|char:
+    err T.fieldNotSupported(field)
+  elif T is UintN:
+    err T.fieldNotSupported(field)
+  elif T is BitArray:
+    err T.fieldNotSupported(field)
+  elif T is BitList:
+    if field == "__len__":
+      ok 3.GeneralizedIndex
+    else:
+      err T.fieldNotSupported(field)
+  elif T is array|HashArray:
+    err T.fieldNotSupported(field)
+  elif T is List|HashList:
+    if field == "__len__":
+      ok 3.GeneralizedIndex
+    else:
+      err T.fieldNotSupported(field)
+  elif T is BitSeq:
+    if field == "__len__":
+      ok 3.GeneralizedIndex
+    else:
+      err T.fieldNotSupported(field)
+  elif T is seq|HashSeq:
+    if field == "__len__":
+      ok 3.GeneralizedIndex
+    else:
+      err T.fieldNotSupported(field)
+  elif T.isUnion:
+    if field == "__selector__":
+      ok 3.GeneralizedIndex
+    else:
+      err T.fieldNotSupported(field)
+  elif T is object|tuple:
+    when T.isProgressiveContainer:
+      static: doAssert T.allFieldNames.find(Opt.some("__active_fields__")) < 0
+      if field == "__active_fields__":
+        ok 3.GeneralizedIndex
+      else:
+        let fieldIdx = T.allFieldNames.find(Opt.some(field))
+        if fieldIdx >= 0:
+          ok 2.GeneralizedIndex.concat_generalized_indices(
+            fieldIdx.progressiveIndexForChunk)
+        else:
+          err T.fieldNotSupported(field)
+    else:
+      let fieldIdx = T.allFieldNames.find(Opt.some(field))
+      if fieldIdx >= 0:
+        ok T.totalSerializedFields.indexForChunk(fieldIdx)
+      else:
+        err T.fieldNotSupported(field)
+  else:
+    unsupported T
+
+func get_generalized_index_impl(
+    T: typedesc, idx: Limit): Result[GeneralizedIndex, string] =
+  mixin toSszType
+  when T is bool|char:
+    err T.indexNotSupported(idx)
+  elif T is UintN:
+    err T.indexNotSupported(idx)
+  elif T is BitArray:
+    if idx < 0 or idx >= T.bits:
+      err T.indexNotSupported(idx)
+    else:
+      ok T.bits.bitChunkCount.indexForChunk(idx.bitChunkIdx)
+  elif T is BitList:
+    if idx < 0 or idx >= T.maxLen:
+      err T.indexNotSupported(idx)
+    else:
+      ok 2.GeneralizedIndex.concat_generalized_indices(
+        T.maxLen.bitChunkCount.indexForChunk(idx.bitChunkIdx))
+  elif T is array|HashArray:
+    template E: untyped = typeof toSszType(declval ElemType(T))
+    if idx < 0 or idx >= T.len:
+      err T.indexNotSupported(idx)
+    else:
+      ok E.maxChunkIdx(T.len).indexForChunk(E.chunkIdx(idx))
+  elif T is List|HashList:
+    template E: untyped = typeof toSszType(declval ElemType(T))
+    if idx < 0 or idx >= T.maxLen:
+      err T.indexNotSupported(idx)
+    else:
+      ok 2.GeneralizedIndex.concat_generalized_indices(
+        E.maxChunkIdx(T.maxLen).indexForChunk(E.chunkIdx(idx)))
+  elif T is BitSeq:
+    if idx < 0:
+      err T.indexNotSupported(idx)
+    else:
+      ok 2.GeneralizedIndex.concat_generalized_indices(
+        idx.bitChunkIdx.progressiveIndexForChunk)
+  elif T is seq|HashSeq:
+    template E: untyped = typeof toSszType(declval ElemType(T))
+    if idx < 0:
+      err T.indexNotSupported(idx)
+    else:
+      ok 2.GeneralizedIndex.concat_generalized_indices(
+        E.chunkIdx(idx).progressiveIndexForChunk)
+  elif T.isUnion:
+    if idx notin T.unionSelectorType:
+      err T.indexNotSupported(idx)
+    else:
+      ok 2.GeneralizedIndex
+  elif T is object|tuple:
+    err T.indexNotSupported(idx)
+  else:
+    unsupported T
