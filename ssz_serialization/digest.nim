@@ -135,7 +135,7 @@ func digest*(a, b: openArray[byte], res: var Digest) =
     else:
       when USE_BLST_SHA256:
         # BLST has a fast assembly optimized SHA256
-        res.data.bls_sha256_digest(a)
+        res.data.bls_sha256_digest(a, b)
       else:
         res = block:
           # We use the init-update-finish interface to avoid
