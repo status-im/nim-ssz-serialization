@@ -190,28 +190,6 @@ template unionSelector*[T: object](x: T): auto =
 # * vIdx - virtual index in Merkle tree - the root is found at index 1, its
 #          two children at 2, 3 then 4, 5, 6, 7 etc
 
-func nextPow2Int64(x: int64): int64 =
-  # TODO the nextPow2 in bitops2 works with uint64 - there's a bug in the nim
-  #      compiler preventing it to be used - it seems that a conversion to
-  #      uint64 cannot be done with the static maxLen :(
-  #
-  #      Works in Nim 2.0 and newer, so remove workaround when Nim 1.6 support
-  #      is dropped
-  var v = x - 1
-
-  # round down, make sure all bits are 1 below the threshold, then add 1
-  v = v or v shr 1
-  v = v or v shr 2
-  v = v or v shr 4
-  when bitsof(x) > 8:
-    v = v or v shr 8
-  when bitsof(x) > 16:
-    v = v or v shr 16
-  when bitsof(x) > 32:
-    v = v or v shr 32
-
-  v + 1
-
 template dataPerChunk*(T: type): int =
   # How many data items fit in a chunk
   mixin toSszType
@@ -231,10 +209,7 @@ template chunkIdx(T: type, dataIdx: int64): int64 =
 
 template maxChunkIdx*(T: type, maxLen: Limit): int64 =
   # Given a number of data items, how many chunks are needed?
-  # TODO compiler bug:
-  # beacon_chain/ssz/types.nim(75, 53) Error: cannot generate code for: maxLen
-  # nextPow2(chunkIdx(T, maxLen + dataPerChunk(T) - 1).uint64).int64
-  nextPow2Int64(chunkIdx(T, maxLen.int64 + dataPerChunk(T) - 1))
+  nextPow2(chunkIdx(T, maxLen.int64 + dataPerChunk(T) - 1).uint64).int64
 
 template layer*(vIdx: int64): int =
   ## Layer 0 = layer at which the root hash is
