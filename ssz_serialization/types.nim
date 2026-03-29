@@ -24,6 +24,7 @@ export stint, bitseqs, json_serialization
 const
   offsetSize* = 4
   bytesPerChunk* = 32
+  bitsPerChunk* = bytesPerChunk * 8
 
 type
   GeneralizedIndex* = uint64
@@ -225,9 +226,13 @@ template dataPerChunk*(T: type): int =
   else:
     1
 
-template chunkIdx(T: type, dataIdx: int64): int64 =
+template chunkIdx*(T: type, dataIdx: int64): int64 =
   # Given a data index, which chunk does it belong to?
   dataIdx div dataPerChunk(T)
+
+template bitChunkIdx*(dataIdx: int64): int64 =
+  # Given a bit index, which chunk does it belong to?
+  dataIdx div bitsPerChunk
 
 template maxChunkIdx*(T: type, maxLen: Limit): int64 =
   # Given a number of data items, how many chunks are needed?
@@ -235,6 +240,9 @@ template maxChunkIdx*(T: type, maxLen: Limit): int64 =
   # beacon_chain/ssz/types.nim(75, 53) Error: cannot generate code for: maxLen
   # nextPow2(chunkIdx(T, maxLen + dataPerChunk(T) - 1).uint64).int64
   nextPow2Int64(chunkIdx(T, maxLen.int64 + dataPerChunk(T) - 1))
+
+template maxBitChunkIdx*(maxBits: Limit): int64 =
+  nextPow2Int64(bitChunkIdx(maxBits.int64 + bitsPerChunk - 1))
 
 template layer*(vIdx: int64): int =
   ## Layer 0 = layer at which the root hash is
