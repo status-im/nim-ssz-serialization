@@ -297,11 +297,11 @@ type
     of SelectorAB.b: bData: Inner
 
   HoleySelector {.pure.} = enum
-    a = 3
-    b = 1
+    a = 1
+    b = 3
     c = 99
-    d = 2
-    e = 5
+    d = 120
+    e = 127
 
   HoleyUnion {.allowDiscriminatorsWithoutZero.} = object
     case selector: HoleySelector
@@ -443,12 +443,11 @@ suite "get_generalized_index":
     TestUnion.checkErr(1, "z")
     DeepUnion.checkErr(0, "inner", "x")
     MixedUnion.checkErr(1, "__len__")
-
-    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 3)
     HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 1)
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 3)
     HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 99)
-    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 2)
-    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 5)
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 120)
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 127)
     HoleyUnion.checkOk(0b1_1.GeneralizedIndex, "__selector__")
     HoleyUnion.checkErr(0)
     HoleyUnion.checkErr(4)
