@@ -132,7 +132,7 @@ suite "Cache layout equivalence (for HashSeq)":
         ha: HashArray[maxLen, Foo]
         hl: HashList[Foo, maxLen]
       for i in 0 ..< int(maxLen):
-        ha.data[i] = foo
+        ha.mitem(i) = foo
         check hl.add(foo)
       discard ha.hash_tree_root()
       discard hl.hash_tree_root()
@@ -148,11 +148,23 @@ suite "Cache layout equivalence (for HashSeq)":
 
 suite "HashArray":
   template runHashArrayTests(maxLen: static Limit): untyped =
-    for numItems in [0, maxLen div 3, maxLen div 2, maxLen]:
+    for numItems in deduplicate([0, maxLen div 3, maxLen div 2, maxLen]):
+      test "Nested HashArray[3, uint64] - " & $numItems & "/" & $maxLen:
+        var ha: HashArray[maxLen, HashArray[3, uint64]]
+        for i in 0 ..< numItems:
+          ha.mitem(i).mitem(0) = i.byte
+        check ha.hash_tree_root() == ha.data.hash_tree_root()
+        for i in 0 ..< numItems:
+          ha.mitem(i).reset()
+        check ha.hash_tree_root() == ha.data.hash_tree_root()
+
       test "Nested HashArray[8, uint64] - " & $numItems & "/" & $maxLen:
         var ha: HashArray[maxLen, HashArray[8, uint64]]
         for i in 0 ..< numItems:
           ha.mitem(i).mitem(0) = i.byte
+        check ha.hash_tree_root() == ha.data.hash_tree_root()
+        for i in 0 ..< numItems:
+          ha.mitem(i).reset()
         check ha.hash_tree_root() == ha.data.hash_tree_root()
 
       test "Composite object - " & $numItems & "/" & $maxLen:
@@ -161,7 +173,11 @@ suite "HashArray":
           ha.mitem(i) = foo
           ha.mitem(i).x.data[0] = i.byte
         check ha.hash_tree_root() == ha.data.hash_tree_root()
+        for i in 0 ..< numItems:
+          ha.mitem(i).reset()
+        check ha.hash_tree_root() == ha.data.hash_tree_root()
 
+  runHashArrayTests(1)
   runHashArrayTests(2)
   runHashArrayTests(3)
   runHashArrayTests(4)

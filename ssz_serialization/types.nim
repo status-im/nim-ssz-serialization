@@ -417,7 +417,11 @@ func clearCachesArray[T](
     depth: int,
     dataIdx: auto) =
   ## Clear all cache entries after data at dataIdx has been modified
-  var idx = 1 shl (depth - 1) + (chunkIdx(t, dataIdx) shr 1)
+  var idx =
+    if depth > 0:
+      1 shl (depth - 1) + (chunkIdx(t, dataIdx) shr 1)
+    else:
+      1
   while idx != 0:
     clearCache(hashes[idx])
     idx = idx shr 1
