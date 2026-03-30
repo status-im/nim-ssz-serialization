@@ -8,8 +8,9 @@
 {.used.}
 
 import
-  std/[algorithm, sequtils],
+  std/[algorithm, macros, sequtils],
   stew/[bitops2, staticfor],
+  serialization/case_objects,
   unittest2,
   ../ssz_serialization/proofs
 
@@ -123,14 +124,14 @@ suite "Merkle proofs":
 
     staticFor index_int, 1 .. 15:
       const index = index_int.GeneralizedIndex
-      checkpoint "Verifying " & $index  & " --- static"
+      checkpoint "Verifying " & $index & " --- static"
       check:
         nodes[index_int] == foo.hash_tree_root(index).get
         nodes[index_int] == allLeaves.hash_tree_root(index).get
 
     for index_int in 1 .. 15:
       let index = index_int.GeneralizedIndex
-      checkpoint "Verifying " & $index  & " --- dynamic"
+      checkpoint "Verifying " & $index & " --- dynamic"
       check:
         nodes[index_int] == foo.hash_tree_root(index).get
         nodes[index_int] == allLeaves.hash_tree_root(index).get
@@ -274,11 +275,295 @@ suite "Merkle proofs":
         proof = mapIt(testCase.proof, Digest.fromHex(it))
         leaf = Digest.fromHex(testCase.leaf)
         index = testCase.index.GeneralizedIndex
-        valid = is_valid_merkle_branch(leaf, proof,
-                                       log2trunc(index),
-                                       get_subtree_index(index),
-                                       root)
+        valid = is_valid_merkle_branch(
+          leaf, proof, log2trunc(index), get_subtree_index(index), root)
       if testCase.valid:
         check valid
       else:
         check (not valid)
+
+  test "progressiveIndexForChunk":
+    check:
+      progressiveIndexForChunk(0) == 0b1_0.GeneralizedIndex
+
+      progressiveIndexForChunk(1) == 0b1_10_00.GeneralizedIndex
+      progressiveIndexForChunk(2) == 0b1_10_01.GeneralizedIndex
+      progressiveIndexForChunk(3) == 0b1_10_10.GeneralizedIndex
+      progressiveIndexForChunk(4) == 0b1_10_11.GeneralizedIndex
+
+      progressiveIndexForChunk(5) == 0b1_110_0000.GeneralizedIndex
+      progressiveIndexForChunk(20) == 0b1_110_1111.GeneralizedIndex
+
+type
+  Inner = object
+    x, y: uint64
+
+  Nested = object
+    inner: Inner
+    z: uint64
+
+  WithArray = object
+    a: uint64
+    items: array[8, Inner]
+
+  WithBitArray = object
+    bits: BitArray[256]
+
+  WithList = object
+    a: uint64
+    items: List[Inner, 128]
+
+  WithBitList = object
+    bits: BitList[256]
+
+  WithSeq = object
+    items: seq[Inner]
+
+  WithBitSeq = object
+    bits: BitSeq
+
+  SelectorAB {.pure.} = enum
+    a = 0
+    b = 1
+
+  TestUnion = object
+    case selector: SelectorAB
+    of SelectorAB.a: aData: uint64
+    of SelectorAB.b: bData: Inner
+
+  DeepUnion = object
+    case selector: SelectorAB
+    of SelectorAB.a: aData: uint64
+    of SelectorAB.b: bData: Nested
+
+  MixedUnion = object
+    case selector: SelectorAB
+    of SelectorAB.a: aData: List[uint64, 64]
+    of SelectorAB.b: bData: Inner
+
+  NestedUnion = object
+    case selector: SelectorAB
+    of SelectorAB.a: aData: TestUnion
+    of SelectorAB.b: bData: Inner
+
+  HoleySelector {.pure.} = enum
+    a = 1
+    b = 3
+    c = 99
+    d = 120
+    e = 127
+
+  HoleyUnion {.allowDiscriminatorsWithoutZero.} = object
+    case selector: HoleySelector
+    of HoleySelector.a: aData: uint64
+    of HoleySelector.b: bData: uint32
+    of HoleySelector.c: cData: uint64
+    of HoleySelector.d: dData: uint32
+    of HoleySelector.e: eData: uint64
+
+  ProgTestStruct {.sszActiveFields: [1, 0, 1, 0, 1].} = object
+    a: uint64
+    c: uint64
+    e: uint64
+
+  ProgTestTuple {.sszActiveFields: [1, 0, 1].} = tuple
+    a: uint64
+    c: uint64
+
+  SingleField = object
+    a: uint64
+
+  TwoFields = object
+    a, b: uint64
+
+  ThreeFields = object
+    a, b, c: uint64
+
+  FourFields = object
+    a, b, c, d: uint64
+
+  FiveFields = object
+    a, b, c, d, e: uint64
+
+  DistinctInt = distinct uint64
+  DistinctList = distinct seq[DistinctInt]
+
+template toSszType(v: DistinctInt): auto = distinctBase(v)
+template toSszType(v: DistinctList): auto = distinctBase(v)
+
+static:
+  doAssert ProgTestStruct.isProgressiveContainer
+  doAssert ProgTestTuple.isProgressiveContainer
+
+suite "get_generalized_index":
+  func buildGindexCalls(
+      T, path: NimNode): tuple[staticCall, runtimeCall, varDecls: NimNode] =
+    result.staticCall = newCall(newDotExpr(T, ident"get_generalized_index"))
+    result.runtimeCall = newCall(newDotExpr(T, ident"get_generalized_index"))
+    result.varDecls = newStmtList()
+    for i in 0 ..< path.len:
+      let p = path[i]
+      result.staticCall.add p
+      let v = nskLet.genSym "p"
+      result.runtimeCall.add v
+      if p.kind == nnkStrLit:
+        result.varDecls.add quote do:
+          let `v` = `p`
+      else:
+        result.varDecls.add quote do:
+          let `v` = `p`.Limit
+
+  macro checkOk(
+      T: typedesc, expected: GeneralizedIndex,
+      path: varargs[untyped]): untyped =
+    let (staticCall, runtimeCall, varDecls) = T.buildGindexCalls(path)
+    var code = newStmtList()
+    code.add quote do:
+      check `staticCall` == `expected`
+    if path.len > 0:
+      code.add quote do:
+        block:
+          `varDecls`
+          check `runtimeCall`.get == `expected`
+    code
+
+  macro checkErr(T: typedesc, path: varargs[untyped]): untyped =
+    let (staticCall, runtimeCall, varDecls) = T.buildGindexCalls(path)
+    quote do:
+      check not compiles(`staticCall`)
+      block:
+        `varDecls`
+        check `runtimeCall`.isErr
+
+  test "Basic":
+    bool.checkErr("x")
+    uint64.checkErr("x")
+    uint64.checkErr(0)
+
+  test "Array":
+    WithArray.checkOk(0b1_1_000.GeneralizedIndex, "items", 0)
+    WithArray.checkOk(0b1_1_011.GeneralizedIndex, "items", 3)
+    WithArray.checkOk(0b1_1_011_1.GeneralizedIndex, "items", 3, "y")
+    WithArray.checkOk(0b1_1_111_0.GeneralizedIndex, "items", 7, "x")
+    WithBitArray.checkOk(0b1.GeneralizedIndex, "bits", 0)
+    WithBitArray.checkOk(0b1.GeneralizedIndex, "bits", 255)
+    HashArray[8, uint64].checkOk(0b1_0.GeneralizedIndex, 3)
+    array[8, uint64].checkErr(8)
+    array[8, uint64].checkErr(-1)
+
+  test "List":
+    WithList.checkOk(0b1_1_0_0000000.GeneralizedIndex, "items", 0)
+    WithList.checkOk(0b1_1_0_0000000_1.GeneralizedIndex, "items", 0, "y")
+    WithList.checkOk(0b1_1_1.GeneralizedIndex, "items", "__len__")
+    WithBitList.checkOk(0b1_0.GeneralizedIndex, "bits", 0)
+    WithBitList.checkOk(0b1_1.GeneralizedIndex, "bits", "__len__")
+    List[ProgTestStruct, 4]
+      .checkOk(0b1_0_00_1.GeneralizedIndex, 0, "__active_fields__")
+    HashList[uint64, 128].checkOk(0b1_0_00000.GeneralizedIndex, 0)
+    HashList[uint64, 128].checkOk(0b1_1.GeneralizedIndex, "__len__")
+    List[uint64, 128].checkErr(128)
+    List[uint64, 128].checkErr(-1)
+
+  test "Seq":
+    seq[uint64].checkOk(0b1_0_0.GeneralizedIndex, 0)
+    seq[uint64].checkOk(0b1_0_1110_000100.GeneralizedIndex, 100)
+    seq[uint64].checkOk(0b1_1.GeneralizedIndex, "__len__")
+    BitSeq.checkOk(0b1_0_0.GeneralizedIndex, 0)
+    BitSeq.checkOk(0b1_0_10_10.GeneralizedIndex, 1000)
+    BitSeq.checkOk(0b1_1.GeneralizedIndex, "__len__")
+    WithSeq.checkOk(0b1_0_0_0.GeneralizedIndex, "items", 0, "x")
+    WithSeq.checkOk(0b1_1.GeneralizedIndex, "items", "__len__")
+    WithBitSeq.checkOk(0b1_0_0.GeneralizedIndex, "bits", 0)
+    WithBitSeq.checkOk(0b1_1.GeneralizedIndex, "bits", "__len__")
+    HashSeq[uint64].checkOk(0b1_0_0.GeneralizedIndex, 0)
+    HashSeq[uint64].checkOk(0b1_1.GeneralizedIndex, "__len__")
+    seq[uint64].checkErr(-1)
+
+  test "Union":
+    TestUnion.checkOk(0b1_0.GeneralizedIndex, 0)
+    TestUnion.checkOk(0b1_0.GeneralizedIndex, 1)
+    TestUnion.checkOk(0b1_0_1.GeneralizedIndex, 1, "y")
+    TestUnion.checkOk(0b1_1.GeneralizedIndex, "__selector__")
+    NestedUnion.checkOk(0b1_0_0_1.GeneralizedIndex, 0, 1, "y")
+    NestedUnion.checkOk(0b1_0_1.GeneralizedIndex, 1, "y")
+    NestedUnion.checkOk(0b1_1.GeneralizedIndex, "__selector__")
+    TestUnion.checkErr(2)
+    TestUnion.checkErr(-1)
+    TestUnion.checkErr(0, "y")
+    TestUnion.checkErr(1, "z")
+    DeepUnion.checkErr(0, "inner", "x")
+    MixedUnion.checkErr(1, "__len__")
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 1)
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 3)
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 99)
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 120)
+    HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 127)
+    HoleyUnion.checkOk(0b1_1.GeneralizedIndex, "__selector__")
+    HoleyUnion.checkErr(0)
+    HoleyUnion.checkErr(4)
+    HoleyUnion.checkErr(98)
+    HoleyUnion.checkErr(100)
+
+  test "Progressive container":
+    ProgTestStruct.checkOk(0b1_0_0.GeneralizedIndex, "a")
+    ProgTestStruct.checkOk(0b1_0_10_01.GeneralizedIndex, "c")
+    ProgTestStruct.checkOk(0b1_0_10_11.GeneralizedIndex, "e")
+    ProgTestStruct.checkOk(0b1_1.GeneralizedIndex, "__active_fields__")
+    ProgTestTuple.checkOk(0b1_0_0.GeneralizedIndex, 0)
+    ProgTestTuple.checkOk(0b1_0_10_01.GeneralizedIndex, 1)
+    ProgTestTuple.checkOk(0b1_1.GeneralizedIndex, "__active_fields__")
+    ProgTestStruct.checkErr("b")
+    ProgTestStruct.checkErr("d")
+    ProgTestTuple.checkErr(2)
+
+  test "Object":
+    SingleField.checkOk(0b1.GeneralizedIndex, "a")
+    SingleField.checkErr(0)
+    TwoFields.checkOk(0b1_0.GeneralizedIndex, "a")
+    TwoFields.checkOk(0b1_1.GeneralizedIndex, "b")
+    TwoFields.checkErr(1)
+    ThreeFields.checkOk(0b1_00.GeneralizedIndex, "a")
+    ThreeFields.checkOk(0b1_01.GeneralizedIndex, "b")
+    ThreeFields.checkOk(0b1_10.GeneralizedIndex, "c")
+    ThreeFields.checkErr(2)
+    FourFields.checkOk(0b1_00.GeneralizedIndex, "a")
+    FourFields.checkOk(0b1_11.GeneralizedIndex, "d")
+    FourFields.checkErr(3)
+    FiveFields.checkOk(0b1_000.GeneralizedIndex, "a")
+    FiveFields.checkOk(0b1_100.GeneralizedIndex, "e")
+    FiveFields.checkErr(4)
+    Nested.checkOk(0b1_0.GeneralizedIndex, "inner")
+    Nested.checkOk(0b1_0_0.GeneralizedIndex, "inner", "x")
+    Nested.checkOk(0b1_0_1.GeneralizedIndex, "inner", "y")
+    Nested.checkOk(0b1_1.GeneralizedIndex, "z")
+    Nested.checkOk(0b1.GeneralizedIndex)
+    Nested.checkErr(5)
+    Nested.checkErr("")
+    Nested.checkErr("nonexistent")
+    Nested.checkErr("inner", "nonexistent")
+    Nested.checkErr("nonexistent", "x")
+
+  test "Tuple":
+    (uint64, uint64).checkOk(0b1_0.GeneralizedIndex, 0)
+    (uint64, uint64).checkOk(0b1_1.GeneralizedIndex, 1)
+    (uint64, uint64, uint64).checkOk(0b1_00.GeneralizedIndex, 0)
+    (uint64, uint64, uint64).checkOk(0b1_10.GeneralizedIndex, 2)
+    (uint64, uint64).checkErr(2)
+    (uint64, uint64).checkErr("x")
+
+  test "Distinct":
+    seq[DistinctInt].checkOk(0b1_0_0.GeneralizedIndex, 0)
+    seq[DistinctInt].checkOk(0b1_0_10_00.GeneralizedIndex, 5)
+    DistinctList.checkOk(0b1_0_0.GeneralizedIndex, 0)
+    DistinctList.checkOk(0b1_1.GeneralizedIndex, "__len__")
+
+  test "Round-trip with build_proof":
+    let
+      foo = Nested(inner: Inner(x: 42, y: 99), z: 7)
+      root = hash_tree_root(foo)
+    const index = Nested.get_generalized_index("inner", "y")
+    let
+      leaf = hash_tree_root(foo.inner.y)
+      proof = foo.build_proof(index).get
+    check is_valid_merkle_branch(
+      leaf, proof, log2trunc(index), get_subtree_index(index), root)

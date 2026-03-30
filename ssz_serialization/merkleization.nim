@@ -121,9 +121,8 @@ template chunksForIndex(index: GeneralizedIndex): Slice[Limit] =
 const
   zero64 = default array[64, byte]
   zeroDigest = Digest()
-  bitsPerChunk = bytesPerChunk * 8
 
-func bitChunkCount*(maxBits: Limit): Limit =
+func bitChunkCount(maxBits: Limit): Limit =
   (maxBits + bitsPerChunk - 1) div bitsPerChunk
 
 func binaryTreeHeight*(totalElements: Limit): Limit =
@@ -628,7 +627,7 @@ func unionHashTreeRoot[T: object](x: T, res: var Digest) =
   if not isSome:
     res.reset()
 
-func allFieldNames(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
+func allFieldNames*(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
   when T.isProgressiveContainer:
     const
       activeFields = T.activeFields

@@ -8,10 +8,11 @@
 {.push raises: [].}
 
 import
-  std/[algorithm, math, sequtils, sets, tables],
+  std/[algorithm, enumutils, macros, sequtils, sets, tables],
   results,
-  stew/[bitops2],
-  "."/[digest, merkleization]
+  stew/[bitops2, objects],
+  serialization/case_objects,
+  "."/[codec, digest, merkleization]
 
 export digest, merkleization
 
@@ -29,6 +30,12 @@ func concat_generalized_indices*(
   for i in indices:
     let depth = log2trunc(i)
     result = (result shl depth) + i - (1.GeneralizedIndex shl depth)
+
+template `&`*(a, b: GeneralizedIndex): GeneralizedIndex =
+  concat_generalized_indices(a, b)
+
+func `&=`*(a: var GeneralizedIndex, b: GeneralizedIndex) =
+  a = a & b
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#generalized_index_sibling
 template generalized_index_sibling*(
@@ -103,7 +110,7 @@ template get_union_indices*(
 func check_multiproof_acceptable*(
     indices: varargs[GeneralizedIndex]): Result[void, string] =
   # Check that proof verification won't allocate excessive amounts of memory.
-  const max_multiproof_complexity = nextPowerOfTwo(256)
+  const max_multiproof_complexity = nextPow2(256'u64).int
   if indices.len > max_multiproof_complexity:
     return err("Unsupported multiproof complexity (" & $indices.len & ")")
 
@@ -134,7 +141,7 @@ func calculate_multi_merkle_root_impl(
   # This data structure only scales with the number of `leaves`,
   # in contrast to the spec one that also scales with the number of `proof`
   # items and the number of all intermediate roots, potentially the entire tree.
-  let capacity = nextPowerOfTwo(leaves.len)
+  let capacity = nextPow2(leaves.len.uint64).int
   var objects = initTable[GeneralizedIndex, Digest](capacity)
   for i, index in indices:
     if objects.mgetOrPut(index, leaves[i]) != leaves[i]:
@@ -453,3 +460,319 @@ func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
       buf[32..63] = branch[i].data
     value = digest(buf)
   value == root
+
+# https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#ssz-object-to-index
+type
+  SszSchemaRef = proc(): lent SszSchema {.noSideEffect, nimcall, raises: [].}
+
+  SszSchemaKind {.pure.} = enum
+    sszBasic
+    sszArray
+    sszList
+    sszSeq
+    sszUnion
+    sszProgressiveObject
+    sszObject
+    sszProgressiveTuple
+    sszTuple
+
+  SszObjectField = object
+    name: string
+    gindex: GeneralizedIndex
+    schema: SszSchemaRef
+
+  SszTupleField = object
+    gindex: GeneralizedIndex
+    schema: SszSchemaRef
+
+  SszUnionVariant = object
+    selector: uint8
+    schema: SszSchemaRef
+
+  SszSchema = object
+    case kind: SszSchemaKind
+    of sszBasic:
+      discard
+    of sszArray, sszList, sszSeq:
+      dataPerChunkExp: int
+      maxLen, firstIdx: Limit
+      elemSchema: SszSchemaRef
+    of sszUnion:
+      unionVariants: seq[SszUnionVariant]
+    of sszProgressiveObject, sszObject:
+      objectFields: seq[SszObjectField]
+    of sszProgressiveTuple, sszTuple:
+      tupleFields: seq[SszTupleField]
+
+func indexForChunk(firstIdx: Limit, chunkIdx: Limit): GeneralizedIndex =
+  firstIdx.GeneralizedIndex + chunkIdx.GeneralizedIndex
+
+func progressiveIndexForChunk*(chunkIdx: Limit): GeneralizedIndex =
+  var
+    gindex = 1.GeneralizedIndex
+    chunkIdx = chunkIdx
+    depth = 0.Limit
+  while true:
+    let numChunks = 1.Limit shl depth
+    if chunkIdx < numChunks:
+      let firstIdx = (gindex shl (depth + 1)).Limit
+      return firstIdx.indexForChunk(chunkIdx)
+    gindex = (gindex shl 1) or 1
+    chunkIdx -= numChunks
+    depth += 2
+
+func sszSchema(T: typedesc): lent SszSchema
+
+func sszSchemaRef(T: typedesc): SszSchemaRef =
+  const res: SszSchemaRef =
+    func(): lent SszSchema {.nimcall.} =
+      T.sszSchema
+  res
+
+const basicSchema = SszSchema(kind: sszBasic)
+
+func sszSchema(T: typedesc): lent SszSchema =
+  mixin toSszType, enumAllSerializedFields
+  template S: untyped = typeof toSszType(declval T)
+  when S is bool|char|UintN:
+    return basicSchema
+  else:
+    const res = block:
+      when S is BitArray:
+        SszSchema(
+          kind: sszArray, dataPerChunkExp: log2trunc(bitsPerChunk.uint64),
+          maxLen: S.bits, firstIdx: S.bits.maxBitChunkIdx)
+      elif S is BitList:
+        SszSchema(
+          kind: sszList, dataPerChunkExp: log2trunc(bitsPerChunk.uint64),
+          maxLen: S.maxLen, firstIdx: S.maxLen.maxBitChunkIdx shl 1)
+      elif S is array|HashArray:
+        template E: untyped = typeof toSszType(declval ElemType(S))
+        SszSchema(
+          kind: sszArray, dataPerChunkExp: log2trunc(E.dataPerChunk.uint64),
+          maxLen: S.len, firstIdx: E.maxChunkIdx(S.len),
+          elemSchema: E.sszSchemaRef)
+      elif S is List|HashList:
+        template E: untyped = typeof toSszType(declval ElemType(S))
+        SszSchema(
+          kind: sszList, dataPerChunkExp: log2trunc(E.dataPerChunk.uint64),
+          maxLen: S.maxLen, firstIdx: E.maxChunkIdx(S.maxLen) shl 1,
+          elemSchema: E.sszSchemaRef)
+      elif S is BitSeq:
+        SszSchema(
+          kind: sszSeq, dataPerChunkExp: log2trunc(bitsPerChunk.uint64))
+      elif S is seq|HashSeq:
+        template E: untyped = typeof toSszType(declval ElemType(S))
+        SszSchema(
+          kind: sszSeq, dataPerChunkExp: log2trunc(E.dataPerChunk.uint64),
+          elemSchema: E.sszSchemaRef)
+      elif S.isUnion:
+        var variants: seq[SszUnionVariant]
+        for selector in S.unionSelectorType.items():
+          doAssert selector.int in 0 .. uint8.high.int
+          let sample = S.doInit(S.unionSelectorKey, selector)
+          var isSome = false
+          sample.withFieldPairs(key, val):
+            when key != S.unionSelectorKey:
+              doAssert not isSome
+              isSome = true
+              variants.add SszUnionVariant(
+                selector: selector.int.uint8,
+                schema: sszSchemaRef(typeof(val)))
+          if not isSome:
+            variants.add SszUnionVariant(
+              selector: selector.int.uint8)
+        SszSchema(kind: sszUnion, unionVariants: variants)
+      elif S is object|tuple:
+        when S.isProgressiveContainer:
+          const
+            activeFields = S.activeFields
+            totalChunks = activeFields.bitWidth
+          var i = 0
+        else:
+          const
+            totalChunks = T.totalSerializedFields
+            firstIdx = nextPow2(totalChunks.uint64).Limit
+        when S is object:
+          var fields: seq[SszObjectField]
+        else:
+          var fields: seq[SszTupleField]
+        var fieldIdx = 0
+        S.enumAllSerializedFields:
+          when S.isProgressiveContainer:
+            while not activeFields[i]:
+              inc i
+          let gindex =
+            when S.isProgressiveContainer:
+              2.GeneralizedIndex & i.progressiveIndexForChunk
+            else:
+              firstIdx.indexForChunk(fieldIdx)
+          when S is object:
+            fields.add SszObjectField(
+              name: fieldName,
+              gindex: gindex,
+              schema: sszSchemaRef(FieldType))
+          else:
+            fields.add SszTupleField(
+              gindex: gindex,
+              schema: sszSchemaRef(FieldType))
+          inc fieldIdx
+          when S.isProgressiveContainer:
+            inc i
+        when S.isProgressiveContainer:
+          doAssert i == totalChunks
+        else:
+          doAssert fieldIdx == totalChunks
+        when S is object:
+          const kind =
+            when S.isProgressiveContainer:
+              sszProgressiveObject
+            else:
+              sszObject
+          SszSchema(kind: kind, objectFields: fields)
+        else:
+          const kind =
+            when S.isProgressiveContainer:
+              sszProgressiveTuple
+            else:
+              sszTuple
+          SszSchema(kind: kind, tupleFields: fields)
+      else:
+        unsupported S
+    res
+
+func gindex(schema: SszSchema, p: string): Result[GeneralizedIndex, string] =
+  case schema.kind
+  of sszBasic, sszArray, sszTuple:
+    discard
+  of sszList, sszSeq:
+    if p == "__len__":
+      return ok 3.GeneralizedIndex
+  of sszUnion:
+    if p == "__selector__":
+      return ok 3.GeneralizedIndex
+  of sszProgressiveObject, sszObject:
+    if schema.kind == sszProgressiveObject and p == "__active_fields__":
+      return ok 3.GeneralizedIndex
+    for field in schema.objectFields:
+      if field.name == p:
+        return ok field.gindex
+  of sszProgressiveTuple:
+    if p == "__active_fields__":
+      return ok 3.GeneralizedIndex
+  err "Field '" & p & "' not found"
+
+func schema(schema: SszSchema, p: string): lent SszSchema =
+  case schema.kind
+  of sszBasic, sszArray, sszList, sszSeq,
+      sszUnion, sszProgressiveTuple, sszTuple:
+    return basicSchema
+  of sszProgressiveObject, sszObject:
+    for field in schema.objectFields:
+      if field.name == p:
+        if field.schema != nil:
+          return field.schema()
+        break
+    return basicSchema
+
+func gindex(schema: SszSchema, p: Limit): Result[GeneralizedIndex, string] =
+  case schema.kind
+  of sszBasic, sszProgressiveObject, sszObject:
+    discard
+  of sszArray, sszList:
+    if p in 0 ..< schema.maxLen:
+      let chunkIdx = p shr schema.dataPerChunkExp
+      return ok schema.firstIdx.indexForChunk(chunkIdx)
+  of sszSeq:
+    if p >= 0:
+      let chunkIdx = p shr schema.dataPerChunkExp
+      return ok(2.GeneralizedIndex & chunkIdx.progressiveIndexForChunk)
+  of sszUnion:
+    if p in 0.Limit .. uint8.high.Limit:
+      for v in schema.unionVariants:
+        if v.selector == p.uint8:
+          return ok 2.GeneralizedIndex
+  of sszProgressiveTuple, sszTuple:
+    if p in 0.Limit ..< schema.tupleFields.len.Limit:
+      return ok schema.tupleFields[p].gindex
+  err "Index '" & $p & "' not supported"
+
+func schema(schema: SszSchema, p: Limit): lent SszSchema =
+  case schema.kind
+  of sszBasic, sszProgressiveObject, sszObject:
+    return basicSchema
+  of sszArray, sszList, sszSeq:
+    if schema.elemSchema != nil:
+      return schema.elemSchema()
+    return basicSchema
+  of sszUnion:
+    if p in 0.Limit .. uint8.high.Limit:
+      for v in schema.unionVariants:
+        if v.selector == p.uint8:
+          if v.schema != nil:
+            return v.schema()
+          break
+    return basicSchema
+  of sszProgressiveTuple, sszTuple:
+    if p in 0.Limit ..< schema.tupleFields.len.Limit:
+      if schema.tupleFields[p].schema != nil:
+        return schema.tupleFields[p].schema()
+    return basicSchema
+
+macro get_generalized_index_impl(T: typedesc, path: varargs[untyped]): untyped =
+  if path.len == 0:
+    return quote do:
+      Result[GeneralizedIndex, string].ok(1.GeneralizedIndex)
+  if path.len == 1:
+    let firstP = path[0]
+    return quote do:
+      `T`.sszSchema.gindex(`firstP`)
+
+  let
+    res = nskVar.genSym "res"
+    syms = (0 ..< path.len).mapIt (
+      p: path[it],
+      schema: nskLet.genSym "schema",
+      gindex: nskLet.genSym "gindex")
+    (firstP, firstSchema, firstGindex) = syms[0]
+    (_, _, lastGindex) = syms[^1]
+  var body = quote do:
+    if `lastGindex`.isOk:
+      Result[GeneralizedIndex, string].ok `res` & `lastGindex`.unsafeGet
+    else:
+      `lastGindex`
+  for i in countdown(path.len - 1, 1):
+    let
+      (prevP, prevSchema, prevGindex) = syms[i - 1]
+      (currP, currSchema, currGindex) = syms[i]
+    body = quote do:
+      if `prevGindex`.isOk:
+        `res` &= `prevGindex`.unsafeGet
+        let
+          `currSchema` = `prevSchema`.schema(`prevP`)
+          `currGindex` = `currSchema`.gindex(`currP`)
+        `body`
+      else:
+        `prevGindex`
+  quote do:
+    block:
+      var `res` = 1.GeneralizedIndex
+      let
+        `firstSchema` = `T`.sszSchema
+        `firstGindex` = `firstSchema`.gindex(`firstP`)
+      `body`
+
+macro get_generalized_index*(T: typedesc, path: varargs[untyped]): untyped =
+  ## Converts a path (eg. `[7, "foo", 3]` for `x[7].foo[3]`,
+  ## `[12, "bar", "__len__"]` for `len(x[12].bar)`) into the generalized index
+  ## representing its position in the Merkle tree.
+  let impl = quote do:
+    `T`.get_generalized_index_impl(`path`)
+  quote do:
+    when compiles(static(`impl`)):
+      const res = `impl`
+      when res.isErr:
+        {.error: res.error.}
+      res.unsafeGet
+    else:
+      `impl`
