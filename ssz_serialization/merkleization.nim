@@ -1696,7 +1696,7 @@ func mergedDataHash[T](
         res)
   else:
     if chunkIdx + 1 > data.len():
-      assign(res, zeroHashes[maxChunks.layer])
+      assign(res, zeroHashes[1])
     elif chunkIdx + 1 == data.len():
       hash_tree_root(data[chunkIdx], res)
       mergeBranches(res, zeroDigest, res)
