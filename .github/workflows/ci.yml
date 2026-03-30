@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - master
+      - ci-fix
   pull_request:
   workflow_dispatch:
 
@@ -134,7 +135,12 @@ jobs:
         id: nim-hash
         run: |
           BRANCH="${{ matrix.branch }}"
-          HASH=$(curl -s "https://api.github.com/repos/nim-lang/Nim/branches/${{ matrix.branch }}" | jq -r .commit.sha)
+          RESP=$(curl -s "https://api.github.com/repos/nim-lang/Nim/branches/${{ matrix.branch }}")
+          echo $RESP
+          HASH=$(echo "$RESP" | jq -r .commit.sha)
+          HASH2=$(echo "$RESP" | jq -r '.commit.sha')
+          echo "HASH=$HASH"
+          echo "HASH2=$HASH2"
           echo "NIM_COMMIT_HASH=$HASH" >> $GITHUB_ENV
           echo "nim_commit_hash=$HASH" >> $GITHUB_OUTPUT
 
