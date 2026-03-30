@@ -146,7 +146,7 @@ suite "Cache layout equivalence (for HashSeq)":
   checkEquivalence(64)
   checkEquivalence(256)
 
-suite "HashArray (non-power-of-2 size)":
+suite "HashArray":
   template runHashArrayTests(maxLen: static Limit): untyped =
     for numItems in [0, maxLen div 3, maxLen div 2, maxLen]:
       test "Nested HashArray[8, uint64] - " & $numItems & "/" & $maxLen:
