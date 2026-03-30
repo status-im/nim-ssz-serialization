@@ -586,6 +586,9 @@ func gindex(schema: SszSchema, p: string): Result[GeneralizedIndex, string] =
   of sszList, sszSeq:
     if p == "__len__":
       return ok 3.GeneralizedIndex
+  of sszUnion:
+    if p == "__selector__":
+      return ok 3.GeneralizedIndex
   of sszProgressiveObject, sszObject:
     if schema.kind == sszProgressiveObject and p == "__active_fields__":
       return ok 3.GeneralizedIndex
@@ -594,9 +597,6 @@ func gindex(schema: SszSchema, p: string): Result[GeneralizedIndex, string] =
         return ok field.gindex
   of sszProgressiveTuple:
     if p == "__active_fields__":
-      return ok 3.GeneralizedIndex
-  of sszUnion:
-    if p == "__selector__":
       return ok 3.GeneralizedIndex
   err "Field '" & p & "' not found"
 
@@ -625,14 +625,14 @@ func gindex(schema: SszSchema, p: Limit): Result[GeneralizedIndex, string] =
     if p >= 0:
       let chunkIdx = p shr schema.dataPerChunkExp
       return ok(2.GeneralizedIndex & chunkIdx.progressiveIndexForChunk)
-  of sszProgressiveTuple, sszTuple:
-    if p in 0.Limit ..< schema.tupleFields.len.Limit:
-      return ok schema.tupleFields[p].gindex
   of sszUnion:
     if p in 0.Limit .. uint8.high.Limit:
       for v in schema.unionVariants:
         if v.selector == p.uint8:
           return ok 2.GeneralizedIndex
+  of sszProgressiveTuple, sszTuple:
+    if p in 0.Limit ..< schema.tupleFields.len.Limit:
+      return ok schema.tupleFields[p].gindex
   err "Index '" & $p & "' not supported"
 
 func schema(schema: SszSchema, p: Limit): lent SszSchema =
@@ -651,7 +651,7 @@ func schema(schema: SszSchema, p: Limit): lent SszSchema =
             return v.schema()
           break
     return basicSchema
-  of sszTuple, sszProgressiveTuple:
+  of sszProgressiveTuple, sszTuple:
     if p in 0.Limit ..< schema.tupleFields.len.Limit:
       if schema.tupleFields[p].schema != nil:
         return schema.tupleFields[p].schema()
