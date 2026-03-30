@@ -182,7 +182,7 @@ proc readSszValue*[T](
     readSszBytes(input, toSszType(val.data))
     val.resetCache()
   elif val is array|List|HashList|seq|HashSeq:
-    type E = typeof toSszType(declval ElemType(typeof val))
+    template E: untyped = typeof toSszType(declval ElemType(typeof val))
     when val is HashList|HashSeq:
       template v: untyped = val.data
       when not supportsBulkCopy(type v[0]):

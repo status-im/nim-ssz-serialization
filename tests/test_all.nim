@@ -7,6 +7,7 @@
 
 import
   ./test_bitseqs,
+  ./test_digest,
   ./test_hashcache,
   ./test_proofs,
   ./test_ssz_roundtrip,
