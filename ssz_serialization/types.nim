@@ -217,7 +217,7 @@ template maxChunkIdx*(T: type, maxLen: Limit): int64 =
   nextPow2(chunkIdx(T, maxLen.int64 + dataPerChunk(T) - 1).uint64).int64
 
 template maxBitChunkIdx*(maxBits: Limit): int64 =
-  nextPow2Int64(bitChunkIdx(maxBits.int64 + bitsPerChunk - 1))
+  nextPow2(bitChunkIdx(maxBits.int64 + bitsPerChunk - 1).uint64).int64
 
 template layer*(vIdx: int64): int =
   ## Layer 0 = layer at which the root hash is
