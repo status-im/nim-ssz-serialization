@@ -637,7 +637,9 @@ func allFieldNames*(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
   when T is object:
     var res: array[totalChunks, Opt[string]]
   else:
-    var res: array[totalChunks, Opt[int]]
+    var
+      res: array[totalChunks, Opt[int]]
+      fieldIdx = 0
   var i = 0
   T.enumAllSerializedFields:
     when T.isProgressiveContainer:
@@ -646,7 +648,8 @@ func allFieldNames*(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
     when T is object:
       res[i].ok realFieldName
     else:
-      res[i].ok i
+      res[i].ok fieldIdx
+      inc fieldIdx
     inc i
   doAssert i == totalChunks
   res
