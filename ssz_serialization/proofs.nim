@@ -69,7 +69,8 @@ iterator get_path_indices*(
     index = generalized_index_parent(index)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
-func get_helper_indices*(
+func get_helper_indices_impl(
+    withPathIndices: static bool,
     indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
   ## Get the generalized indices of all "extra" chunks in the tree needed
   ## to prove the chunks with the given generalized indices. Note that the
@@ -79,15 +80,24 @@ func get_helper_indices*(
   for index in indices:
     for idx in get_branch_indices(index):
       all_helper_indices.incl idx
-  for index in indices:
-    for idx in get_path_indices(index):
-      all_helper_indices.excl idx
+  when not withPathIndices:
+    for index in indices:
+      for idx in get_path_indices(index):
+        all_helper_indices.excl idx
 
   var res = newSeqOfCap[GeneralizedIndex](all_helper_indices.len)
-  for idx in all_helper_indices:
+  for idx in all_helper_indices.items():
     res.add idx
   res.sort(SortOrder.Descending)
   res
+
+template get_helper_indices*(
+    indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
+  get_helper_indices_impl(withPathIndices = false, indices)
+
+template get_union_indices*(
+    indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
+  get_helper_indices_impl(withPathIndices = true, indices)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 func check_multiproof_acceptable*(
@@ -371,6 +381,58 @@ func build_proof*(
   else:
     const helper_indices = get_helper_indices(index)
     hash_tree_root(anchor, helper_indices)
+
+func extract_branch*(
+    roots: openArray[Digest],
+    union_indices: openArray[GeneralizedIndex],
+    indices: openArray[GeneralizedIndex],
+    branch: var openArray[Digest]): Result[void, string] =
+  if roots.len != union_indices.len:
+    return err("Length mismatch for roots and indices")
+  if branch.len != indices.len:
+    return err("Length mismatch for branch and indices")
+  var j = 0
+  for i, idx in indices:
+    while j < union_indices.len and union_indices[j] > idx:
+      inc j
+    if j >= union_indices.len or union_indices[j] != idx:
+      return err("Index not covered by union")
+    branch[i] = roots[j]
+  ok()
+
+func extract_branch*(
+    roots: openArray[Digest],
+    union_indices: openArray[GeneralizedIndex],
+    indices: openArray[GeneralizedIndex]): Result[seq[Digest], string] =
+  var branch = newSeq[Digest](indices.len)
+  ? roots.extract_branch(union_indices, indices, branch)
+  ok branch
+
+func extract_branch*(
+    roots: openArray[Digest],
+    union_indices: openArray[GeneralizedIndex],
+    indices: static openArray[GeneralizedIndex]): auto =
+  type ResultType = Result[array[indices.len, Digest], string]
+  var branch {.noinit.}: array[indices.len, Digest]
+  let v = roots.extract_branch(union_indices, indices, branch)
+  if v.isErr:
+    ResultType.err(v.error)
+  else:
+    ResultType.ok(branch)
+
+func extract_branch*(
+    roots: openArray[Digest],
+    union_indices: openArray[GeneralizedIndex],
+    index: GeneralizedIndex): Result[seq[Digest], string] =
+  let indices = get_helper_indices(index)
+  roots.extract_branch(union_indices, indices)
+
+func extract_branch*(
+    roots: openArray[Digest],
+    union_indices: openArray[GeneralizedIndex],
+    index: static GeneralizedIndex): auto =
+  const indices = get_helper_indices(index)
+  roots.extract_branch(union_indices, indices)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/specs/phase0/beacon-chain.md#is_valid_merkle_branch
 func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
