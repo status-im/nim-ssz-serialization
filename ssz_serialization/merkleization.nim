@@ -2108,7 +2108,7 @@ func validateIndices(
     indices: openArray[GeneralizedIndex],
     loopOrder: seq[int]): Result[void, string] =
   if indices[loopOrder[0] shr 8] < 1.GeneralizedIndex:
-    return err("Invalid generalized index.")
+    return err("Invalid generalized index")
   for i in 1 ..< loopOrder.high:
     let
       curr = loopOrder[i] shr 8
@@ -2140,6 +2140,30 @@ func hash_tree_root*(
 
 func hash_tree_root*(
     x: auto,
+    indices: openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    topRoot: var Digest): Result[void, string] =
+  doAssert indices.len == roots.len
+  if indices.len == 0:
+    hash_tree_root(x, topRoot)
+    ok()
+  elif indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+    hash_tree_root(x, roots[0])
+    topRoot = roots[0]
+    ok()
+  else:
+    let loopOrder = merkleizationLoopOrder(indices)
+    ? validateIndices(indices, loopOrder)
+    var batch = BatchRequest.init(indices, roots, loopOrder)
+    let numFulfilled = hash_tree_root_multi(
+        x, addr batch, needTopRoot = true).valueOr:
+      return err(unsupportedIndex)
+    doAssert numFulfilled == loopOrder.len
+    topRoot = batch.topRoot
+    ok()
+
+func hash_tree_root*(
+    x: auto,
     indices: static openArray[GeneralizedIndex],
     roots: var openArray[Digest]): Result[void, string] =
   doAssert indices.len == roots.len
@@ -2160,6 +2184,35 @@ func hash_tree_root*(
         let numFulfilled = hash_tree_root_multi(x, addr batch).valueOr:
           return err(unsupportedIndex)
         doAssert numFulfilled == loopOrder.len
+        ok()
+
+func hash_tree_root*(
+    x: auto,
+    indices: static openArray[GeneralizedIndex],
+    roots: var openArray[Digest],
+    topRoot: var Digest): Result[void, string] =
+  doAssert indices.len == roots.len
+  when indices.len == 0:
+    hash_tree_root(x, topRoot)
+    ok()
+  else:
+    when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+      hash_tree_root(x, roots[0])
+      topRoot = roots[0]
+      ok()
+    else:
+      const
+        loopOrder = merkleizationLoopOrder(indices)
+        v = validateIndices(indices, loopOrder)
+      when v.isErr:
+        err(v.error)
+      else:
+        var batch = BatchRequest.init(indices, roots, loopOrder)
+        let numFulfilled = hash_tree_root_multi(
+            x, addr batch, needTopRoot = true).valueOr:
+          return err(unsupportedIndex)
+        doAssert numFulfilled == loopOrder.len
+        topRoot = batch.topRoot
         ok()
 
 func hash_tree_root*(
@@ -2213,7 +2266,7 @@ func hash_tree_root*(
     index: GeneralizedIndex
 ): Result[Digest, string] =
   if index < 1.GeneralizedIndex:
-    err("Invalid generalized index.")
+    err("Invalid generalized index")
   elif index == 1.GeneralizedIndex:
     ok(hash_tree_root(x))
   else:
@@ -2231,7 +2284,7 @@ func hash_tree_root*(
     index: static GeneralizedIndex
 ): Result[Digest, string] =
   when index < 1.GeneralizedIndex:
-    err("Invalid generalized index.")
+    err("Invalid generalized index")
   elif index == 1.GeneralizedIndex:
     ok(hash_tree_root(x))
   else:
