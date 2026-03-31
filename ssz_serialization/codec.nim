@@ -82,9 +82,8 @@ func fromSszBytes*(
 func `[]`[T, U, V](s: openArray[T], x: HSlice[U, V]) {.error:
   "Please don't use openArray's [] as it allocates a result sequence".}
 
-template checkForForbiddenBits(ResulType: type,
-                               input: openArray[byte],
-                               expectedBits: static int64) =
+template checkForForbiddenBits(
+    ResulType: type, input: openArray[byte], expectedBits: static int64) =
   ## This checks if the input contains any bits set above the maximum
   ## sized allowed. We only need to check the last byte to verify this:
   const bitsInLastByte = (expectedBits mod 8)
@@ -137,7 +136,7 @@ proc readSszValue*[T](
 
   template readOffset(n: int): int {.used.} =
     let offset = readOffsetUnchecked(n)
-    if offset > input.len.uint32:
+    if offset > input.len.uint:
       raiseMalformedSszError(
         T, "list element offset points past the end of the input")
     int(offset)
@@ -289,13 +288,12 @@ proc readSszValue*[T](
     when isUnion(type(val)):
       val = initSszUnion(type(val), input)
     else:
-      let inputLen = uint32 input.len
-      const minimallyExpectedSize = uint32 fixedPortionSize(T)
+      const minimallyExpectedSize = fixedPortionSize(T)
       when isFixedSize(T):
-        if inputLen != minimallyExpectedSize:
+        if input.len != minimallyExpectedSize:
           raiseIncorrectSize(T)
 
-      if inputLen < minimallyExpectedSize:
+      if input.len < minimallyExpectedSize:
         raiseMalformedSszError(T, "input of insufficient size")
 
       enumInstanceSerializedFields(val, fieldName, field):
@@ -316,22 +314,25 @@ proc readSszValue*[T](
             endOffset = boundingOffsets[1]
         else:
           let
-            startOffset = readOffsetUnchecked(boundingOffsets[0])
-            endOffset = if boundingOffsets[1] == -1: inputLen
-                        else: readOffsetUnchecked(boundingOffsets[1])
+            startOffset = readOffsetUnchecked(boundingOffsets[0]).uint
+            endOffset =
+              if boundingOffsets[1] == -1:
+                input.len.uint
+              else:
+                readOffsetUnchecked(boundingOffsets[1]).uint
 
           when boundingOffsets.isFirstOffset:
-            if startOffset != minimallyExpectedSize:
+            if startOffset != minimallyExpectedSize.uint:
               raiseMalformedSszError(
                 T, "object dynamic portion starts at invalid offset")
 
           if startOffset > endOffset:
             raiseMalformedSszError(
               T, "field offsets are not monotonically increasing")
-          elif endOffset > inputLen:
+          elif endOffset > input.len.uint:
             raiseMalformedSszError(
               T, "field offset points past the end of the input")
-          elif startOffset < minimallyExpectedSize:
+          elif startOffset < minimallyExpectedSize.uint:
             raiseMalformedSszError(
               T, "field offset points outside bounding offsets")
 
