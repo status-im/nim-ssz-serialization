@@ -11,7 +11,7 @@ import
   std/typetraits,
   unittest2, stew/byteutils,
   ../ssz_serialization,
-  ../ssz_serialization/[merkleization, navigator, dynamic_navigator]
+  ../ssz_serialization/merkleization
 
 from nimcrypto/utils import fromHex
 
@@ -130,19 +130,7 @@ proc readSszBytes*(
   readSszValue(data, val)
   val.ignored = "overloaded"
 
-suite "SSZ navigator":
-  test "simple object fields":
-    var foo = Foo(bar: Bar(b: BarList @[1'u64, 2, 3], baz: Baz(i: 10'u64)))
-    let encoded = SSZ.encode(foo)
-
-    check SSZ.decode(encoded, Foo) == foo
-
-    let mountedFoo = sszMount(encoded, Foo)
-    check mountedFoo.bar.b[] == BarList @[1'u64, 2, 3]
-
-    let mountedBar = mountedFoo.bar
-    check mountedBar.baz.i == 10'u64
-
+suite "HashList":
   test "lists with max size":
     let a = [byte 0x01, 0x02, 0x03].toDigest
     let b = [byte 0x04, 0x05, 0x06].toDigest
@@ -235,26 +223,6 @@ suite "SSZ navigator":
       HashSeq[T]
 
     doBasicTypeTest listImpl, 1000
-
-suite "SSZ dynamic navigator":
-  test "navigating fields":
-    var fooOrig = Foo(bar: Bar(b: BarList @[1'u64, 2, 3], baz: Baz(i: 10'u64)))
-    let fooEncoded = SSZ.encode(fooOrig)
-
-    var navFoo = DynamicSszNavigator.init(fooEncoded, Foo)
-
-    var navBar = navFoo.navigate("bar")
-    check navBar.toJson(pretty = false) == """{"b":[1,2,3],"baz":{"i":10}}"""
-
-    var navB = navBar.navigate("b")
-    check navB.toJson(pretty = false) == "[1,2,3]"
-
-    var navBaz = navBar.navigate("baz")
-    var navI = navBaz.navigate("i")
-    check navI.toJson == "10"
-
-    expect KeyError:
-      discard navBar.navigate("biz")
 
 type
   Obj = object
