@@ -48,7 +48,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: true
 
@@ -84,7 +84,7 @@ jobs:
       - name: Restore llvm-mingw (Windows) from cache
         if: runner.os == 'Windows'
         id: windows-mingw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: external/mingw-${{ matrix.target.cpu }}
           key: 'mingw-llvm-17-${{ matrix.target.cpu }}'
@@ -108,7 +108,7 @@ jobs:
       - name: Restore Nim DLLs dependencies (Windows) from cache
         if: runner.os == 'Windows'
         id: windows-dlls-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: external/dlls-${{ matrix.target.cpu }}
           key: 'dlls-${{ matrix.target.cpu }}'
@@ -132,15 +132,22 @@ jobs:
 
       - name: Get Nim commit hash
         id: nim-hash
-        run: |
-          BRANCH="${{ matrix.branch }}"
-          HASH=$(curl -s "https://api.github.com/repos/nim-lang/Nim/branches/${{ matrix.branch }}" | jq -r .commit.sha)
-          echo "NIM_COMMIT_HASH=$HASH" >> $GITHUB_ENV
-          echo "nim_commit_hash=$HASH" >> $GITHUB_OUTPUT
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const branch = "${{ matrix.branch }}";
+            const res = await github.rest.repos.getBranch({
+              owner: "nim-lang",
+              repo: "Nim",
+              branch: branch,
+            });
+            const sha = res.data.commit.sha;
+            core.setOutput("nim_commit_hash", sha);
+            core.exportVariable("NIM_COMMIT_HASH", sha);
 
       - name: Restore Nim build from cache
         id: nim-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             nim/bin
@@ -164,7 +171,7 @@ jobs:
 
       - name: Save Nim build to cache
         if: steps.nim-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             nim/bin
