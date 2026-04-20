@@ -109,19 +109,6 @@ static:
   doAssert fixedPortionSize(ObjWithFields) ==
     1 + 4 + sizeof(array[20, byte]) + (256 div 8)
 
-type
-  Foo = object
-    bar: Bar
-
-  BarList = List[uint64, 128]
-
-  Bar = object
-    b: BarList
-    baz: Baz
-
-  Baz = object
-    i: uint64
-
 func toDigest[N: static int](x: array[N, byte]): Digest =
   result.data[0 .. N-1] = x
 

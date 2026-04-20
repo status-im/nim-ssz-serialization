@@ -442,11 +442,9 @@ func extract_branch*(
   roots.extract_branch(union_indices, indices)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/specs/phase0/beacon-chain.md#is_valid_merkle_branch
-func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
-                             depth: int, index: uint64,
-                             root: Digest): bool =
-  ## Check if ``leaf`` at ``index`` verifies against the Merkle ``root`` and
-  ## ``branch``.
+func merkle_branch_root*(
+    leaf: Digest, branch: openArray[Digest],
+    depth: int, index: uint64): Digest =
   var
     value = leaf
     buf: array[64, byte]
@@ -459,7 +457,16 @@ func is_valid_merkle_branch*(leaf: Digest, branch: openArray[Digest],
       buf[0..31] = value.data
       buf[32..63] = branch[i].data
     value = digest(buf)
-  value == root
+  value
+
+func is_valid_merkle_branch*(
+    leaf: Digest, branch: openArray[Digest],
+    depth: int, index: uint64, root: Digest): bool =
+  ## Check if ``leaf`` at ``index`` verifies against the Merkle ``root`` and
+  ## ``branch``.
+  if depth != branch.len:
+    return false
+  merkle_branch_root(leaf, branch, depth, index) == root
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#ssz-object-to-index
 type
