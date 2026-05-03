@@ -687,7 +687,7 @@ func addDefault*(x: var HashList): ptr x.T =
   clearCaches(x, x.data.len() - 1)
   addr x.data[^1]
 
-func add*(x: var HashSeq, val: auto): bool =
+func add*(x: var HashSeq, val: auto): bool {.discardable.} =
   add(x.data, val)
   x.resizeHashes()
   if x.data.len() > 0:
