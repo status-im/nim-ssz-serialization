@@ -661,6 +661,11 @@ func resetCache*(a: var HashSeq) =
   a.indices.reset()
   a.resizeHashes()
 
+func clearCache*(a: var HashSeq) =
+  clearCache(a.root)
+  for level in a.hashes.mitems():
+    clearCache(level)
+
 template len*(a: type HashArray): auto = int(a.maxLen)
 
 func add*(x: var HashList, val: auto): bool =
@@ -682,12 +687,13 @@ func addDefault*(x: var HashList): ptr x.T =
   clearCaches(x, x.data.len() - 1)
   addr x.data[^1]
 
-func add*(x: var HashSeq, val: auto) =
+func add*(x: var HashSeq, val: auto): bool {.discardable.} =
   add(x.data, val)
   x.resizeHashes()
   if x.data.len() > 0:
     # Otherwise, adding an empty list to an empty list fails
     clearCaches(x, x.data.len() - 1)
+  true
 
 func addDefault*(x: var HashSeq): ptr x.T =
   distinctBase(x.data).setLen(x.data.len + 1)

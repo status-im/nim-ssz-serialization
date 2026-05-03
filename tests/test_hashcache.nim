@@ -67,20 +67,16 @@ template runHashCacheTests[T](_: typedesc[T]): untyped =
 
   test "Incremental add":
     for i in 0 ..< 100:
-      when items is HashList:
-        check items.add(foo)
-      else:
+      check:
         items.add(foo)
-      check items.hash_tree_root() == items.data.hash_tree_root()
+        items.hash_tree_root() == items.data.hash_tree_root()
 
   test "Incremental add across cache depth boundary":
     items.checkResize(1020)
     for i in 1020 ..< 1080:
-      when items is HashList:
-        check items.add(foo)
-      else:
+      check:
         items.add(foo)
-      check items.hash_tree_root() == items.data.hash_tree_root()
+        items.hash_tree_root() == items.data.hash_tree_root()
 
   test "Incremental decrease":
     for i in countdown(1050, 0):
@@ -106,11 +102,9 @@ template runHashCacheTests[T](_: typedesc[T]): untyped =
         else:
           true
       if canAdd and rand(1) == 0:
-        when items is HashList:
-          check items.add(foo)
-        else:
+        check:
           items.add(foo)
-        check items.hash_tree_root() == items.data.hash_tree_root()
+          items.hash_tree_root() == items.data.hash_tree_root()
       else:
         let count =
           when items is HashList:
