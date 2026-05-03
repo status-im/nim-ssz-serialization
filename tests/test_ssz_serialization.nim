@@ -190,11 +190,9 @@ suite "HashList":
       var leaves: typ.listImpl
       while leaves.len < maxLen:
         checkpoint $typ & " - " & $leaves.len
-        when leaves is HashSeq:
+        check:
           leaves.add leaves.len.typ
-        else:
-          check leaves.add leaves.len.typ
-        check hash_tree_root(leaves) == hash_tree_root(leaves.data)
+          hash_tree_root(leaves) == hash_tree_root(leaves.data)
 
     checkType uint64
     checkType DistinctInt
@@ -269,16 +267,10 @@ suite "hash":
         emptyBytes = SSZ.encode(small)
         emptyRoot = hash_tree_root(small)
 
-      when MyList is HashSeq:
-        small.add(10.typ)
-      else:
-        check small.add(10.typ)
+      check small.add(10.typ)
 
       for i in 0..<100:
-        when MyList is HashSeq:
-          large.add(i.typ)
-        else:
-          check large.add(i.typ)
+        check large.add(i.typ)
 
       let
         sroot = hash_tree_root(small)
@@ -335,16 +327,10 @@ suite "hash":
       emptyBytes = SSZ.encode(small)
       emptyRoot = hash_tree_root(small)
 
-    when MyList is HashSeq:
-      small.add(NonFixed())
-    else:
-      check small.add(NonFixed())
+    check small.add(NonFixed())
 
     for i in 0..<100:
-      when MyList is HashSeq:
-        large.add(NonFixed())
-      else:
-        check large.add(NonFixed())
+      check large.add(NonFixed())
 
     let
       sroot = hash_tree_root(small)
