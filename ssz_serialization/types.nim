@@ -1027,6 +1027,15 @@ method formatMsg*(
   except CatchableError:
     "SSZ size mismatch"
 
+proc readValue*(
+    reader: var JsonReader, value: var seq[byte]
+) {.raises: [IOError, SerializationError].} =
+  value = utils.fromHex(reader.readValue(string))
+
+proc writeValue*(
+    writer: var JsonWriter, value: seq[byte]) {.raises: [IOError].} =
+  writeValue(writer, to0xHex(value))
+
 template readValue*(reader: var JsonReader, value: var List) =
   mixin readValue
   when type(value[0]) is byte:
