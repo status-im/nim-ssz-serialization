@@ -234,6 +234,7 @@ func hashListIndicesLen[T](t: typedesc[T], maxLen: Limit | static Limit): int =
 type
   List*[T; maxLen: static Limit] = distinct seq[T]
   BitList*[maxLen: static Limit] = distinct BitSeq
+  ByteSeq* = distinct seq[byte]
 
   HashArray*[maxLen: static Limit; T] = object
     ## Array implementation that caches the hash of each chunk of data - see
@@ -380,6 +381,26 @@ template `$`*(a: BitList): string = $(BitSeq(a))
 
 template items*(x: BitList): untyped = items(BitSeq(x))
 template pairs*(x: BitList): untyped = pairs(BitSeq(x))
+
+template asSeq*(x: ByteSeq): auto = distinctBase(x)
+template init*(T: type ByteSeq, x: seq[byte]): auto = ByteSeq(x)
+template `$`*(x: ByteSeq): auto = $(distinctBase(x))
+template len*(x: ByteSeq): auto = len(distinctBase(x))
+template low*(x: ByteSeq): auto = low(distinctBase(x))
+template high*(x: ByteSeq): auto = high(distinctBase(x))
+template `[]`*(x: ByteSeq, idx: auto): untyped = distinctBase(x)[idx]
+template `[]=`*(x: var ByteSeq, idx: auto, val: byte) =
+  distinctBase(x)[idx] = val
+template `==`*(a, b: ByteSeq): bool = distinctBase(a) == distinctBase(b)
+template `&`*(a, b: ByteSeq): auto = ByteSeq(distinctBase(a) & distinctBase(b))
+template items*(x: ByteSeq): untyped = items(distinctBase(x))
+template pairs*(x: ByteSeq): untyped = pairs(distinctBase(x))
+template mitems*(x: var ByteSeq): untyped = mitems(distinctBase(x))
+template mpairs*(x: var ByteSeq): untyped = mpairs(distinctBase(x))
+template contains*(x: ByteSeq, val: byte): untyped =
+  contains(distinctBase(x), val)
+template add*(x: var ByteSeq, val: byte) = add(distinctBase(x), val)
+template setLen*(x: var ByteSeq, newLen: int) = setLen(distinctBase(x), newLen)
 
 template isCached*(v: Digest): bool =
   ## An entry is "in the cache" if the first 8 bytes are zero - conveniently,
@@ -1028,13 +1049,13 @@ method formatMsg*(
     "SSZ size mismatch"
 
 proc readValue*(
-    reader: var JsonReader, value: var seq[byte]
+    reader: var JsonReader, value: var ByteSeq
 ) {.raises: [IOError, SerializationError].} =
-  value = utils.fromHex(reader.readValue(string))
+  value = ByteSeq utils.fromHex(reader.readValue(string))
 
 proc writeValue*(
-    writer: var JsonWriter, value: seq[byte]) {.raises: [IOError].} =
-  writeValue(writer, to0xHex(value))
+    writer: var JsonWriter, value: ByteSeq) {.raises: [IOError].} =
+  writeValue(writer, to0xHex(distinctBase(value)))
 
 template readValue*(reader: var JsonReader, value: var List) =
   mixin readValue

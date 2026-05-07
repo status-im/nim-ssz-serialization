@@ -364,3 +364,8 @@ template toSszType*(v: auto): auto =
       v
   else:
     unsupported T
+
+template toSszType*(v: ByteSeq): seq[byte] = distinctBase(v)
+
+template fromSszBytes*(T: type ByteSeq, bytes: openArray[byte]): T =
+  T fromSszBytes(distinctBase(T), bytes)
