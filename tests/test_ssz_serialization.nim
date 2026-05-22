@@ -10,6 +10,7 @@
 import
   std/typetraits,
   unittest2, stew/byteutils,
+  json_serialization,
   ../ssz_serialization,
   ../ssz_serialization/merkleization
 
@@ -529,6 +530,16 @@ suite "Distinct":
     readSszBytes(encodedObj, xx)
 
     check xx == obj
+
+  test "ByteSeq JSON round-trip":
+    let
+      obj = ByteSeq @[byte 0xde, 0xad, 0xbe, 0xef]
+      encodedObj = Json.encode(obj)
+
+    check:
+      encodedObj == "\"0xdeadbeef\""
+      Json.encode(distinctBase(obj)) == "[222,173,190,239]"
+      Json.decode(encodedObj, ByteSeq) == obj
 
   test "readSszBytes overload works in nested objects":
     check:
