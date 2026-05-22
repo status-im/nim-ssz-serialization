@@ -368,4 +368,4 @@ template toSszType*(v: auto): auto =
 template toSszType*(v: ByteSeq): seq[byte] = distinctBase(v)
 
 template fromSszBytes*(T: type ByteSeq, bytes: openArray[byte]): T =
-  T fromSszBytes(distinctBase(T), bytes)
+  T(@bytes)
