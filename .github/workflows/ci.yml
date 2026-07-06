@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - master
+      - older-mac
   pull_request:
   workflow_dispatch:
 
@@ -31,7 +32,7 @@ jobs:
           - os: macos
             cpu: arm64
             platform: arm64
-            builder: macos-latest
+            builder: macos-15
           - os: windows
             cpu: amd64
             platform: x64
