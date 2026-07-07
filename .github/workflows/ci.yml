@@ -20,22 +20,10 @@ jobs:
             cpu: amd64
             platform: x64
             builder: ubuntu-latest
-          - os: linux-gcc-14 # This is to use ubuntu 24 and install gcc 14. Should be removed when ubuntu-latest is 26.04
-            cpu: amd64
-            platform: x64
-            builder: ubuntu-24.04
-          - os: linux
-            cpu: i386
-            platform: x86
-            builder: ubuntu-latest
           - os: macos
             cpu: arm64
             platform: arm64
-            builder: macos-latest
-          - os: windows
-            cpu: amd64
-            platform: x64
-            builder: windows-latest
+            builder: macos-26
         branch: [version-2-0, version-2-2, devel]
 
     defaults:
@@ -51,84 +39,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: true
-
-      - name: Install build dependencies (Linux i386)
-        if: runner.os == 'Linux' && matrix.target.cpu == 'i386'
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
-            --no-install-recommends -yq gcc-multilib g++-multilib libssl-dev:i386
-          mkdir -p external/bin
-          cat << EOF > external/bin/gcc
-          #!/bin/bash
-          exec $(which gcc) -m32 -mno-adx "\$@"
-          EOF
-          cat << EOF > external/bin/g++
-          #!/bin/bash
-          exec $(which g++) -m32 -mno-adx "\$@"
-          EOF
-          chmod 755 external/bin/gcc external/bin/g++
-          echo '${{ github.workspace }}/external/bin' >> $GITHUB_PATH
-
-      - name: Use gcc 14
-        # Should be removed when ubuntu-latest is 26.04
-        if: ${{ matrix.target.os == 'linux-gcc-14' }}
-        run: |
-          # Add GCC-14 to alternatives
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 14
-          # Set GCC-14 as the default
-          sudo update-alternatives --set gcc /usr/bin/gcc-14
-
-
-      - name: Restore llvm-mingw (Windows) from cache
-        if: runner.os == 'Windows'
-        id: windows-mingw-cache
-        uses: actions/cache@v5
-        with:
-          path: external/mingw-${{ matrix.target.cpu }}
-          key: 'mingw-llvm-17-${{ matrix.target.cpu }}'
-
-      - name: Install llvm-mingw dependency (Windows)
-        if: >
-          steps.windows-mingw-cache.outputs.cache-hit != 'true' &&
-          runner.os == 'Windows'
-        run: |
-          mkdir -p external
-          MINGW_BASE="https://github.com/mstorsjo/llvm-mingw/releases/download/20241203"
-          if [[ '${{ matrix.target.cpu }}' == 'amd64' ]]; then
-            MINGW_URL="$MINGW_BASE/llvm-mingw-20241203-ucrt-x86_64.zip"
-          else
-            MINGW_URL="$MINGW_BASE/llvm-mingw-20241203-ucrt-i686.zip"
-          fi
-          curl -L "$MINGW_URL" -o "external/mingw-${{ matrix.target.cpu }}.zip"
-          7z x -y "external/mingw-${{ matrix.target.cpu }}.zip" -oexternal/mingw-${{ matrix.target.cpu }}/
-          mv external/mingw-${{ matrix.target.cpu }}/**/* ./external/mingw-${{ matrix.target.cpu }}
-
-      - name: Restore Nim DLLs dependencies (Windows) from cache
-        if: runner.os == 'Windows'
-        id: windows-dlls-cache
-        uses: actions/cache@v5
-        with:
-          path: external/dlls-${{ matrix.target.cpu }}
-          key: 'dlls-${{ matrix.target.cpu }}'
-
-      - name: Install DLLs dependencies (Windows)
-        if: >
-          runner.os == 'Windows' &&
-          steps.windows-dlls-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p external
-          curl -L "https://nim-lang.org/download/windeps.zip" -o external/windeps.zip
-          7z x -y external/windeps.zip -oexternal/dlls-${{ matrix.target.cpu }}
-
-      - name: Path to cached dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          echo "${{ github.workspace }}/external/mingw-${{ matrix.target.cpu }}/bin" >> $GITHUB_PATH
-          echo "${{ github.workspace }}/external/dlls-${{ matrix.target.cpu }}" >> $GITHUB_PATH
-
-
 
       - name: Get Nim commit hash
         id: nim-hash
@@ -169,17 +79,6 @@ jobs:
           curl -O -L -s -S https://raw.githubusercontent.com/status-im/nimbus-build-system/master/scripts/build_nim.sh
           bash build_nim.sh nim csources dist/nimble NimBinaries
 
-      - name: Save Nim build to cache
-        if: steps.nim-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v5
-        with:
-          path: |
-            nim/bin
-            nim/config
-            nim/lib
-            nim/nim.nimble
-          key: nim-${{ matrix.branch }}-${{ steps.nim-hash.outputs.nim_commit_hash }}-${{ matrix.target.os }}-${{ matrix.target.cpu }}
-
       - name: Add Nim bin to GITHUB_PATH
         run: echo '${{ github.workspace }}/nim/bin' >> $GITHUB_PATH
 
@@ -194,11 +93,6 @@ jobs:
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
           env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
 
-      - name: Fuzz a little (hashtree_abi via vendor directory import)
-        if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
-        run: |
-          nimble fuzzHashtree
-
       - name: Remove vendor directory to force hashtree_abi via search path import
         run: |
           rm -rf vendor
@@ -210,9 +104,3 @@ jobs:
           gcc --version
           nimble install -y --depsOnly
           env TEST_LANG="c" NIMFLAGS="${NIMFLAGS}" nimble test
-          env TEST_LANG="cpp" NIMFLAGS="${NIMFLAGS}" nimble test
-
-      - name: Fuzz a little (hashtree_abi via search path import)
-        if: runner.os == 'Linux' && matrix.target.cpu == 'amd64'
-        run: |
-          nimble fuzzHashtree

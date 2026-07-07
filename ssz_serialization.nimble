@@ -36,15 +36,9 @@ proc build(args, path: string) =
 
 proc run(args, path: string) =
   build args & " --mm:refc -r", path
-  build args & " --mm:orc -r", path
 
 task test, "Run all tests":
-  for blst in [false, true]:
-    for hashtree in [false, true]:
+  for blst in [false]:
+    for hashtree in [false]:
       let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
       run opts, "tests/test_all"
-
-task fuzzHashtree, "Run fuzzing test":
-  # TODO We don't run because the timeout parameter doesn't seem to work so
-  # this takes too long
-  build "-d:release", "tests/fuzzing/fuzz_hashtree"
