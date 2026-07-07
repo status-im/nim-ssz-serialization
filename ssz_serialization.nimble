@@ -27,7 +27,6 @@ from os import quoteShell
 
 let cfg =
   " --styleCheck:usages --styleCheck:error" &
-  (if verbose: "" else: " --verbosity:0") &
   " --skipParentCfg --skipUserCfg --outdir:build " &
   quoteShell("--nimcache:build/nimcache/$projectName")
 
@@ -38,7 +37,7 @@ proc run(args, path: string) =
   build args & " --mm:refc -r", path
 
 task test, "Run all tests":
-  for blst in [false]:
-    for hashtree in [false]:
+  for blst in [false, true]:
+    for hashtree in [false, true]:
       let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
-      run opts, "tests/test_all"
+      run opts, "ssz_serialization/digest"
