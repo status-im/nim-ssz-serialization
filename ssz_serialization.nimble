@@ -37,7 +37,6 @@ proc run(args, path: string) =
   build args & " --mm:refc -r", path
 
 task test, "Run all tests":
-  for blst in [false, true]:
-    for hashtree in [false, true]:
-      let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
-      run opts, "ssz_serialization/digest"
+  for hashtree in [false, true]:
+    let opts = "--threads:on -d:PREFER_HASHTREE_SHA256=" & $hashtree
+    run opts, "ssz_serialization/digest"
