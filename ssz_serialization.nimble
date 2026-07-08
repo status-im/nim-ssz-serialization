@@ -16,7 +16,7 @@ requires "nim >= 2.0.10",
          "blscurve",
          "results",
          "unittest2",
-         "hashtree_abi"
+         "hashtree_abi#7cb0a35fd604a58bb5a66c50dfda81c801b66743"
 
 let nimc = getEnv("NIMC", "nim") # Which nim compiler to use
 let lang = getEnv("NIMLANG", "c") # Which backend (c/cpp/js)
