@@ -1423,8 +1423,8 @@ func hashTreeRootAux[T](
     else:
       trs "FIXED TYPE; USE CHUNK STREAM"
       const
-        numUsedChunks = T.maxChunksCount(x.len)
-        height = numUsedChunks.binaryTreeHeight
+        numUsedChunks = E.totalChunkCount(x.len)
+        height = T.maxChunksCount(x.len).binaryTreeHeight
 
       func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
         when E is BasicType:
@@ -1850,8 +1850,8 @@ func hashTreeRootCached(
   mixin toSszType
   template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
   const
-    numUsedChunks = x.maxChunks
-    height = numUsedChunks.binaryTreeHeight
+    numUsedChunks = E.totalChunkCount(x.len)
+    height = x.maxChunks.binaryTreeHeight
 
   func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
     when E is BasicType:

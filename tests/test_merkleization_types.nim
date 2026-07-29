@@ -159,6 +159,10 @@ type
     bo: HashSeq[E]
     bp: HashSeq[uint64]
     bq: HashSeq[uint64]
+    br: array[3, E]
+    bs: HashArray[3, E]
+    bt: array[9, uint64]
+    bu: HashArray[9, uint64]
 let
   x = X(
     a: true,
@@ -359,7 +363,12 @@ let
       @[E(x: false, y: true), E(x: true, y: false)]),
     bo: HashSeq[E].init(@[]),
     bp: HashSeq[uint64].init(@[1'u64, 2]),
-    bq: HashSeq[uint64].init(@[]))
+    bq: HashSeq[uint64].init(@[]),
+    br: [E(x: false, y: true), E(x: true, y: false), E(x: true, y: true)],
+    bs: HashArray[3, E](data: [
+      E(x: false, y: true), E(x: true, y: false), E(x: true, y: true)]),
+    bt: [1'u64, 2, 3, 4, 5, 6, 7, 8, 9],
+    bu: HashArray[9, uint64](data: [1'u64, 2, 3, 4, 5, 6, 7, 8, 9]))
   roots = block:
     var res = {
       # a
@@ -1185,6 +1194,36 @@ let
       # bq
       0b110001000: d([]),
       0b110001001: d(0'u64),
+
+      # br
+      0b11000101000: d(0'u8),
+      0b11000101001: d(1'u8),
+      0b11000101010: d(1'u8),
+      0b11000101011: d(0'u8),
+      0b11000101100: d(1'u8),
+      0b11000101101: d(1'u8),
+      0b1100010111: d([]),
+
+      # bs
+      0b11000110000: d(0'u8),
+      0b11000110001: d(1'u8),
+      0b11000110010: d(1'u8),
+      0b11000110011: d(0'u8),
+      0b11000110100: d(1'u8),
+      0b11000110101: d(1'u8),
+      0b1100011011: d([]),
+
+      # bt
+      0b1100011100: d([1'u64, 2, 3, 4]),
+      0b1100011101: d([5'u64, 6, 7, 8]),
+      0b1100011110: d([9'u64]),
+      0b1100011111: d([]),
+
+      # bu
+      0b1100100000: d([1'u64, 2, 3, 4]),
+      0b1100100001: d([5'u64, 6, 7, 8]),
+      0b1100100010: d([9'u64]),
+      0b1100100011: d([]),
     }.toOrderedTable
     for i in [
         0b10001000'i64,
@@ -1757,9 +1796,27 @@ let
         0b11000010,
         0b110000110,
         0b11000011,
-        0b11000100]:
+        0b11000100,
+        0b1100010100,
+        0b1100010101,
+        0b1100010110,
+        0b110001010,
+        0b110001011,
+        0b11000101,
+        0b1100011000,
+        0b1100011001,
+        0b1100011010,
+        0b110001100,
+        0b110001101,
+        0b11000110,
+        0b110001110,
+        0b110001111,
+        0b11000111,
+        0b110010000,
+        0b110010001,
+        0b11001000]:
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
-    for i in 197 ..< 256:
+    for i in 201 ..< 256:
       res[i] = d([])
     for i in countdown(127, 1):
       res[i] = d(res.getOrDefault(2 * i + 0), res.getOrDefault(2 * i + 1))
