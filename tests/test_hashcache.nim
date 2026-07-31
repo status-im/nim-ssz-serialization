@@ -116,6 +116,24 @@ template runHashCacheTests[T](_: typedesc[T]): untyped =
 suite "HashList":
   runHashCacheTests(HashList[Foo, 8192])
 
+suite "HashList mutation":
+  template runMutationTests(maxLen: static Limit): untyped =
+    test "Mutate elements after hashing - " & $maxLen:
+      var hl: HashList[Foo, maxLen]
+      for i in 0 ..< int(maxLen):
+        check:
+          hl.add(foo)
+          hl.hash_tree_root() == hl.data.hash_tree_root()
+        for j in 0 ..< hl.data.len:
+          hl.mitem(j).y = uint64(1000 + i * 100 + j)
+          check hl.hash_tree_root() == hl.data.hash_tree_root()
+
+  runMutationTests(1)
+  runMutationTests(2)
+  runMutationTests(3)
+  runMutationTests(4)
+  runMutationTests(8)
+
 suite "HashSeq":
   runHashCacheTests(HashSeq[Foo])
 

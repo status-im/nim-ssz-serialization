@@ -495,8 +495,8 @@ func clearCachesList[T, I](
     return
 
   var
-    idx = 1'i64 shl (depth - 1) + (chunkIdx(t, dataIdx) shr 1)
-    layer = depth - 1
+    layer = max(depth - 1, 0)
+    idx = 1'i64 shl layer + (chunkIdx(t, dataIdx) shr 1)
   while idx > 0:
     let
       idxInLayer = idx - (1'i64 shl layer)
