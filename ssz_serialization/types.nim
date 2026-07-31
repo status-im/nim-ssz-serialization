@@ -537,7 +537,7 @@ func resizeHashes[T, I](
   ## be called whenever `data` shrinks or grows.
   let
     leaves = int(chunkIdx(T, dataLen + dataPerChunk(T) - 1))
-    newSize = 1 + max(cacheNodes(depth, leaves), 1)
+    newSize = 1 + cacheNodes(max(depth, 1), leaves)
 
   # Growing might be because of add(), addDefault(), or in-place reading of a
   # larger HashList. In-place reading of a smaller HashList causes shrinking.
