@@ -128,6 +128,29 @@ suite "HashList mutation":
           hl.mitem(j).y = uint64(1000 + i * 100 + j)
           check hl.hash_tree_root() == hl.data.hash_tree_root()
 
+    test "Add after empty read - " & $maxLen:
+      var hl: HashList[Foo, maxLen]
+      try:
+        readSszBytes(@[], hl)
+      except SszError:
+        raiseAssert "Valid SSZ"
+      for i in 0 ..< int(maxLen):
+        check:
+          hl.add(foo)
+          hl.hash_tree_root() == hl.data.hash_tree_root()
+
+    test "Resize via read - " & $maxLen:
+      var hl: HashList[Foo, maxLen]
+      for i, len in [
+          0, 0, int(maxLen), int(maxLen), 0, 1, 1, int(maxLen), 0, 0, 1]:
+        let contents = (0 ..< len).mapIt(
+          Foo(x: foo.x, y: uint64(1000 * (i + 1) + it)))
+        try:
+          readSszBytes(SSZ.encode(contents), hl)
+        except SszError:
+          raiseAssert "Valid SSZ"
+        check hl.hash_tree_root() == hl.data.hash_tree_root()
+
   runMutationTests(1)
   runMutationTests(2)
   runMutationTests(3)
