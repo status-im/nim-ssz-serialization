@@ -9,7 +9,7 @@
 {.used.}
 
 import
-  std/[random, sequtils],
+  std/[algorithm, random, sequtils],
   stew/byteutils,
   unittest2,
   ../ssz_serialization,
@@ -211,6 +211,15 @@ suite "HashArray":
         for i in 0 ..< numItems:
           ha.mitem(i).reset()
         check ha.hash_tree_root() == ha.data.hash_tree_root()
+
+    test "Fill after hashing - " & $maxLen:
+      var ha: HashArray[maxLen, Foo]
+      for i in 0 ..< int(maxLen):
+        ha.mitem(i) = foo
+        ha.mitem(i).x.data[0] = i.byte
+      check ha.hash_tree_root() == ha.data.hash_tree_root()
+      ha.fill(foo)
+      check ha.hash_tree_root() == ha.data.hash_tree_root()
 
   runHashArrayTests(1)
   runHashArrayTests(2)

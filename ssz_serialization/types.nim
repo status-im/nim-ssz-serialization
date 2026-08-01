@@ -424,6 +424,8 @@ template maxChunks*(a: HashList|HashArray): int64 =
   ## Layer where data is
   const v = maxChunkIdx(a.T, a.maxLen) # force compile-time eval
   static: doAssert (v mod 2 == 0) or (v == 1)
+  when a is HashArray:
+    static: doAssert v > 0, "HashArray must have a non-zero length"
   v
 
 template maxDepth*(a: HashList|HashArray): int =
@@ -809,6 +811,8 @@ template clear*(a: var HashSeq) =
 template fill*(a: var HashArray, c: auto) =
   mixin fill
   fill(a.data, c)
+  a.resetCache()
+
 template sum*[maxLen; T](a: var HashArray[maxLen, T]): T =
   mixin sum
   sum(a.data)
