@@ -1,6 +1,6 @@
 import system/ansi_c, stew/[importops, ptrops], blscurve
 
-when not tryImport ../vendor/hashtree/hashtree_abi:
+when not tryImport ../../vendor/hashtree/hashtree_abi:
   import hashtree_abi
 
 proc testOneInput(
