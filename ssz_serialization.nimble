@@ -16,6 +16,7 @@ requires "nim >= 2.0.10",
          "blscurve",
          "results",
          "unittest2",
+         "testutils",
          "hashtree_abi"
 
 let nimc = getEnv("NIMC", "nim") # Which nim compiler to use
