@@ -16,6 +16,7 @@ requires "nim >= 2.0.10",
          "blscurve",
          "results",
          "unittest2",
+         "testutils",
          "hashtree_abi"
 
 let nimc = getEnv("NIMC", "nim") # Which nim compiler to use
@@ -44,7 +45,20 @@ task test, "Run all tests":
       let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
       run opts, "tests/test_all"
 
+let
+  fuzzSeconds = getEnv("FUZZ_SECONDS", "100")
+  fuzzTime =
+    if fuzzSeconds == "": ""
+    else: " --duration=" & fuzzSeconds & " "
+
+proc fuzz(format: string) =
+  for fuzzer in ["libFuzzer", "honggfuzz", "afl"]:
+    when defined(macosx):
+      if fuzzer == "honggfuzz":
+        continue
+
+    exec "ntu fuzz --fuzzer=" & fuzzer & fuzzTime &
+      "tests/fuzzing/fuzz_" & format
+
 task fuzzHashtree, "Run fuzzing test":
-  # TODO We don't run because the timeout parameter doesn't seem to work so
-  # this takes too long
-  build "-d:release", "tests/fuzzing/fuzz_hashtree"
+  fuzz("hashtree")

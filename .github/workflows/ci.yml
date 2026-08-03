@@ -181,8 +181,45 @@ jobs:
           key: nim-${{ matrix.branch }}-${{ steps.nim-hash.outputs.nim_commit_hash }}-${{ matrix.target.os }}-${{ matrix.target.cpu }}
 
       - name: Add Nim bin to GITHUB_PATH
-        run: echo '${{ github.workspace }}/nim/bin' >> $GITHUB_PATH
+        run: |
+          echo '${{ github.workspace }}/nim/bin' >> "$GITHUB_PATH"
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
+
+      - name: Install fuzzing engines (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+
+          # libFuzzer
+          sudo apt-get install -y clang
+
+          # honggfuzz
+          nimble install -y testutils
+          "$(nimble path testutils | head -1)/scripts/install_honggfuzz.sh"
+          echo "/opt/honggfuzz/usr/local/bin" >> "$GITHUB_PATH"
+
+          # afl
+          sudo apt-get install -y afl++
+          sudo afl-system-config
+
+      - name: Install fuzzing engines (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+
+          # libFuzzer
+          brew install llvm
+          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
+
+          # honggfuzz
+          nimble install -y testutils
+          "$(nimble path testutils | head -1)/scripts/install_honggfuzz.sh"
+          echo "/opt/honggfuzz/usr/local/bin" >> "$GITHUB_PATH"
+
+          # afl
+          brew install afl++
+          sudo afl-system-config
 
 
       - name: Run tests (hashtree_abi via vendor directory import)
