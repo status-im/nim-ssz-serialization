@@ -808,10 +808,12 @@ template clear*(a: var HashList) =
 template clear*(a: var HashSeq) =
   a.reset()
 
-template fill*(a: var HashArray, c: auto) =
+template fill*(
+    a: var HashArray, c: auto, skipCacheReset: static[bool] = false) =
   mixin fill
   fill(a.data, c)
-  a.resetCache()
+  when not skipCacheReset:
+    a.resetCache()
 
 template sum*[maxLen; T](a: var HashArray[maxLen, T]): T =
   mixin sum
