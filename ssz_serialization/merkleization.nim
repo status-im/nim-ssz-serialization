@@ -1161,13 +1161,20 @@ func fulfill(
       index = 1.GeneralizedIndex
       indexLayer = 0
     if indexLayer < chunkLayer:
+      let chunks = chunksForIndex(index)
       var merkleizer = createMerkleizer2(
         height, indexLayer, internalParam = true)
-      let chunks = chunksForIndex(index)
       let lastUsedChunk = min(chunks.b, totalChunkCount - 1)
       var
         chunk = chunks.a
         allFulfilled = false
+
+      template addChunksUpThrough(highChunk: Limit) =
+        while chunk <= highChunk:
+          merkleizer.addChunkDirect:
+            chunk.getTopRoot(depth, outChunk)
+          inc chunk
+
       while i <= batch.loopOrderHigh and chunk <= lastUsedChunk:
         let (stem, index, indexLayer) = indexAt(i)
         if shouldStop:
@@ -1181,10 +1188,7 @@ func fulfill(
             inc i
             continue
           let lastUsedSubChunk = min(subChunks.b, totalChunkCount - 1)
-          while chunk <= lastUsedSubChunk:
-            merkleizer.addChunkDirect:
-              chunk.getTopRoot(depth, outChunk)
-            inc chunk
+          addChunksUpThrough(lastUsedSubChunk)
           if chunk == totalChunkCount:
             break
           let layerIdx = chunkLayer - indexLayer
@@ -1199,20 +1203,14 @@ func fulfill(
             return err()
           if subChunk > chunks.b:
             break
-          while chunk < subChunk:
-            merkleizer.addChunkDirect:
-              chunk.getTopRoot(depth, outChunk)
-            inc chunk
+          addChunksUpThrough(subChunk - 1)
           i += (? subChunk.getNestedRoot(
             depth, batch, i, atLayer + chunkLayer.int, needTopRoot = true))
           merkleizer.addChunkDirect:
             assign(outChunk, batch.topRoot)
           inc chunk
       if not allFulfilled or needTopRoot:
-        while chunk <= min(chunks.b, totalChunkCount - 1):
-          merkleizer.addChunkDirect:
-            chunk.getTopRoot(depth, outChunk)
-          inc chunk
+        addChunksUpThrough(min(chunks.b, totalChunkCount - 1))
         merkleizer.combineToTop(
           merkleizer.combinedChunks[merkleizer.topIndex][1])
         while i <= batch.loopOrderHigh:
