@@ -256,45 +256,45 @@ suite "Multiproof cache":
     res.y = i.uint64
     res
 
-  template runCachedTest(
-      initObj: proc, maxGindex: GeneralizedIndex): untyped =
-    let obj = initObj()
+  template runCachedTest(T: typedesc, maxGindex: GeneralizedIndex): untyped =
+    let
+      obj = initObj[T]()
+      allGindices = toSeq(1.GeneralizedIndex .. maxGindex)
+      validGindices = allGindices.filterIt(obj.hash_tree_root(it).isOk)
+      allGindicesPlusOne = toSeq(1.GeneralizedIndex .. maxGindex + 1)
+
+    randomize()
+    const numRandomTests = 100
+    var tests = @[allGindices, validGindices, allGindicesPlusOne]
+    for i in 1 .. maxGindex + 1:
+      tests.add @[i.GeneralizedIndex]
+    for _ in 0 ..< numRandomTests:
+      var indices: seq[GeneralizedIndex]
+      for i in (if rand(1.0) < 0.8: validGindices else: allGindices):
+        if rand(1.0) < 0.35:
+          indices.add i
+      indices.shuffle()
+      tests.add indices
+
     test "Cached matches uncached result - " & $typeof(obj) & " - " & $obj.len:
-      let
-        allGindices = (1.GeneralizedIndex .. maxGindex).mapIt(it)
-        validGindices = allGindices.filterIt(obj.hash_tree_root(it).isOk)
-
-      var tests = @[allGindices]
-      for i in 1 .. maxGindex:
-        tests.add @[i.GeneralizedIndex]
-
-      randomize()
-      const numRandomTests = 100
-      for _ in 0 ..< numRandomTests:
-        var indices: seq[GeneralizedIndex]
-        for i in (if rand(1.0) < 0.8: validGindices else: allGindices):
-          if rand(1.0) < 0.35:
-            indices.add i
-        indices.shuffle()
-        tests.add indices
-
       for indices in tests:
+        checkpoint $indices
+
         var
-          uncached = initObj()
+          uncached = initObj[T]()
           uncachedRoots = newSeqUninit[Digest](indices.len)
           uncachedTopRoot: Digest
         let res1 =
           hash_tree_root(uncached, indices, uncachedRoots, uncachedTopRoot)
 
         var
-          cached = initObj()
+          cached = initObj[T]()
           cachedRoots = newSeqUninit[Digest](indices.len)
           cachedTopRoot: Digest
         let
           root = cached.hash_tree_root()
           res2 = hash_tree_root(cached, indices, cachedRoots, cachedTopRoot)
 
-        checkpoint $indices
         check:
           hash_tree_root(uncached) == root
           hash_tree_root(cached) == root
@@ -308,6 +308,52 @@ suite "Multiproof cache":
             if i == 1.GeneralizedIndex:
               check uncachedRoots[o] == root
 
+    if obj.len > 0:
+      test "Mutation invalidates cache - " & $typeof(obj) & " - " & $obj.len:
+        for indices in tests:
+          let i = (0 ..< obj.len).rand()
+          checkpoint $indices & "-" & $i
+
+          var
+            uncached = initObj[T]()
+            uncachedRoots = newSeqUninit[Digest](indices.len)
+            uncachedTopRoot: Digest
+          when typeof(obj) isnot HashArray:
+            discard uncached.add(uncached.item(i))
+          uncached.modObj(i)
+          let res1 =
+            hash_tree_root(uncached, indices, uncachedRoots, uncachedTopRoot)
+
+          var
+            cached = initObj[T]()
+            cachedRoots = newSeqUninit[Digest](indices.len)
+            cachedTopRoot: Digest
+          discard cached.hash_tree_root()
+          when typeof(obj) isnot HashArray:
+            discard cached.add(cached.item(i))
+          cached.modObj(i)
+          let res2 =
+            hash_tree_root(cached, indices, cachedRoots, cachedTopRoot)
+
+          var reference = initObj[T]()
+          when typeof(obj) isnot HashArray:
+            discard reference.add(reference.item(i))
+          reference.modObj(i)
+          let root = reference.hash_tree_root
+
+          check:
+            hash_tree_root(uncached) == root
+            hash_tree_root(cached) == root
+            res1.isOk == res2.isOk
+          if res1.isOk:
+            check:
+              uncachedRoots == cachedRoots
+              uncachedTopRoot == cachedTopRoot
+              uncachedTopRoot == root
+            for o, i in indices:
+              if i == 1.GeneralizedIndex:
+                check uncachedRoots[o] == root
+
   block:
     func initObj[T]: T {.closure.} =
       var res: T
@@ -315,9 +361,12 @@ suite "Multiproof cache":
         res[i] = (i + 1).uint64
       res
 
-    initObj[HashArray[8, uint64]].runCachedTest(7.GeneralizedIndex)
-    initObj[HashArray[9, uint64]].runCachedTest(15.GeneralizedIndex)
-    initObj[HashArray[17, uint64]].runCachedTest(31.GeneralizedIndex)
+    func modObj[T](obj: var T, i: int) {.closure.} =
+      obj[i] = 999'u64
+
+    HashArray[8, uint64].runCachedTest(7.GeneralizedIndex)
+    HashArray[9, uint64].runCachedTest(15.GeneralizedIndex)
+    HashArray[17, uint64].runCachedTest(31.GeneralizedIndex)
 
   block:
     func initObj[T]: T {.closure.} =
@@ -326,9 +375,12 @@ suite "Multiproof cache":
         res[i] = Foo.init(i)
       res
 
-    initObj[HashArray[3, Foo]].runCachedTest(31.GeneralizedIndex)
-    initObj[HashArray[4, Foo]].runCachedTest(63.GeneralizedIndex)
-    initObj[HashArray[6, Foo]].runCachedTest(63.GeneralizedIndex)
+    func modObj[T](obj: var T, i: int) {.closure.} =
+      obj[i] = Foo.init(42)
+
+    HashArray[3, Foo].runCachedTest(31.GeneralizedIndex)
+    HashArray[4, Foo].runCachedTest(63.GeneralizedIndex)
+    HashArray[6, Foo].runCachedTest(63.GeneralizedIndex)
 
   block:
     func initObj[T]: T {.closure.} =
@@ -337,9 +389,12 @@ suite "Multiproof cache":
         res[i] = Bar.init(i)
       res
 
-    initObj[HashArray[3, Bar]].runCachedTest(127.GeneralizedIndex)
-    initObj[HashArray[4, Bar]].runCachedTest(127.GeneralizedIndex)
-    initObj[HashArray[6, Bar]].runCachedTest(127.GeneralizedIndex)
+    func modObj[T](obj: var T, i: int) {.closure.} =
+      obj[i] = Bar.init(123)
+
+    HashArray[3, Bar].runCachedTest(127.GeneralizedIndex)
+    HashArray[4, Bar].runCachedTest(127.GeneralizedIndex)
+    HashArray[6, Bar].runCachedTest(127.GeneralizedIndex)
 
   for n in [0, 1, 2, 3, 4, 5, 7, 8, 9, 16, 31, 32]:
     func initObj[T]: T {.closure.} =
@@ -348,7 +403,10 @@ suite "Multiproof cache":
         doAssert res.add((i + 1).uint64)
       res
 
-    initObj[HashList[uint64, 32]].runCachedTest(63.GeneralizedIndex)
+    func modObj[T](obj: var T, i: int) {.closure.} =
+      obj[i] = 999'u64
+
+    HashList[uint64, 32].runCachedTest(63.GeneralizedIndex)
 
   for n in [0, 1, 2, 3, 5, 8, 13, 16]:
     func initObj[T]: T {.closure.} =
@@ -357,7 +415,10 @@ suite "Multiproof cache":
         doAssert res.add(Foo.init(i))
       res
 
-    initObj[HashList[Foo, 16]].runCachedTest(127.GeneralizedIndex)
+    func modObj[T](obj: var T, i: int) {.closure.} =
+      obj[i] = Foo.init(42)
+
+    HashList[Foo, 16].runCachedTest(127.GeneralizedIndex)
 
   for n in [0, 1, 2, 4, 5, 6, 7, 20, 21, 22, 84, 85, 86, 340, 341]:
     func initObj[T]: T {.closure.} =
@@ -366,7 +427,10 @@ suite "Multiproof cache":
         doAssert res.add((i + 1).uint64)
       res
 
-    initObj[HashSeq[uint64]].runCachedTest(1023.GeneralizedIndex)
+    func modObj[T](obj: var T, i: int) {.closure.} =
+      obj[i] = 999'u64
+
+    HashSeq[uint64].runCachedTest(1023.GeneralizedIndex)
 
   for n in [1, 5, 6, 21, 22]:
     func initObj[T]: T {.closure.} =
@@ -375,4 +439,7 @@ suite "Multiproof cache":
         doAssert res.add(Foo.init(i))
       res
 
-    initObj[HashSeq[Foo]].runCachedTest(1023.GeneralizedIndex)
+    func modObj[T](obj: var T, i: int) {.closure.} =
+      obj[i] = Foo.init(42)
+
+    HashSeq[Foo].runCachedTest(1023.GeneralizedIndex)
