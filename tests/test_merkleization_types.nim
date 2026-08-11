@@ -2065,6 +2065,7 @@ suite "Merkleization types":
       @[0b101111010110100000010000100100.GeneralizedIndex, 0b110001001,
         0b1100000101, 0b1100000101001, 0b110000, 0b101110100100101,
         0b101111010110011],
+      @[0b100110000.GeneralizedIndex, 0b1001100001],
     ]
     for i in tests:
       checkpoint $i.mapIt(toBin(it.int64))
