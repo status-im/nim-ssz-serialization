@@ -42,7 +42,9 @@ proc run(args, path: string) =
 task test, "Run all tests":
   for blst in [false, true]:
     for hashtree in [false, true]:
-      let opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
+      var opts = "--threads:on -d:PREFER_BLST_SHA256=" & $blst & " -d:PREFER_HASHTREE_SHA256=" & $hashtree
+      if blst and hashtree:
+        opts = opts & " -d:SSZ_DEBUG_COUNT_HASHES=1 -d:release"
       run opts, "tests/test_all"
 
 let

@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2018-2024 Status Research & Development GmbH
+# Copyright (c) 2018-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -56,6 +56,18 @@ when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
 else:
   const USE_HASHTREE_SHA256 = false
 
+const SSZ_DEBUG_COUNT_HASHES* {.booldefine.} = false
+when SSZ_DEBUG_COUNT_HASHES:
+  {.hint: "Debug hash counter enabled".}
+  var debugTotalSszHashes*: uint64
+
+  template debugCountHash: untyped =
+    {.noSideEffect.}:
+      inc debugTotalSszHashes
+else:
+  template debugCountHash: untyped =
+    discard
+
 template computeDigest*(body: untyped): Digest =
   ## This little helper will init the hash function and return the sliced
   ## hash:
@@ -90,6 +102,7 @@ func digest*(a: openArray[byte], res: var Digest) =
       h.update(a)
       h.finish()
   else:
+    debugCountHash()
     when USE_HASHTREE_SHA256:
       if a.len() == 64:
         hashtree_hash(baseAddr res.data, baseAddr a, 1)
@@ -133,6 +146,7 @@ func digest*(a, b: openArray[byte], res: var Digest) =
         copyMem(addr buf[a.len], unsafeAddr b[0], b.len)
       digest(buf, res)
     else:
+      debugCountHash()  # Other branches are counted via single-input `digest`
       when USE_BLST_SHA256:
         # BLST has a fast assembly optimized SHA256
         res.data.bls_sha256_digest(a, b)

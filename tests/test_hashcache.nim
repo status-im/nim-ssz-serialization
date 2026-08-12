@@ -9,11 +9,11 @@
 {.used.}
 
 import
-  std/[algorithm, random, sequtils],
+  std/[algorithm, random, sequtils, sets],
   stew/byteutils,
   unittest2,
   ../ssz_serialization,
-  ../ssz_serialization/merkleization
+  ../ssz_serialization/[merkleization, proofs]
 
 type Foo = object
   x: Digest
@@ -237,8 +237,10 @@ suite "HashArray":
   runHashArrayTests(128)
   runHashArrayTests(129)
 
+const BarXMaxLen = 9
+
 type Bar = object
-  x: HashArray[9, uint64]
+  x: HashArray[BarXMaxLen, uint64]
   y: uint64
 
 when (NimMajor, NimMinor) < (2, 2):
@@ -260,12 +262,36 @@ suite "Multiproof cache":
     let
       obj = initObj(T)
       allGindices = toSeq(1.GeneralizedIndex .. maxGindex)
-      validGindices = allGindices.filterIt(obj.hash_tree_root(it).isOk)
       allGindicesPlusOne = toSeq(1.GeneralizedIndex .. maxGindex + 1)
+      validGindices = allGindices.filterIt(obj.hash_tree_root(it).isOk)
+
+      itemGindices = block:
+        when ElemType(T) is Bar:
+          var res: seq[GeneralizedIndex]
+          for i in 0 ..< obj.len:
+            res.add T.get_generalized_index(i).get
+            for j in 0 ..< BarXMaxLen:
+              res.add T.get_generalized_index(i, "x", j).get
+            res.add T.get_generalized_index(i, "y").get
+          res
+        else:
+          (0 ..< obj.len).mapIt(T.get_generalized_index(it).get)
+      cachedGindices = block:
+        var indices = initHashSet[GeneralizedIndex]()
+        for idx in itemGindices.get_union_indices():
+          indices.incl idx
+        for idx in itemGindices:
+          indices.excl idx
+        var res = newSeqOfCap[GeneralizedIndex](indices.len)
+        for idx in indices.items():
+          res.add idx
+        res
 
     randomize()
     const numRandomTests = 100
-    var tests = @[allGindices, validGindices, allGindicesPlusOne]
+    var tests = @[
+      allGindices, allGindicesPlusOne,
+      validGindices, itemGindices, cachedGindices]
     for i in 1 .. maxGindex + 1:
       tests.add @[i.GeneralizedIndex]
     for _ in 0 ..< numRandomTests:
@@ -354,6 +380,50 @@ suite "Multiproof cache":
               if i == 1.GeneralizedIndex:
                 check uncachedRoots[o] == root
 
+      test "Cache avoids re-hashing - " & $T & " - " & $obj.len:
+        when SSZ_DEBUG_COUNT_HASHES:
+          var cached = initObj(T)
+          let
+            root = cached.hash_tree_root()
+            numHashes = debugTotalSszHashes
+          check:
+            numHashes > 0
+            cached.hash_tree_root() == root
+            debugTotalSszHashes == numHashes
+            cached.hash_tree_root(cachedGindices).isOk
+            # debugTotalSszHashes == numHashes
+
+          if obj.len > 0:
+            let numItemHashes = block:
+              let numHashesBefore = debugTotalSszHashes
+              discard default(ElemType(T)).hash_tree_root()
+              debugTotalSszHashes - numHashesBefore
+
+            when ElemType(T).dataPerChunk == 1:
+              block:
+                const itemGindex = T.get_generalized_index(0)
+                let
+                  itemRoot = obj.item(0).hash_tree_root()
+                  numHashesBefore = debugTotalSszHashes
+                check:
+                  cached.hash_tree_root(itemGindex).get == itemRoot
+                  debugTotalSszHashes <= numHashesBefore + numItemHashes
+
+            let i = (0 ..< obj.len).rand()
+            checkpoint $i
+            cached.modObj(i)
+            let numHashesBefore = debugTotalSszHashes
+            discard cached.hash_tree_root()
+            check debugTotalSszHashes <= numHashesBefore + 2 * numItemHashes +
+              T.get_generalized_index(i).get.int64.layer.uint64
+
+            # let allHashes = debugTotalSszHashes
+            check:
+              cached.hash_tree_root(cachedGindices).isOk
+              # debugTotalSszHashes == allHashes
+        else:
+          skip()
+
   block:
     template initObj(T: typedesc): untyped =
       block:
@@ -393,7 +463,7 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj[i] = Bar.init(123)
+      obj.mitem(i).x[i mod BarXMaxLen] = 123'u64
 
     HashArray[3, Bar].runCachedTest(127.GeneralizedIndex)
     HashArray[4, Bar].runCachedTest(127.GeneralizedIndex)
