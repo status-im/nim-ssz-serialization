@@ -403,9 +403,12 @@ template add*(x: var ByteSeq, val: byte) = add(distinctBase(x), val)
 template setLen*(x: var ByteSeq, newLen: int) = setLen(distinctBase(x), newLen)
 
 template isCached*(v: Digest): bool =
-  ## An entry is "in the cache" if the first 8 bytes are zero - conveniently,
-  ## Nim initializes values this way, and while there may be false positives,
-  ## that's fine.
+  ## An entry is "in the cache" if it does not start with 8 zero bytes,
+  ## which is how `clearCache` and Nim's zero-initialization indicate absence.
+  ##
+  ## May return false negatives. Treating a missing entry as deliberately
+  ## cleared is only acceptable for computed `Digest` entries (internal nodes),
+  ## where the chance of false negative is roughly 2^-64 per entry.
 
   when nimvm:
     v.data.toOpenArray(0, sizeof(uint64) - 1) !=
@@ -494,6 +497,12 @@ func clearCachesList[T, I](
   ## Clear each level of the Merkle tree up to the root affected by a data
   ## change at `dataIdx`.
   if hashes.len == 0:
+    return
+  if hashes.len == 2:
+    # The root of a single chunk tree is just the raw data, making `isCached`
+    # potentially produce false negatives at higher rate as it is not hashed.
+    clearCache(hashes[1])  # Raw data chunk
+    clearCache(hashes[0])  # Top list root (mixed in length)
     return
 
   var

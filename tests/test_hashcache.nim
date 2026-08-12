@@ -261,6 +261,8 @@ suite "Multiproof cache":
   template runCachedTest(T: typedesc, maxGindex: GeneralizedIndex): untyped =
     let
       obj = initObj(T)
+      suffix = " - " & $T & " (" & $maxGindex & ") - " & $obj.len
+
       allGindices = toSeq(1.GeneralizedIndex .. maxGindex)
       allGindicesPlusOne = toSeq(1.GeneralizedIndex .. maxGindex + 1)
       validGindices = allGindices.filterIt(obj.hash_tree_root(it).isOk)
@@ -302,7 +304,7 @@ suite "Multiproof cache":
       indices.shuffle()
       tests.add indices
 
-    test "Cached matches uncached result - " & $typeof(obj) & " - " & $obj.len:
+    test "Cached matches uncached result" & suffix:
       for indices in tests:
         checkpoint $indices
 
@@ -335,7 +337,7 @@ suite "Multiproof cache":
               check uncachedRoots[o] == root
 
     if obj.len > 0:
-      test "Mutation invalidates cache - " & $typeof(obj) & " - " & $obj.len:
+      test "Mutation invalidates cache" & suffix:
         for indices in tests:
           let i = (0 ..< obj.len).rand()
           checkpoint $indices & "-" & $i
@@ -380,7 +382,7 @@ suite "Multiproof cache":
               if i == 1.GeneralizedIndex:
                 check uncachedRoots[o] == root
 
-      test "Cache avoids re-hashing - " & $T & " - " & $obj.len:
+      test "Cache avoids re-hashing" & suffix:
         when SSZ_DEBUG_COUNT_HASHES:
           var cached = initObj(T)
           let
@@ -468,6 +470,53 @@ suite "Multiproof cache":
     HashArray[3, Bar].runCachedTest(127.GeneralizedIndex)
     HashArray[4, Bar].runCachedTest(127.GeneralizedIndex)
     HashArray[6, Bar].runCachedTest(127.GeneralizedIndex)
+
+  func zeroPrefixedChunk(i: int): uint64 =
+    # Ensure every chunk starts with 8 zero bytes, so `isCached` report false
+    # and the raw chunk is considered deliberately cleared (!= `uninitSentinel`)
+    if i mod 4 == 0:
+      0'u64
+    else:
+      i.uint64
+
+  block:
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< T.maxLen:
+          res[i] = zeroPrefixedChunk(i)
+        res
+
+    template modObj(obj: untyped, i: int) =
+      obj[i] = 999'u64
+
+    HashArray[4, uint64].runCachedTest(3.GeneralizedIndex)
+
+  for n in [0, 1, 2, 4]:
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add(zeroPrefixedChunk(i))
+        res
+
+    template modObj(obj: untyped, i: int) =
+      obj[i] = 999'u64
+
+    HashList[uint64, 4].runCachedTest(7.GeneralizedIndex)
+
+  for n in [0, 1, 2, 4, 5, 8, 16, 20, 21]:
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add(zeroPrefixedChunk(i))
+        res
+
+    template modObj(obj: untyped, i: int) =
+      obj[i] = 999'u64
+
+    HashSeq[uint64].runCachedTest(63.GeneralizedIndex)
 
   for n in [0, 1, 2, 3, 4, 5, 7, 8, 9, 16, 31, 32]:
     template initObj(T: typedesc): untyped =
