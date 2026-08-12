@@ -258,7 +258,7 @@ suite "Multiproof cache":
 
   template runCachedTest(T: typedesc, maxGindex: GeneralizedIndex): untyped =
     let
-      obj = initObj[T]()
+      obj = initObj(T)
       allGindices = toSeq(1.GeneralizedIndex .. maxGindex)
       validGindices = allGindices.filterIt(obj.hash_tree_root(it).isOk)
       allGindicesPlusOne = toSeq(1.GeneralizedIndex .. maxGindex + 1)
@@ -281,14 +281,14 @@ suite "Multiproof cache":
         checkpoint $indices
 
         var
-          uncached = initObj[T]()
+          uncached = initObj(T)
           uncachedRoots = newSeqUninit[Digest](indices.len)
           uncachedTopRoot: Digest
         let res1 =
           hash_tree_root(uncached, indices, uncachedRoots, uncachedTopRoot)
 
         var
-          cached = initObj[T]()
+          cached = initObj(T)
           cachedRoots = newSeqUninit[Digest](indices.len)
           cachedTopRoot: Digest
         let
@@ -315,7 +315,7 @@ suite "Multiproof cache":
           checkpoint $indices & "-" & $i
 
           var
-            uncached = initObj[T]()
+            uncached = initObj(T)
             uncachedRoots = newSeqUninit[Digest](indices.len)
             uncachedTopRoot: Digest
           when typeof(obj) isnot HashArray:
@@ -325,7 +325,7 @@ suite "Multiproof cache":
             hash_tree_root(uncached, indices, uncachedRoots, uncachedTopRoot)
 
           var
-            cached = initObj[T]()
+            cached = initObj(T)
             cachedRoots = newSeqUninit[Digest](indices.len)
             cachedTopRoot: Digest
           discard cached.hash_tree_root()
@@ -335,7 +335,7 @@ suite "Multiproof cache":
           let res2 =
             hash_tree_root(cached, indices, cachedRoots, cachedTopRoot)
 
-          var reference = initObj[T]()
+          var reference = initObj(T)
           when typeof(obj) isnot HashArray:
             discard reference.add(reference.item(i))
           reference.modObj(i)
@@ -355,13 +355,14 @@ suite "Multiproof cache":
                 check uncachedRoots[o] == root
 
   block:
-    func initObj[T]: T {.closure.} =
-      var res: T
-      for i in 0 ..< T.maxLen:
-        res[i] = (i + 1).uint64
-      res
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< T.maxLen:
+          res[i] = (i + 1).uint64
+        res
 
-    func modObj[T](obj: var T, i: int) {.closure.} =
+    template modObj(obj: untyped, i: int) =
       obj[i] = 999'u64
 
     HashArray[8, uint64].runCachedTest(7.GeneralizedIndex)
@@ -369,13 +370,14 @@ suite "Multiproof cache":
     HashArray[17, uint64].runCachedTest(31.GeneralizedIndex)
 
   block:
-    func initObj[T]: T {.closure.} =
-      var res: T
-      for i in 0 ..< T.maxLen:
-        res[i] = Foo.init(i)
-      res
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< T.maxLen:
+          res[i] = Foo.init(i)
+        res
 
-    func modObj[T](obj: var T, i: int) {.closure.} =
+    template modObj(obj: untyped, i: int) =
       obj[i] = Foo.init(42)
 
     HashArray[3, Foo].runCachedTest(31.GeneralizedIndex)
@@ -383,13 +385,14 @@ suite "Multiproof cache":
     HashArray[6, Foo].runCachedTest(63.GeneralizedIndex)
 
   block:
-    func initObj[T]: T {.closure.} =
-      var res: T
-      for i in 0 ..< T.maxLen:
-        res[i] = Bar.init(i)
-      res
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< T.maxLen:
+          res[i] = Bar.init(i)
+        res
 
-    func modObj[T](obj: var T, i: int) {.closure.} =
+    template modObj(obj: untyped, i: int) =
       obj[i] = Bar.init(123)
 
     HashArray[3, Bar].runCachedTest(127.GeneralizedIndex)
@@ -397,49 +400,53 @@ suite "Multiproof cache":
     HashArray[6, Bar].runCachedTest(127.GeneralizedIndex)
 
   for n in [0, 1, 2, 3, 4, 5, 7, 8, 9, 16, 31, 32]:
-    func initObj[T]: T {.closure.} =
-      var res: T
-      for i in 0 ..< n:
-        doAssert res.add((i + 1).uint64)
-      res
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add((i + 1).uint64)
+        res
 
-    func modObj[T](obj: var T, i: int) {.closure.} =
+    template modObj(obj: untyped, i: int) =
       obj[i] = 999'u64
 
     HashList[uint64, 32].runCachedTest(63.GeneralizedIndex)
 
   for n in [0, 1, 2, 3, 5, 8, 13, 16]:
-    func initObj[T]: T {.closure.} =
-      var res: T
-      for i in 0 ..< n:
-        doAssert res.add(Foo.init(i))
-      res
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add(Foo.init(i))
+        res
 
-    func modObj[T](obj: var T, i: int) {.closure.} =
+    template modObj(obj: untyped, i: int) =
       obj[i] = Foo.init(42)
 
     HashList[Foo, 16].runCachedTest(127.GeneralizedIndex)
 
   for n in [0, 1, 2, 4, 5, 6, 7, 20, 21, 22, 84, 85, 86, 340, 341]:
-    func initObj[T]: T {.closure.} =
-      var res: T
-      for i in 0 ..< n:
-        doAssert res.add((i + 1).uint64)
-      res
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add((i + 1).uint64)
+        res
 
-    func modObj[T](obj: var T, i: int) {.closure.} =
+    template modObj(obj: untyped, i: int) =
       obj[i] = 999'u64
 
     HashSeq[uint64].runCachedTest(1023.GeneralizedIndex)
 
   for n in [1, 5, 6, 21, 22]:
-    func initObj[T]: T {.closure.} =
-      var res: T
-      for i in 0 ..< n:
-        doAssert res.add(Foo.init(i))
-      res
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add(Foo.init(i))
+        res
 
-    func modObj[T](obj: var T, i: int) {.closure.} =
+    template modObj(obj: untyped, i: int) =
       obj[i] = Foo.init(42)
 
     HashSeq[Foo].runCachedTest(1023.GeneralizedIndex)
