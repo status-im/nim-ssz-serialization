@@ -368,7 +368,7 @@ suite "Multiproof cache":
             uncached = initObj(T)
             uncachedRoots = newSeqUninit[Digest](indices.len)
             uncachedTopRoot: Digest
-          when typeof(obj) isnot HashArray:
+          when T isnot HashArray:
             discard uncached.add(uncached.item(i))
           uncached.modObj(i)
           let res1 =
@@ -379,14 +379,14 @@ suite "Multiproof cache":
             cachedRoots = newSeqUninit[Digest](indices.len)
             cachedTopRoot: Digest
           discard cached.hash_tree_root()
-          when typeof(obj) isnot HashArray:
+          when T isnot HashArray:
             discard cached.add(cached.item(i))
           cached.modObj(i)
           let res2 =
             hash_tree_root(cached, indices, cachedRoots, cachedTopRoot)
 
           var reference = initObj(T)
-          when typeof(obj) isnot HashArray:
+          when T isnot HashArray:
             discard reference.add(reference.item(i))
           reference.modObj(i)
           let root1 = reference.hash_tree_root()
@@ -422,7 +422,7 @@ suite "Multiproof cache":
             cached.hash_tree_root(cachedGindices).isOk
             # debugTotalSszHashes == numHashes
 
-          if obj.len > 0:
+          if cached.len > 0:
             let numItemHashes = block:
               let numHashesBefore = debugTotalSszHashes
               discard default(ElemType(T)).hash_tree_root()
@@ -450,6 +450,13 @@ suite "Multiproof cache":
             check:
               cached.hash_tree_root(cachedGindices).isOk
               # debugTotalSszHashes == allHashes
+
+          when T is HashList:
+            if cached.len < T.maxLen:
+              check:
+                cached.add(cached.item(0))
+                cached.hashes.countIt(not isCached(it)) <=
+                  max(cached.maxChunks, 2).binaryTreeHeight
         else:
           skip()
 
