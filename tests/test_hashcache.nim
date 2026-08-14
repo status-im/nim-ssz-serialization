@@ -432,13 +432,13 @@ suite "Multiproof cache":
               block:
                 const itemGindex = T.get_generalized_index(0)
                 let
-                  itemRoot = obj.item(0).hash_tree_root()
+                  itemRoot = cached.item(0).hash_tree_root()
                   numHashesBefore = debugTotalSszHashes
                 check:
                   cached.hash_tree_root(itemGindex).get == itemRoot
                   debugTotalSszHashes <= numHashesBefore + numItemHashes
 
-            let i = (0 ..< obj.len).rand()
+            let i = (0 ..< cached.len).rand()
             checkpoint $i
             cached.modObj(i)
             let numHashesBefore = debugTotalSszHashes
@@ -453,6 +453,93 @@ suite "Multiproof cache":
         else:
           skip()
 
+      test "Random operations" & suffix:
+        var cached = initObj(T)
+
+        template reference: T =
+          try:
+            SSZ.decode(SSZ.encode(cached), T)
+          except SerializationError:
+            raiseAssert "Valid SSZ"
+
+        const NumRandomTests = 200
+        for _ in 0 ..< NumRandomTests:
+          case rand(8)
+          of 0:
+            let i = (0 ..< cached.len).rand()
+            checkpoint "mod-" & $i
+            cached.modObj(i)
+          of 1:
+            let i = (0 ..< cached.len).rand()
+            checkpoint "htr-leaf-" & $i
+            check cached.hash_tree_root(T.get_generalized_index(i).get) ==
+              reference.hash_tree_root(T.get_generalized_index(i).get)
+          of 2:
+            let i = allGindices.sample()
+            checkpoint "htr-all-" & $i
+            check cached.hash_tree_root(i) == reference.hash_tree_root(i)
+          of 3:
+            let i = validGindices.sample()
+            checkpoint "htr-valid-" & $i
+            check cached.hash_tree_root(i) == reference.hash_tree_root(i)
+          of 4:
+            checkpoint "htr-top"
+            check cached.hash_tree_root() == reference.hash_tree_root()
+          of 5:
+            when typeof(cached) isnot HashArray:
+              let i = (0 ..< cached.len).rand()
+              checkpoint "htr-add-" & $i
+              discard cached.add(cached.item(i))
+          of 6:
+            let frequency = rand(0.5)
+            var
+              indices = (if rand(1.0) < 0.2: allGindices else: validGindices)
+                .filterIt(rand(1.0) < frequency)
+              cachedRoots = newSeqUninit[Digest](indices.len)
+              refRoots = newSeqUninit[Digest](indices.len)
+            indices.shuffle()
+            checkpoint "htr-multi-" & $indices
+            let
+              res1 = cached.hash_tree_root(indices, cachedRoots)
+              res2 = reference.hash_tree_root(indices, refRoots)
+            check res1 == res2
+            if res1.isOk:
+              check cachedRoots == refRoots
+          else:
+            let frequency = rand(0.5)
+            var
+              indices = (if rand(1.0) < 0.2: allGindices else: validGindices)
+                .filterIt(rand(1.0) < frequency)
+              cachedRoots = newSeqUninit[Digest](indices.len)
+              refRoots = newSeqUninit[Digest](indices.len)
+              cachedTopRoot: Digest
+              refTopRoot: Digest
+            indices.shuffle()
+            checkpoint "htr-multitop-" & $indices
+            let
+              res1 = cached.hash_tree_root(indices, cachedRoots, cachedTopRoot)
+              res2 = reference.hash_tree_root(indices, refRoots, refTopRoot)
+            check res1 == res2
+            if res1.isOk:
+              check:
+                cachedRoots == refRoots
+                cachedTopRoot == refTopRoot
+
+        var
+          cachedRoots = newSeqUninit[Digest](validGindices.len)
+          refRoots = newSeqUninit[Digest](validGindices.len)
+          cachedTopRoot: Digest
+          refTopRoot: Digest
+        check:
+          cached.hash_tree_root() == reference.hash_tree_root()
+          cached.hash_tree_root(validGindices, cachedRoots) ==
+            reference.hash_tree_root(validGindices, refRoots)
+          cachedRoots == refRoots
+          cached.hash_tree_root(validGindices, cachedRoots, cachedTopRoot) ==
+            reference.hash_tree_root(validGindices, refRoots, refTopRoot)
+          cachedRoots == refRoots
+          cachedTopRoot == refTopRoot
+
   block:
     template initObj(T: typedesc): untyped =
       block:
@@ -462,7 +549,7 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj[i] = 999'u64
+      obj.mitem(i) += 999'u64
 
     HashArray[8, uint64].runCachedTest(7.GeneralizedIndex)
     HashArray[9, uint64].runCachedTest(15.GeneralizedIndex)
@@ -492,7 +579,7 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj.mitem(i).x[i mod BarXMaxLen] = 123'u64
+      obj.mitem(i).x.mitem(i mod BarXMaxLen) += 123'u64
 
     HashArray[3, Bar].runCachedTest(127.GeneralizedIndex)
     HashArray[4, Bar].runCachedTest(127.GeneralizedIndex)
@@ -515,7 +602,7 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj[i] = 999'u64
+      obj.mitem(i) += 999'u64
 
     HashArray[4, uint64].runCachedTest(3.GeneralizedIndex)
 
@@ -528,7 +615,7 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj[i] = 999'u64
+      obj.mitem(i) += 999'u64
 
     HashList[uint64, 4].runCachedTest(7.GeneralizedIndex)
 
@@ -541,7 +628,7 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj[i] = 999'u64
+      obj.mitem(i) += 999'u64
 
     HashSeq[uint64].runCachedTest(63.GeneralizedIndex)
 
@@ -554,7 +641,7 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj[i] = 999'u64
+      obj.mitem(i) += 999'u64
 
     HashList[uint64, 32].runCachedTest(63.GeneralizedIndex)
 
@@ -571,6 +658,19 @@ suite "Multiproof cache":
 
     HashList[Foo, 16].runCachedTest(127.GeneralizedIndex)
 
+  for n in [1, 3, 8]:
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add(Bar.init(i))
+        res
+
+    template modObj(obj: untyped, i: int) =
+      obj.mitem(i).x.mitem(i mod BarXMaxLen) += 123'u64
+
+    HashList[Bar, 8].runCachedTest(127.GeneralizedIndex)
+
   for n in [0, 1, 2, 4, 5, 6, 7, 20, 21, 22, 84, 85, 86, 340, 341]:
     template initObj(T: typedesc): untyped =
       block:
@@ -580,11 +680,11 @@ suite "Multiproof cache":
         res
 
     template modObj(obj: untyped, i: int) =
-      obj[i] = 999'u64
+      obj.mitem(i) += 999'u64
 
     HashSeq[uint64].runCachedTest(1023.GeneralizedIndex)
 
-  for n in [1, 5, 6, 21, 22]:
+  for n in [1, 2, 5, 6, 21, 22, 85, 86]:
     template initObj(T: typedesc): untyped =
       block:
         var res: T
