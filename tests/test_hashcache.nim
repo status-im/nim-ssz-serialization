@@ -277,7 +277,7 @@ suite "Multiproof cache":
             res.add T.get_generalized_index(i, "y").get
           res
         else:
-          (0 ..< obj.len).mapIt(T.get_generalized_index(it).get)
+          (0 ..< obj.len).mapIt(T.get_generalized_index(it).get).deduplicate()
       cachedGindices = block:
         var indices = initHashSet[GeneralizedIndex]()
         for idx in itemGindices.get_union_indices():
@@ -289,11 +289,20 @@ suite "Multiproof cache":
           res.add idx
         res
 
+      topGindices = @[2.GeneralizedIndex, 3.GeneralizedIndex]
+        .filterIt(obj.hash_tree_root(it).isOk)
+      itemGindicesWithTop = topGindices & itemGindices
+      evenGindicesWithTop = topGindices &
+        itemGindices.filterIt(it == it.generalized_index_sibling_left)
+      oddGindicesWithTop = topGindices &
+        itemGindices.filterIt(it == it.generalized_index_sibling_right)
+
     randomize()
     const numRandomTests = 100
     var tests = @[
       allGindices, allGindicesPlusOne,
-      validGindices, itemGindices, cachedGindices]
+      validGindices, itemGindices, cachedGindices,
+      topGindices, itemGindicesWithTop, evenGindicesWithTop, oddGindicesWithTop]
     for i in 1 .. maxGindex + 1:
       tests.add @[i.GeneralizedIndex]
     for _ in 0 ..< numRandomTests:
@@ -339,7 +348,20 @@ suite "Multiproof cache":
     if obj.len > 0:
       test "Mutation invalidates cache" & suffix:
         for indices in tests:
-          let i = (0 ..< obj.len).rand()
+          let
+            i = (0 ..< obj.len).rand()
+            iIndex = T.get_generalized_index(i).get
+            siblingIndex = iIndex.generalized_index_sibling
+            j = block:
+              var res = max(i, T.dataPerChunk) - T.dataPerChunk
+              if T.get_generalized_index(res).get == siblingIndex:
+                res
+              else:
+                res = min(i + T.dataPerChunk, obj.high)
+                if T.get_generalized_index(res).get == siblingIndex:
+                  res
+                else:
+                  i
           checkpoint $indices & "-" & $i
 
           var
@@ -367,20 +389,25 @@ suite "Multiproof cache":
           when typeof(obj) isnot HashArray:
             discard reference.add(reference.item(i))
           reference.modObj(i)
-          let root = reference.hash_tree_root
+          let root1 = reference.hash_tree_root()
+
+          uncached.modObj(j)
+          cached.modObj(j)
+          reference.modObj(j)
+          let root2 = reference.hash_tree_root()
 
           check:
-            hash_tree_root(uncached) == root
-            hash_tree_root(cached) == root
+            hash_tree_root(uncached) == root2
+            hash_tree_root(cached) == root2
             res1.isOk == res2.isOk
           if res1.isOk:
             check:
               uncachedRoots == cachedRoots
               uncachedTopRoot == cachedTopRoot
-              uncachedTopRoot == root
+              uncachedTopRoot == root1
             for o, i in indices:
               if i == 1.GeneralizedIndex:
-                check uncachedRoots[o] == root
+                check uncachedRoots[o] == root1
 
       test "Cache avoids re-hashing" & suffix:
         when SSZ_DEBUG_COUNT_HASHES:

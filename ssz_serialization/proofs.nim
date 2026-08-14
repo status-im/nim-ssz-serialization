@@ -42,11 +42,11 @@ template generalized_index_sibling*(
     index: GeneralizedIndex): GeneralizedIndex =
   index xor 1.GeneralizedIndex
 
-template generalized_index_sibling_left(
+template generalized_index_sibling_left*(
     index: GeneralizedIndex): GeneralizedIndex =
   index and not 1.GeneralizedIndex
 
-template generalized_index_sibling_right(
+template generalized_index_sibling_right*(
     index: GeneralizedIndex): GeneralizedIndex =
   index or 1.GeneralizedIndex
 
