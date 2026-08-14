@@ -572,8 +572,7 @@ func resizeHashes[T, I](
   for i in 1 .. max(depth, 1):
     newIndices[i] = newIndices[i - 1] + nodesAtLayer(i - 1, depth, leaves)
 
-  # When resizing, copy each layer (truncating when shrinking).
-  for i in 1 ..< max(depth, 1):
+    # When resizing, copy each layer (truncating when shrinking).
     let copyLen = min(
       indices[i] - indices[i-1], newIndices[i] - newIndices[i - 1])
     for j in 0 ..< copyLen:
