@@ -417,7 +417,7 @@ template isCached*(v: Digest): bool =
     # Checking and resetting the cache status are hotspots - profile before
     # touching!
     var tmp {.noinit.}: uint64
-    copyMem(addr tmp, unsafeAddr v.data[0], sizeof(tmp))
+    copyMem(addr tmp, addr v.data[0], sizeof(tmp))
     tmp != 0
 
 template clearCache*(v: var Digest) =
@@ -757,7 +757,7 @@ template `[]`*(x: var HashSeq, idx: auto): auto =
   discard
 
 template item*(x: HashArray|HashList|HashSeq, idx: auto): auto =
-  # We must use a template, or the magic `unsafeAddr x[idx]` won't work, but
+  # We must use a template, or the magic `addr x[idx]` won't work, but
   # we don't want to accidentally return a `var` instance that gets mutated
   # so we avoid overloading the `[]` name
   x.data[idx]

@@ -758,7 +758,7 @@ func chunkedHashTreeRoot[T: BasicType](
     when sizeof(T) == 1 or cpuEndian == littleEndian:
       let
         remainingBytes = numFromFirst * sizeof(T)
-        pos = cast[ptr byte](unsafeAddr arr[firstIdx])
+        pos = cast[ptr byte](addr arr[firstIdx])
 
       merkleizer.addChunks(makeOpenArray(pos, remainingBytes.int))
     else:
@@ -1068,7 +1068,7 @@ genGetBodyImpls(tuple, int)
 func hashTreeRootSingleChunkBasicArray[E](x: openArray[E], res: var Digest) =
   let numBytes = x.len * sizeof(E)
   when sizeof(E) == 1 or cpuEndian == littleEndian:
-    copyMem(addr res.data[0], unsafeAddr x, numBytes)
+    copyMem(addr res.data[0], addr x, numBytes)
   else:
     var pos = 0
     for e in x:
@@ -1086,7 +1086,7 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     when cpuEndian == bigEndian:
       res.data[0..<sizeof(x)] = toBytesLE(x)
     else:
-      copyMem(addr res.data[0], unsafeAddr x, sizeof x)
+      copyMem(addr res.data[0], addr x, sizeof x)
     when sizeof(x) < sizeof(res.data):
       zeroMem(addr res.data[sizeof x], sizeof(res.data) - sizeof(x))
   elif T is BitArray:
@@ -1373,9 +1373,10 @@ func hashTreeRootAux[T](
     x: T,
     batch: ptr BatchRequest, first: int,
     atLayer: int, needTopRoot = false): Opt[int] =
-  let xAddr = unsafeAddr x
-  template x: untyped {.used.} = xAddr[]
   mixin hash_tree_root, toSszType
+  let xAddr = addr x
+  template x: untyped {.used.} = xAddr[]
+
   when T is BasicType:
     err()
   elif T is BitArray:
@@ -1663,7 +1664,7 @@ func singleDataHash[T](data: openArray[T], res: var Digest) =
         unsupported T # No bigendian support here!
 
       let
-        bytes = cast[ptr UncheckedArray[byte]](unsafeAddr data[0])
+        bytes = cast[ptr UncheckedArray[byte]](addr data[0])
         byteLen = data.len * sizeof(T)
         nbytes = min(byteLen, 32)
       res.data[0 ..< nbytes] = bytes.toOpenArray(0, nbytes - 1)
@@ -1682,7 +1683,7 @@ func mergedDataHash[T](
       unsupported T # No bigendian support here!
 
     let
-      bytes = cast[ptr UncheckedArray[byte]](unsafeAddr data[0])
+      bytes = cast[ptr UncheckedArray[byte]](addr data[0])
       byteIdx = chunkIdx * bytesPerChunk
       byteLen = data.len * sizeof(T)
 
@@ -1738,7 +1739,7 @@ func hashTreeRootCachedPtrArray[T](
   # The instance must not be mutated! This is an internal low-level API.
 
   doAssert vIdx >= 1, "Only valid for flat Merkle tree indices"
-  let px = unsafeAddr hashes[vIdx]
+  let px = addr hashes[vIdx]
   if not isCached(hashes[vIdx]):
     # TODO oops. so much for maintaining non-mutability.
     data.refreshHash(
@@ -1771,9 +1772,9 @@ func hashTreeRootCachedPtrList[T](
   doAssert layer < maxChunks.layer or layer == 0
   if layerIdx >= indices[layer + 1]:
     trs "ZERO ", indices[layer], " ", indices[layer + 1]
-    unsafeAddr zeroHashes[maxChunks.layer - layer]
+    addr zeroHashes[maxChunks.layer - layer]
   else:
-    let px = unsafeAddr hashes[layerIdx]
+    let px = addr hashes[layerIdx]
     if not isCached(px[]):
       trs "REFRESHING ", vIdx, " ", layerIdx, " ", layer
       # TODO oops. so much for maintaining non-mutability.
@@ -1792,7 +1793,7 @@ func hashTreeRootCachedPtr(x: HashSeq, depth: int, vIdx: int64): ptr Digest =
   # `var` and `lent` returns don't work for the constant zero hashes
   # The instance must not be mutated! This is an internal low-level API.
   if vIdx == 0:
-    let px = unsafeAddr x.hashes[depth][0]
+    let px = addr x.hashes[depth][0]
     if not isCached(px[]):
       # TODO oops. so much for maintaining non-mutability.
       mergeBranches(
@@ -1826,7 +1827,7 @@ func hashTreeRootCached(x: HashList): Digest {.noinit.} =
   else:
     if not isCached(x.hashes[0]):
       # TODO oops. so much for maintaining non-mutability.
-      let px = unsafeAddr x.hashes[0]
+      let px = addr x.hashes[0]
       mixInLength(hashTreeRootCachedPtr(x, 1)[], x.data.len, px[])
 
     result = x.hashes[0]
@@ -1837,7 +1838,7 @@ func hashTreeRootCached(x: HashSeq): Digest {.noinit.} =
   else:
     if not isCached(x.root):
       # TODO oops. so much for maintaining non-mutability.
-      let px = unsafeAddr x.root
+      let px = addr x.root
       mixInLength(hashTreeRootCachedPtr(x, 0, 0)[], x.data.len, px[])
     x.root
 
@@ -2100,7 +2101,7 @@ func merkleizationLoopOrder(indices: openArray[GeneralizedIndex]): seq[int] =
   when nimvm:
     result.sortForMerkleization toSeq(indices)
   else:
-    result.sortForMerkleization makeUncheckedArray(unsafeAddr indices[0])
+    result.sortForMerkleization makeUncheckedArray(addr indices[0])
 
 func validateIndices(
     indices: openArray[GeneralizedIndex],
