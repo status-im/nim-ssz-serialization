@@ -1218,7 +1218,7 @@ func fulfill(
           if shouldStop:
             break
           if indexLayer <= chunkLayer:
-            var subChunks = chunksForIndex(index)
+            let subChunks = chunksForIndex(index)
             if subChunks.a > chunks.b:
               break
             if shouldSkip(i):
@@ -1373,9 +1373,10 @@ func hashTreeRootAux[T](
     x: T,
     batch: ptr BatchRequest, first: int,
     atLayer: int, needTopRoot = false): Opt[int] =
+  mixin hash_tree_root, toSszType
   let xAddr = unsafeAddr x
   template x: untyped {.used.} = xAddr[]
-  mixin hash_tree_root, toSszType
+
   when T is BasicType:
     err()
   elif T is BitArray:
@@ -1850,6 +1851,8 @@ func hashTreeRootCached(
   const
     numUsedChunks = E.totalChunkCount(x.len)
     height = x.maxChunks.binaryTreeHeight
+  let xAddr = unsafeAddr x
+  template x: untyped = xAddr[]
 
   func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
     when E is BasicType:
@@ -1858,7 +1861,7 @@ func hashTreeRootCached(
         last = min(first + E.dataPerChunk - 1, x.high)
       x.data.toOpenArray(first, last).hashTreeRootSingleChunkBasicArray(res)
     else:
-      x[chunk].hash_tree_root(res)
+      x.item(chunk).hash_tree_root(res)
 
   func getNestedRoot(
       chunk: Limit, depth: int,
@@ -1867,7 +1870,7 @@ func hashTreeRootCached(
     when E is BasicType:
       err()
     else:
-      x[chunk].hash_tree_root_multi(
+      x.item(chunk).hash_tree_root_multi(
         batch, first, atLayer, needTopRoot)
 
   assign(result, batch.fulfill(
@@ -1883,13 +1886,15 @@ func hashTreeRootCached(
   mixin toSszType
   template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
   const height = x.maxChunks.binaryTreeHeight
+  let xAddr = unsafeAddr x
+  template x: untyped = xAddr[]
 
   func getTopDataRoot(chunk: Limit, depth: int, res: var Digest) =
     when E is BasicType:
       chunkedHashTreeRoot(
         height, asSeq x, chunk .. chunk, height.int - 1, res)
     else:
-      x[chunk].hash_tree_root(res)
+      x.item(chunk).hash_tree_root(res)
 
   func getNestedDataRoot(
       chunk: Limit, depth: int,
@@ -1898,7 +1903,7 @@ func hashTreeRootCached(
     when E is BasicType:
       err()
     else:
-      x[chunk].hash_tree_root_multi(
+      x.item(chunk).hash_tree_root_multi(
         batch, first, atLayer, needTopRoot)
 
   func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1931,6 +1936,8 @@ func hashTreeRootCached(
     atLayer: int, needTopRoot = false): Opt[int] =
   mixin toSszType
   template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
+  let xAddr = unsafeAddr x
+  template x: untyped = xAddr[]
   let totalUsedChunks = x.totalChunkCount
 
   func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1960,7 +1967,7 @@ func hashTreeRootCached(
     when E is BasicType:
       err()
     else:
-      x[firstIdx + chunk].hash_tree_root_multi(
+      x.item(firstIdx + chunk).hash_tree_root_multi(
         batch, first, atLayer, needTopRoot)
 
   assign(result, batch.fulfillProgressive(
