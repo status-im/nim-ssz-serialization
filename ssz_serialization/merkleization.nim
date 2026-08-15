@@ -1851,7 +1851,7 @@ func hashTreeRootCached(
   const
     numUsedChunks = E.totalChunkCount(x.len)
     height = x.maxChunks.binaryTreeHeight
-  let xAddr = unsafeAddr x
+  let xAddr = addr x
   template x: untyped = xAddr[]
 
   func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1886,7 +1886,7 @@ func hashTreeRootCached(
   mixin toSszType
   template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
   const height = x.maxChunks.binaryTreeHeight
-  let xAddr = unsafeAddr x
+  let xAddr = addr x
   template x: untyped = xAddr[]
 
   func getTopDataRoot(chunk: Limit, depth: int, res: var Digest) =
@@ -1936,7 +1936,7 @@ func hashTreeRootCached(
     atLayer: int, needTopRoot = false): Opt[int] =
   mixin toSszType
   template E: untyped = typeof toSszType(declval ElemType(typeof(x)))
-  let xAddr = unsafeAddr x
+  let xAddr = addr x
   template x: untyped = xAddr[]
   let totalUsedChunks = x.totalChunkCount
 
