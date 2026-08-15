@@ -140,10 +140,10 @@ func digest*(a, b: openArray[byte], res: var Digest) =
       # Single call to digester
       var buf {.noinit.}: array[64, byte]
       if a.len > 0:
-        copyMem(addr buf[0], unsafeAddr a[0], a.len)
+        copyMem(addr buf[0], addr a[0], a.len)
       # b.len > 0 per above..
       if b.len > 0:
-        copyMem(addr buf[a.len], unsafeAddr b[0], b.len)
+        copyMem(addr buf[a.len], addr b[0], b.len)
       digest(buf, res)
     else:
       debugCountHash()  # Other branches are counted via single-input `digest`

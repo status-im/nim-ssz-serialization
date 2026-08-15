@@ -77,7 +77,7 @@ func fromSszBytes*(
     T: type Digest, data: openArray[byte]): T {.raises: [SszError], noinit.} =
   if data.len != sizeof(result.data):
     raiseIncorrectSize T
-  copyMem(result.data.addr, unsafeAddr data[0], sizeof(result.data))
+  copyMem(result.data.addr, addr data[0], sizeof(result.data))
 
 func `[]`[T, U, V](s: openArray[T], x: HSlice[U, V]) {.error:
   "Please don't use openArray's [] as it allocates a result sequence".}
@@ -202,7 +202,7 @@ proc readSszValue*[T](
       v.setOutputSize input.len div elemSize
       when supportsBulkCopy(type v[0]):
         if v.len > 0:
-          copyMem addr v[0], unsafeAddr input[0], input.len
+          copyMem addr v[0], addr input[0], input.len
 
         when val is HashList|HashSeq:
           # There's no selective invalidation here, because it would require a
@@ -282,7 +282,7 @@ proc readSszValue*[T](
     if sizeof(val) != input.len:
       raiseIncorrectSize(T)
     checkForForbiddenBits(T, input, val.bits)
-    copyMem(addr val.bytes[0], unsafeAddr input[0], input.len)
+    copyMem(addr val.bytes[0], addr input[0], input.len)
 
   elif val is object|tuple:
     when isUnion(type(val)):
