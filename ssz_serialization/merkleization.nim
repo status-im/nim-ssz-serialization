@@ -215,10 +215,12 @@ func combineToTop(merkleizer: var SszMerkleizer2, res: var Digest) =
           trs "COMBINED"
           mergeBranches(
             merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
-            res)
+            merkleizer.combinedChunks[topHashIdx][0])
         else:
           trs "COMBINED WITH ZERO"
-          mergeBranches(merkleizer.combinedChunks[i][1], zeroHashes[i], res)
+          mergeBranches(
+            merkleizer.combinedChunks[i][1], zeroHashes[i],
+            merkleizer.combinedChunks[topHashIdx][0])
       else:
         if getBitLE(merkleizer.totalChunks, i):
           trs "COMBINED"
@@ -231,16 +233,15 @@ func combineToTop(merkleizer: var SszMerkleizer2, res: var Digest) =
             merkleizer.combinedChunks[i][1], zeroHashes[i],
             merkleizer.combinedChunks[i + 1][1])
 
-  elif bottomHashIdx == topHashIdx:
-    # We have a perfect tree (chunks == 2**n) at just the right height!
-    assign(res, merkleizer.combinedChunks[bottomHashIdx][0])
-  else:
+    merkleizer.totalChunks = 1'u64 shl topHashIdx
+  elif bottomHashIdx != topHashIdx:
     # We have a perfect tree of user chunks, but we have more work to
     # do - we must extend it to reach the desired height
     if bottomHashIdx == topHashIdx - 1:
       mergeBranches(
         merkleizer.combinedChunks[topHashIdx - 1][0],
-        zeroHashes[topHashIdx - 1], res)
+        zeroHashes[topHashIdx - 1],
+        merkleizer.combinedChunks[topHashIdx][0])
     else:
       mergeBranches(
         merkleizer.combinedChunks[bottomHashIdx][0],
@@ -254,7 +255,15 @@ func combineToTop(merkleizer: var SszMerkleizer2, res: var Digest) =
 
       mergeBranches(
         merkleizer.combinedChunks[topHashIdx - 1][1],
-        zeroHashes[topHashIdx - 1], res)
+        zeroHashes[topHashIdx - 1],
+        merkleizer.combinedChunks[topHashIdx][0])
+
+    merkleizer.totalChunks = 1'u64 shl topHashIdx
+  else:
+    # We have a perfect tree (chunks == 2**n) at just the right height!
+    doAssert merkleizer.totalChunks == 1'u64 shl topHashIdx
+
+  assign(res, merkleizer.combinedChunks[topHashIdx][0])
 
 func combineChunks(merkleizer: var SszMerkleizer2, start: int) =
   for i in start..<merkleizer.topIndex:
@@ -1169,7 +1178,8 @@ func fulfill(
         chunk = chunks.a
         allFulfilled = false
 
-      template addChunksUpThrough(highChunk: Limit) =
+      template addChunksUpThrough(maxChunk: Limit) =
+        let highChunk = min(maxChunk, totalChunkCount - 1)
         while chunk <= highChunk:
           merkleizer.addChunkDirect:
             chunk.getTopRoot(depth, outChunk)
@@ -1187,8 +1197,11 @@ func fulfill(
           if shouldSkip(i):
             inc i
             continue
-          let lastUsedSubChunk = min(subChunks.b, totalChunkCount - 1)
-          addChunksUpThrough(lastUsedSubChunk)
+          if subChunks.a >= totalChunkCount:
+            assign(rootAt(i), zeroHashes[chunkLayer - indexLayer])
+            inc i
+            continue
+          addChunksUpThrough(subChunks.b)
           if chunk == totalChunkCount:
             break
           let layerIdx = chunkLayer - indexLayer
@@ -1210,9 +1223,8 @@ func fulfill(
             assign(outChunk, batch.topRoot)
           inc chunk
       if not allFulfilled or needTopRoot:
-        addChunksUpThrough(min(chunks.b, totalChunkCount - 1))
-        merkleizer.combineToTop(
-          merkleizer.combinedChunks[merkleizer.topIndex][1])
+        addChunksUpThrough(chunks.b)
+        let totalChunks = merkleizer.totalChunks
         while i <= batch.loopOrderHigh:
           let (stem, index, indexLayer) = indexAt(i)
           if shouldStop:
@@ -1227,14 +1239,17 @@ func fulfill(
             let layerIdx = chunkLayer - indexLayer
             if subChunks.a >= totalChunkCount:
               assign(rootAt(i), zeroHashes[layerIdx])
-            elif subChunks.b < merkleizer.totalChunks.Limit or
-                layerIdx <= firstOne(max(merkleizer.totalChunks, 1)) - 1:
-              if getBitLE(merkleizer.totalChunks, layerIdx):
-                assign(rootAt(i), merkleizer.combinedChunks[layerIdx][0])
+            else:
+              merkleizer.combineToTop(
+                merkleizer.combinedChunks[merkleizer.topIndex][1])
+              if subChunks.b < totalChunks.Limit or
+                  layerIdx <= firstOne(max(totalChunks, 1)) - 1:
+                if getBitLE(totalChunks, layerIdx):
+                  assign(rootAt(i), merkleizer.combinedChunks[layerIdx][0])
+                else:
+                  assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
               else:
                 assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
-            else:
-              assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
             inc i
           else:
             let subChunk = chunkForIndex(index shr (indexLayer - chunkLayer))
@@ -1242,8 +1257,7 @@ func fulfill(
               break
             return err()
         if needTopRoot:
-          assign(
-            batch.topRoot, merkleizer.combinedChunks[merkleizer.topIndex][1])
+          merkleizer.combineToTop(batch.topRoot)
     elif indexLayer == chunkLayer:
       while i <= batch.loopOrderHigh:
         let (stem, index, indexLayer) = indexAt(i)

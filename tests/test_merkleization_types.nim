@@ -2106,6 +2106,95 @@ suite "Merkleization types":
         roots == r
         hash_tree_root(x, i).get == roots
 
+  test "Multiproof (padding)":
+    let
+      x = List[uint64, 4096].init toSeq(0'u64 ..< 100'u64)
+      i = [5.GeneralizedIndex, 10, 11, 44, 45]
+    var roots {.noinit.}: array[i.len, Digest]
+    when SSZ_DEBUG_COUNT_HASHES:
+      let numHashesBefore = debugTotalSszHashes
+    check:
+      hash_tree_root(x, i, roots).isOk
+      roots == [
+        #[5]# zeroHashes[9],
+        #[10]# zeroHashes[8], #[11]# zeroHashes[8],
+        #[44]# zeroHashes[6], #[45]# zeroHashes[6]]
+    when SSZ_DEBUG_COUNT_HASHES:
+      check debugTotalSszHashes == numHashesBefore
+
+  test "Multiproof (boundary at data end)":
+    let
+      x = List[uint64, 4096].init toSeq(0'u64 ..< 100'u64)
+      i = [8.GeneralizedIndex, 16]
+    var roots {.noinit.}: array[i.len, Digest]
+    check:
+      hash_tree_root(x, i, roots).isOk
+      roots == [
+        #[8]# (block:
+          var res: array[1024, uint64]
+          for i in 0'u64 ..< 100'u64:
+            res[i] = i
+          res).hash_tree_root(),
+        #[16]# (block:
+          var res: array[512, uint64]
+          for i in 0'u64 ..< 100'u64:
+            res[i] = i
+          res).hash_tree_root()]
+    when SSZ_DEBUG_COUNT_HASHES:
+      let numHashesBefore = debugTotalSszHashes
+      check hash_tree_root(x, 8.GeneralizedIndex).isOk
+      let numItemHashes = debugTotalSszHashes - numHashesBefore
+      check:
+        hash_tree_root(x, 16.GeneralizedIndex).isOk
+        debugTotalSszHashes == numHashesBefore + 2 * numItemHashes - 1
+
+  test "Multiproof (overlapped item root)":
+    type
+      Inner = object
+        a, b, c, d: uint64
+      Outer = object
+        x: Inner
+        y: uint64
+    var x: array[8, Outer]
+    for i in 0'u64 ..< 8'u64:
+      x[i].x.a = 100 + i
+      x[i].x.b = 200 + i
+      x[i].x.c = 300 + i
+      x[i].x.d = 400 + i
+      x[i].y = 500 + i
+    let tests =[
+      @[9.GeneralizedIndex, 18],
+      @[9.GeneralizedIndex, 72],
+      @[2.GeneralizedIndex, 9, 18],
+      @[2.GeneralizedIndex, 9, 18, 19],
+    ]
+    for i in tests:
+      checkpoint $i
+      var roots =
+        when (NimMajor, NimMinor) < (2, 2):
+          newSeq[Digest](i.len)
+        else:
+          newSeqUninit[Digest](i.len)
+      for x in roots.mitems:
+        x.data[0] = 0xba
+        x.data[1] = 0xad
+      check hash_tree_root(x, i, roots).isOk
+      for j, i in i:
+        let r =
+          case i
+          of 2.GeneralizedIndex:
+            hash_tree_root([x[0], x[1], x[2], x[3]])
+          of 9.GeneralizedIndex:
+            hash_tree_root(x[1])
+          of 18.GeneralizedIndex:
+            hash_tree_root(x[1].x)
+          of 19.GeneralizedIndex:
+            hash_tree_root(x[1].y)
+          else:
+            doAssert i == 72.GeneralizedIndex
+            hash_tree_root(x[1].x.a)
+        check roots[j] == r
+
 type
   InnerA = object
     a: uint64
