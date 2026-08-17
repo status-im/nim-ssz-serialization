@@ -118,8 +118,8 @@ suite "Merkle proofs":
 
     var nodes: array[16, Digest]
     for i in 0 ..< allLeaves.len:
-      nodes[i + 8] = allLeaves[i]
-    for i in countdown(7, 1):
+      nodes[i + allLeaves.len] = allLeaves[i]
+    for i in countdown(allLeaves.high, 1):
       nodes[i] = digest(nodes[2 * i + 0].data, nodes[2 * i + 1].data)
 
     staticFor index_int, 1 .. 15:
@@ -194,6 +194,24 @@ suite "Merkle proofs":
     staticFor index_int, 8 .. 15:
       const index = index_int.GeneralizedIndex
       all_roots.verifyBranch(all_union, index)
+
+    template verifyReject(proof: openArray[Digest], indices: typed) =
+      check:
+        calculate_multi_merkle_root(leaves, proof, indices).isErr
+        not verify_merkle_multiproof(leaves, proof, indices, root)
+
+    const static_indices = [12.GeneralizedIndex, 10, 6]
+    let
+      indices = [12.GeneralizedIndex, 10, 6]
+      helper_indices = get_helper_indices(indices)
+      leaves = indices.mapIt(nodes[it])
+      proof = helper_indices.mapIt(nodes[it])
+      root = nodes[1]
+    verifyReject(proof[0 ..< ^1], indices)
+    verifyReject(proof[0 ..< ^1], static_indices)
+    verifyReject(proof & @[default(Digest)], indices)
+    verifyReject(proof & @[default(Digest)], static_indices)
+    verifyReject(proof, [0.GeneralizedIndex])
 
   test "is_valid_merkle_branch":
     type TestCase = object
