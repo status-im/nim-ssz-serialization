@@ -1337,9 +1337,9 @@ func fulfillImpl(
               topIdx = log2trunc((maxChunk - chunk + 1).GeneralizedIndex)
             var layerIdx =
               if chunk > 0:
-                chunk.GeneralizedIndex.trailingZeros.Limit
+                chunk.GeneralizedIndex.trailingZeros
               else:
-                chunkLayer
+                chunkLayer.int
             layerIdx = min(layerIdx, topIdx)
             while layerIdx > 0:
               let cachedRoot = getCachedRootPtr(chunkIndex shr layerIdx, depth)
