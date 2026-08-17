@@ -770,9 +770,9 @@ suite "Multiproof cache":
       x: Inner
       y: uint64
 
-  func initTestArray(len: static int = 8): HashArray[len, Outer] =
-    var res: HashArray[len, Outer]
-    for i in 0'u64 ..< len.uint64:
+  func initTestArray(maxLen: static Limit = 8): HashArray[maxLen, Outer] =
+    var res: HashArray[maxLen, Outer]
+    for i in 0'u64 ..< maxLen.uint64:
       res.mitem(i).x.a = 100 + i
       res.mitem(i).y = 500 + i
     res

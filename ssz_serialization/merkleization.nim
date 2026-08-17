@@ -1337,7 +1337,7 @@ func fulfillImpl(
               topIdx = log2trunc((maxChunk - chunk + 1).GeneralizedIndex)
             var layerIdx =
               if chunk > 0:
-                chunk.GeneralizedIndex.trailingZeros
+                chunk.GeneralizedIndex.trailingZeros.Limit
               else:
                 chunkLayer
             layerIdx = min(layerIdx, topIdx)
