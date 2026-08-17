@@ -157,81 +157,70 @@ func calculate_multi_merkle_root_impl(
   keys.sort(SortOrder.Descending)
 
   # The Merkle tree is processed from bottom to top, pulling in helper
-  # indices from `proof` as needed. During processing, the `keys` list
-  # may temporarily end up being split into two parts, sorted individually.
-  # An additional index tracks the current maximum element of the list.
+  # indices from `proof` as needed. Keys need to be processed in descending
+  # order to ensure that intermediate roots remain available until they are no
+  # longer needed, ensuring that conflicting roots are detected in all cases.
+  # During processing, parent items above the `keys` are temporarily split into
+  # a separate list, also sorted descending, and processed in parallel.
   var
-    completed = 0         # All key indices before this are fully processed.
-    maxIndex = completed  # Index of the list's largest key.
+    parents = newSeqOfCap[GeneralizedIndex](keys.len)
+    completedKeys = 0     # All key indices before this are fully processed.
+    completedParents = 0  # All parent indices before this are fully processed.
     helper = 0            # Helper index from `proof` to be pulled next.
 
-  # Processing is done when there are no more keys to process.
-  while completed < keys.len:
+  # Processing is done when there are no more keys or parents to process.
+  while completedKeys < keys.len or completedParents < parents.len:
+    if completedParents == parents.len:
+      parents.setLen(0)
+      completedParents = 0
+    if completedParents == keys.len:
+      parents.delete(0 .. keys.high)
+      completedParents = 0
+
     let
-      k = keys[maxIndex]
+      k =
+        if completedParents >= parents.len:
+          inc completedKeys
+          keys[completedKeys - 1]
+        elif completedKeys >= keys.len:
+          inc completedParents
+          parents[completedParents - 1]
+        elif keys[completedKeys] > parents[completedParents]:
+          inc completedKeys
+          keys[completedKeys - 1]
+        else:
+          inc completedParents
+          parents[completedParents - 1]
       sibling = generalized_index_sibling(k)
       left = generalized_index_sibling_left(k)
       right = generalized_index_sibling_right(k)
       parent = generalized_index_parent(k)
-      parentRight = generalized_index_sibling_right(parent)
 
-    # Keys need to be processed in descending order to ensure that intermediate
-    # roots remain available until they are no longer needed. This ensures that
-    # conflicting roots are detected in all cases.
-    keys[maxIndex] =
-      if not objects.hasKey(k):
-        # A previous computation did already merge this key with its sibling.
-        0.GeneralizedIndex
-      else:
-        # Compute expected root for parent. This deletes child roots.
-        # Because the list is sorted in descending order, they are not needed.
-        let root =
-          if helper < helper_indices.len and helper_indices[helper] == sibling:
-            # The next proof item is required to form the parent hash.
-            let h = helper
-            inc(helper)
-            if sibling == left:
-              digest(proof[h].data, objects.popExisting(right).data)
-            else:
-              digest(objects.popExisting(left).data, proof[h].data)
+    # A previous computation may have already merged this key with its sibling.
+    if objects.hasKey(k):
+      # Compute expected root for parent. This deletes child roots. Because
+      # the keys are processed in descending order, they are no longer needed.
+      let root =
+        if helper < helper_indices.len and helper_indices[helper] == sibling:
+          # The next proof item is required to form the parent hash.
+          let h = helper
+          inc(helper)
+          if sibling == left:
+            digest(proof[h].data, objects.popExisting(right).data)
           else:
-            # Both siblings are already known.
-            digest(
-              objects.popExisting(left).data,
-              objects.popExisting(right).data)
-
-        # Store parent root, and replace the current list entry with its parent.
-        if objects.hasKeyOrPut(parent, root):
-          if objects.getExisting(parent) != root:
-            return err("Conflicting roots for same index")
-          0.GeneralizedIndex
-        elif parent > 1.GeneralizedIndex:
-          # Note that the list may contain further nodes that are on a layer
-          # beneath the parent, so this may break the strictly descending order
-          # of the list. For example, given [12, 9], this will lead to [6, 9].
-          # This will resolve itself after the additional nodes are processed,
-          # i.e., [6, 9] -> [6, 4] -> [3, 4] -> [3, 2] -> [1].
-          parent
+            digest(objects.popExisting(left).data, proof[h].data)
         else:
-          0.GeneralizedIndex
-    if keys[maxIndex] != 0.GeneralizedIndex:
-      # The list may have been temporarily split up into two parts that are
-      # individually sorted in descending order. Have to first process further
-      # nodes until the list is sorted once more.
-      inc maxIndex
+          # Both siblings are already known.
+          digest(
+            objects.popExisting(left).data,
+            objects.popExisting(right).data)
 
-    # Determine whether descending sort order has been restored.
-    let isSorted =
-      if maxIndex == completed: true
-      else:
-        while maxIndex < keys.len and keys[maxIndex] == 0.GeneralizedIndex:
-          inc maxIndex
-        maxIndex >= keys.len or keys[maxIndex] <= parentRight
-    if isSorted:
-      # List is sorted once more. Reset `maxIndex` to its start.
-      while completed < keys.len and keys[completed] == 0.GeneralizedIndex:
-        inc completed
-      maxIndex = completed
+      # Store parent root, and queue the parent for processing.
+      if objects.hasKeyOrPut(parent, root):
+        if objects.getExisting(parent) != root:
+          return err("Conflicting roots for same index")
+      elif parent > 1.GeneralizedIndex:
+        parents.add parent
 
   # Proof is guaranteed to provide all info needed to reach the root.
   doAssert helper == helper_indices.len
