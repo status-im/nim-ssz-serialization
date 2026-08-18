@@ -213,7 +213,7 @@ suite "Merkle proofs":
     verifyReject(proof & @[default(Digest)], static_indices)
     verifyReject(proof, [0.GeneralizedIndex])
 
-test "verify_merkle_multiproof - deep tree":
+  test "verify_merkle_multiproof - deep tree":
     var allLeaves: array[32, Digest]
     for i in 0 ..< allLeaves.len:
       allLeaves[i] = digest([i.byte])
