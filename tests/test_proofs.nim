@@ -213,6 +213,43 @@ suite "Merkle proofs":
     verifyReject(proof & @[default(Digest)], static_indices)
     verifyReject(proof, [0.GeneralizedIndex])
 
+  test "verify_merkle_multiproof - deep tree":
+    var allLeaves: array[32, Digest]
+    for i in 0 ..< allLeaves.len:
+      allLeaves[i] = digest([i.byte])
+
+    var nodes: array[64, Digest]
+    for i in 0 ..< allLeaves.len:
+      nodes[i + allLeaves.len] = allLeaves[i]
+    for i in countdown(allLeaves.high, 1):
+      nodes[i] = digest(nodes[2 * i + 0].data, nodes[2 * i + 1].data)
+
+    proc verify(indices_int: openArray[int]) =
+      let
+        indices = indices_int.mapIt(it.GeneralizedIndex)
+        helper_indices = get_helper_indices(indices)
+        leaves = indices.mapIt(nodes[it])
+        proof = helper_indices.mapIt(nodes[it])
+        root = nodes[1]
+      checkpoint "Verifying " & $indices & "---" & $helper_indices
+      check:
+        proof == allLeaves.build_proof(indices).get
+        verify_merkle_multiproof(leaves, proof, indices, root)
+
+    verify([16, 10, 6])
+
+    for a in 1 .. 63:
+      verify([a])
+      for b in 1 .. 63:
+        verify([a, b])
+
+    const indices = [
+      2, 3, 4, 5, 6, 7, 8, 10, 13, 15, 16, 19, 24, 31, 32, 37, 44, 55, 63]
+    for a in indices:
+      for b in indices:
+        for c in indices:
+          verify([a, b, c])
+
   test "is_valid_merkle_branch":
     type TestCase = object
       root: string
