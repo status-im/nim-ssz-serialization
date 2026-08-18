@@ -129,7 +129,12 @@ func binaryTreeHeight*(totalElements: Limit): Limit =
   bitWidth(nextPow2(uint64 totalElements)).Limit
 
 type
-  SszMerkleizer2*[height: static[Limit]] = object
+  GetCachedRootPtrProc =
+    proc (
+      index: GeneralizedIndex,
+      depth = 0): ptr Digest {.noSideEffect, raises: [].}
+
+  SszMerkleizer2*[height: static[Limit], cached: static[bool] = false] = object
     ## The Merkleizer incrementally computes the SSZ-style Merkle root of a tree
     ## with `2**(height-1)` leaf nodes.
     ##
@@ -154,6 +159,10 @@ type
     internal: bool
       # Avoid copying chunk data into merkleizer when not needed - may result
       # in an incomplete root-to-leaf proof
+    when cached:
+      getCachedRootPtr: GetCachedRootPtrProc
+      firstChunkIndex: GeneralizedIndex
+      depth: int
 
 template limit(height: Limit): Limit =
   if height == 0: 0'i64 else: 1'i64 shl (height - 1)
@@ -179,6 +188,24 @@ template mergeBranches(a, b: Digest, res: var Digest) =
   trs "MERGING BRANCHES DIGEST"
   digest(a.data, b.data, res)
 
+func mergeBranchesCached(
+    merkleizer: SszMerkleizer2,
+    a, b: Digest, res: var Digest,
+    index: GeneralizedIndex) =
+  let cachedRes = merkleizer.getCachedRootPtr(index, merkleizer.depth)
+  if not isCached(cachedRes[]):
+    mergeBranches(a, b, cachedRes[])
+  res.assign(cachedRes[])
+
+template mergeBranches(
+    merkleizer: SszMerkleizer2,
+    a, b: Digest, res: var Digest,
+    index: untyped #[lazy GeneralizedIndex]#) =
+  when merkleizer.cached:
+    merkleizer.mergeBranchesCached(a, b, res, index)
+  else:
+    mergeBranches(a, b, res)
+
 func computeZeroHashes: array[sizeof(Limit) * 8, Digest] =
   result[0] = Digest()
   for i in 1 .. result.high:
@@ -191,12 +218,22 @@ func combineToTop(merkleizer: var SszMerkleizer2, res: var Digest) =
     bottomHashIdx = firstOne(max(merkleizer.totalChunks, 1)) - 1
     submittedChunksHeight = bitWidth(max(merkleizer.totalChunks, 1) - 1)
     topHashIdx = merkleizer.topIndex
+  when merkleizer.cached:
+    let lastAddedChunkIndex =
+      merkleizer.firstChunkIndex + max(merkleizer.totalChunks, 1) - 1
 
   trs "BOTTOM HASH ", bottomHashIdx
   trs "SUBMITTED HEIGHT ", submittedChunksHeight
   trs "TOP HASH IDX ", topHashIdx
 
-  if bottomHashIdx != submittedChunksHeight:
+  if merkleizer.totalChunks == 0:
+    assign(
+      merkleizer.combinedChunks[topHashIdx][0],
+      zeroHashes[topHashIdx])
+
+    merkleizer.totalChunks = 1'u64 shl topHashIdx
+
+  elif bottomHashIdx != submittedChunksHeight:
     # Our tree is not finished. We must complete the work in progress
     # branches and then extend the tree to the right height.
     assign(
@@ -204,61 +241,77 @@ func combineToTop(merkleizer: var SszMerkleizer2, res: var Digest) =
       zeroHashes[bottomHashIdx])
 
     block:
-      mergeBranches(
+      merkleizer.mergeBranches(
         merkleizer.combinedChunks[bottomHashIdx][0],
         merkleizer.combinedChunks[bottomHashIdx][1],
-        merkleizer.combinedChunks[bottomHashIdx + 1][1])
+        merkleizer.combinedChunks[bottomHashIdx + 1][1],
+        lastAddedChunkIndex shr (bottomHashIdx + 1))
 
     for i in bottomHashIdx + 1 ..< topHashIdx:
       if i == topHashIdx - 1:
         if getBitLE(merkleizer.totalChunks, i):
           trs "COMBINED"
-          mergeBranches(
-            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
-            merkleizer.combinedChunks[topHashIdx][0])
+          merkleizer.mergeBranches(
+            merkleizer.combinedChunks[i][0],
+            merkleizer.combinedChunks[i][1],
+            merkleizer.combinedChunks[topHashIdx][0],
+            lastAddedChunkIndex shr (i + 1))
         else:
           trs "COMBINED WITH ZERO"
-          mergeBranches(
-            merkleizer.combinedChunks[i][1], zeroHashes[i],
-            merkleizer.combinedChunks[topHashIdx][0])
+          merkleizer.mergeBranches(
+            merkleizer.combinedChunks[i][1],
+            zeroHashes[i],
+            merkleizer.combinedChunks[topHashIdx][0],
+            lastAddedChunkIndex shr (i + 1))
       else:
         if getBitLE(merkleizer.totalChunks, i):
           trs "COMBINED"
-          mergeBranches(
-            merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
-            merkleizer.combinedChunks[i + 1][1])
+          merkleizer.mergeBranches(
+            merkleizer.combinedChunks[i][0],
+            merkleizer.combinedChunks[i][1],
+            merkleizer.combinedChunks[i + 1][1],
+            lastAddedChunkIndex shr (i + 1))
         else:
           trs "COMBINED WITH ZERO"
-          mergeBranches(
-            merkleizer.combinedChunks[i][1], zeroHashes[i],
-            merkleizer.combinedChunks[i + 1][1])
+          merkleizer.mergeBranches(
+            merkleizer.combinedChunks[i][1],
+            zeroHashes[i],
+            merkleizer.combinedChunks[i + 1][1],
+            lastAddedChunkIndex shr (i + 1))
 
     merkleizer.totalChunks = 1'u64 shl topHashIdx
+
   elif bottomHashIdx != topHashIdx:
     # We have a perfect tree of user chunks, but we have more work to
     # do - we must extend it to reach the desired height
     if bottomHashIdx == topHashIdx - 1:
-      mergeBranches(
+      merkleizer.mergeBranches(
         merkleizer.combinedChunks[topHashIdx - 1][0],
         zeroHashes[topHashIdx - 1],
-        merkleizer.combinedChunks[topHashIdx][0])
+        merkleizer.combinedChunks[topHashIdx][0],
+        lastAddedChunkIndex shr topHashIdx)
     else:
-      mergeBranches(
+      merkleizer.mergeBranches(
         merkleizer.combinedChunks[bottomHashIdx][0],
         zeroHashes[bottomHashIdx],
-        merkleizer.combinedChunks[bottomHashIdx + 1][1])
+        merkleizer.combinedChunks[bottomHashIdx + 1][1],
+        lastAddedChunkIndex shr (bottomHashIdx + 1))
 
       for i in bottomHashIdx + 1 ..< topHashIdx - 1:
-        mergeBranches(
-          merkleizer.combinedChunks[i][1], zeroHashes[i],
-          merkleizer.combinedChunks[i + 1][1])
+        merkleizer.mergeBranches(
+          merkleizer.combinedChunks[i][1],
+          zeroHashes[i],
+          merkleizer.combinedChunks[i + 1][1],
+          lastAddedChunkIndex shr (i + 1))
 
-      mergeBranches(
+      merkleizer.mergeBranches(
         merkleizer.combinedChunks[topHashIdx - 1][1],
         zeroHashes[topHashIdx - 1],
-        merkleizer.combinedChunks[topHashIdx][0])
+        merkleizer.combinedChunks[topHashIdx][0],
+        lastAddedChunkIndex shr topHashIdx)
 
     merkleizer.totalChunks = 1'u64 shl topHashIdx
+
   else:
     # We have a perfect tree (chunks == 2**n) at just the right height!
     doAssert merkleizer.totalChunks == 1'u64 shl topHashIdx
@@ -266,17 +319,44 @@ func combineToTop(merkleizer: var SszMerkleizer2, res: var Digest) =
   assign(res, merkleizer.combinedChunks[topHashIdx][0])
 
 func combineChunks(merkleizer: var SszMerkleizer2, start: int) =
+  when merkleizer.cached:
+    let lastAddedChunkIndex =
+      merkleizer.firstChunkIndex + merkleizer.totalChunks
   for i in start..<merkleizer.topIndex:
     trs "CALLING MERGE BRANCHES"
     if getBitLE(merkleizer.totalChunks, i + 1):
-      mergeBranches(
-        merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
-        merkleizer.combinedChunks[i + 1][1])
+      merkleizer.mergeBranches(
+        merkleizer.combinedChunks[i][0],
+        merkleizer.combinedChunks[i][1],
+        merkleizer.combinedChunks[i + 1][1],
+        lastAddedChunkIndex shr (i + 1))
     else:
-      mergeBranches(
-        merkleizer.combinedChunks[i][0], merkleizer.combinedChunks[i][1],
-        merkleizer.combinedChunks[i + 1][0])
+      merkleizer.mergeBranches(
+        merkleizer.combinedChunks[i][0],
+        merkleizer.combinedChunks[i][1],
+        merkleizer.combinedChunks[i + 1][0],
+        lastAddedChunkIndex shr (i + 1))
       break
+
+func addNodeDirect(
+    merkleizer: var SszMerkleizer2, layerIdx: int, hash: Digest): uint64 =
+  # add an internal node with a cached `hash` at `layerIdx` - this is useful
+  # for multiproof computation that span across both leaf and internal nodes
+  # where internal nodes may have already been cached
+  static: doAssert merkleizer.cached
+
+  let numSkippedChunks = 1'u64 shl layerIdx
+  doAssert (merkleizer.totalChunks and (numSkippedChunks - 1)) == 0
+  doAssert merkleizer.totalChunks + numSkippedChunks <= merkleizer.limit.uint64
+
+  if getBitLE(merkleizer.totalChunks, layerIdx):
+    assign(merkleizer.combinedChunks[layerIdx][1], hash)
+    merkleizer.combineChunks(layerIdx)
+  else:
+    assign(merkleizer.combinedChunks[layerIdx][0], hash)
+
+  merkleizer.totalChunks += numSkippedChunks
+  numSkippedChunks
 
 template addChunkDirect(merkleizer: var SszMerkleizer2, body: untyped) =
   # add chunk allowing `body` to write directly to `chunk` memory thus avoiding
@@ -329,8 +409,7 @@ func addChunk*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
 template isOdd(x: SomeNumber): bool =
   (x and 1) != 0
 
-func doAddChunks[height: static[Limit]](
-    merkleizer: var SszMerkleizer2[height], data: openArray[byte]) =
+func addChunks*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
   doAssert merkleizer.totalChunks == 0
   doAssert merkleizer.limit * bytesPerChunk >= data.len,
     "Adding chunks would exceed merklelizer limit " & $merkleizer.limit
@@ -376,9 +455,6 @@ func doAddChunks[height: static[Limit]](
 
       merkleizer.addChunk(data.toOpenArray(done, data.high))
       break
-
-func addChunks*(merkleizer: var SszMerkleizer2, data: openArray[byte]) =
-  doAddChunks[merkleizer.height](merkleizer, data)
 
 func addChunkAndGenMerkleProof*(merkleizer: var SszMerkleizer2,
                                 hash: Digest,
@@ -569,6 +645,39 @@ func addChunksAndGenMerkleProofs*(merkleizer: var SszMerkleizer2,
     writeProofs(0, hash)
 
   merkleizer.totalChunks = newTotalChunks
+
+template createMerkleizer2(
+    height: static Limit, topLayer = 0,
+    internalParam = false,
+    getCachedRootPtrParam: GetCachedRootPtrProc,
+    firstChunkIndexParam: GeneralizedIndex,
+    depthParam = 0): auto =
+  trs "CREATING A MERKLEIZER FOR ", height, " (topLayer: ", topLayer, ")"
+  let topIndex = height.int - 1 - topLayer
+  SszMerkleizer2[height, true](
+    topIndex: if (topIndex < 0): 0 else: topIndex,
+    totalChunks: 0,
+    internal: internalParam,
+    getCachedRootPtr: getCachedRootPtrParam,
+    firstChunkIndex: firstChunkIndexParam,
+    depth: depthParam)
+
+template createMerkleizer2(
+    height: Limit, topLayer = 0,
+    internalParam = false,
+    getCachedRootPtrParam: GetCachedRootPtrProc,
+    firstChunkIndexParam: GeneralizedIndex,
+    depthParam = 0): auto =
+  trs "CREATING A DYN MERKLEIZER FOR ", height, " (topLayer: ", topLayer, ")"
+  let topIndex = height.int - 1 - topLayer
+  SszMerkleizer2[-1, true](
+    combinedChunks: newSeq[(Digest, Digest)](height),
+    topIndex: if (topIndex < 0): 0 else: topIndex,
+    totalChunks: 0,
+    internal: internalParam,
+    getCachedRootPtr: getCachedRootPtrParam,
+    firstChunkIndex: firstChunkIndexParam,
+    depth: depthParam)
 
 template createMerkleizer2*(
     height: static Limit, topLayer = 0,
@@ -1102,9 +1211,17 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
     hashTreeRootAux(x.bytes, res)
   elif T is BitList:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    var contentsHash {.noinit.}: Digest
-    bitListHashTreeRoot(binaryTreeHeight totalChunks, BitSeq x, contentsHash)
-    mixInLength(contentsHash, x.len, res)
+    if x.len == 0:
+      const emptyRoot = block:
+        const height = binaryTreeHeight totalChunks
+        var res: Digest
+        mergeBranches(zeroHashes[height - 1], zeroHashes[0], res)  # mixInLength
+        res
+      assign(res, emptyRoot)
+    else:
+      var contentsHash {.noinit.}: Digest
+      bitListHashTreeRoot(binaryTreeHeight totalChunks, BitSeq x, contentsHash)
+      mixInLength(contentsHash, x.len, res)
   elif T is array:
     template E: untyped = ElemType(T)
     when E is BasicType and sizeof(T) <= sizeof(res.data):
@@ -1115,15 +1232,29 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
       chunkedHashTreeRoot(binaryTreeHeight totalChunks, x, res)
   elif T is List:
     const totalChunks = maxChunksCount(T, x.maxLen)
-    var contentsHash {.noinit.}: Digest
-    chunkedHashTreeRoot(binaryTreeHeight totalChunks, asSeq x, contentsHash)
-    mixInLength(contentsHash, x.len, res)
+    if x.len == 0:
+      const emptyRoot = block:
+        const height = binaryTreeHeight totalChunks
+        var res: Digest
+        mergeBranches(zeroHashes[height - 1], zeroHashes[0], res)  # mixInLength
+        res
+      assign(res, emptyRoot)
+    else:
+      var contentsHash {.noinit.}: Digest
+      chunkedHashTreeRoot(binaryTreeHeight totalChunks, asSeq x, contentsHash)
+      mixInLength(contentsHash, x.len, res)
   elif T is BitSeq:
-    x.progressiveBitListHashTreeRoot(res)
-    mixInLength(res, x.len, res)
+    if x.len == 0:
+      assign(res, zeroHashes[1])  # mixInLength
+    else:
+      x.progressiveBitListHashTreeRoot(res)
+      mixInLength(res, x.len, res)
   elif T is seq:
-    x.progressiveChunkedHashTreeRoot(res)
-    mixInLength(res, x.len, res)
+    if x.len == 0:
+      assign(res, zeroHashes[1])  # mixInLength
+    else:
+      x.progressiveChunkedHashTreeRoot(res)
+      mixInLength(res, x.len, res)
   elif T.isUnion:
     x.unionHashTreeRoot(res)
     mixInSelector(res, x.unionSelector.ord.uint8, res)
@@ -1148,20 +1279,20 @@ type
       batch: ptr BatchRequest, first: int,
       atLayer: int, needTopRoot = false): Opt[int] {.noSideEffect, raises: [].}
 
-func fulfill(
-    batch: ptr BatchRequest, first: int,
+func fulfillImpl(
+    batch: ptr BatchRequest, cached: static bool, first: int,
     atLayer: int, needTopRoot: bool,
     height: Limit | static Limit, numUsedChunks: int,
     getTopRoot: GetTopRootForChunkProc,
     getNestedRoot: GetNestedRootsForChunkProc,
+    getCachedRootPtr: GetCachedRootPtrProc = nil,
     depth = 0): Opt[int] =
   let
     chunkLayer = height - 1
     firstChunkIndex = 1.GeneralizedIndex shl chunkLayer
     totalChunkCount = numUsedChunks.Limit
     topStem = indexAt(first).stem
-  var
-    i = first
+  var i = first
   while i <= batch.loopOrderHigh:
     var (stem, index, indexLayer) = indexAt(i)
     if shouldStop:
@@ -1171,19 +1302,59 @@ func fulfill(
       indexLayer = 0
     if indexLayer < chunkLayer:
       let chunks = chunksForIndex(index)
-      var merkleizer = createMerkleizer2(
-        height, indexLayer, internalParam = true)
+      when cached:
+        var merkleizer = createMerkleizer2(
+          height, indexLayer, internalParam = true,
+          getCachedRootPtr, firstChunkIndex + chunks.a.GeneralizedIndex, depth)
+      else:
+        var merkleizer = createMerkleizer2(
+          height, indexLayer, internalParam = true)
       let lastUsedChunk = min(chunks.b, totalChunkCount - 1)
       var
         chunk = chunks.a
         allFulfilled = false
+      when cached:
+        var pendingIndex = 0.GeneralizedIndex
+
+        template merkleizerNeedTopRoot(chunk: Limit): bool =
+          block:
+            let
+              chunkIndex = firstChunkIndex + chunk.GeneralizedIndex
+              topIdx = log2trunc((chunks.b - chunks.a + 1).GeneralizedIndex)
+            var res = true
+            for layerIdx in 1 .. topIdx:
+              if isCached(getCachedRootPtr(chunkIndex shr layerIdx, depth)[]):
+                res = false
+                break
+            res
 
       template addChunksUpThrough(maxChunk: Limit) =
         let highChunk = min(maxChunk, totalChunkCount - 1)
         while chunk <= highChunk:
-          merkleizer.addChunkDirect:
-            chunk.getTopRoot(depth, outChunk)
-          inc chunk
+          when cached:
+            let
+              chunkIndex = firstChunkIndex + chunk.GeneralizedIndex
+              topIdx = log2trunc((maxChunk - chunk + 1).GeneralizedIndex)
+            var layerIdx =
+              if chunk > 0:
+                chunk.GeneralizedIndex.trailingZeros
+              else:
+                chunkLayer.int
+            layerIdx = min(layerIdx, topIdx)
+            while layerIdx > 0:
+              let cachedRoot = getCachedRootPtr(chunkIndex shr layerIdx, depth)
+              if isCached(cachedRoot[]):
+                chunk += Limit merkleizer.addNodeDirect(layerIdx, cachedRoot[])
+                break
+              dec layerIdx
+            if layerIdx == 0:
+              merkleizer.addChunkDirect:
+                chunk.getTopRoot(depth, outChunk)
+              inc chunk
+          else:
+            merkleizer.addChunkDirect:
+              chunk.getTopRoot(depth, outChunk)
+            inc chunk
 
       while i <= batch.loopOrderHigh and chunk <= lastUsedChunk:
         let (stem, index, indexLayer) = indexAt(i)
@@ -1195,36 +1366,73 @@ func fulfill(
           if subChunks.a > chunks.b:
             break
           if shouldSkip(i):
+            when cached:
+              pendingIndex = index
             inc i
             continue
           if subChunks.a >= totalChunkCount:
             assign(rootAt(i), zeroHashes[chunkLayer - indexLayer])
             inc i
             continue
+          when cached:
+            if indexLayer == chunkLayer:
+              let subChunk = chunkForIndex(index)
+              subChunk.getTopRoot(depth, rootAt(i))
+              if merkleizerNeedTopRoot(subChunk):
+                addChunksUpThrough(subChunk - 1)
+                merkleizer.addChunkDirect:
+                  assign(outChunk, rootAt(i))
+                inc chunk
+              inc i
+              continue
           addChunksUpThrough(subChunks.b)
-          if chunk == totalChunkCount:
-            break
-          let layerIdx = chunkLayer - indexLayer
-          if getBitLE(merkleizer.totalChunks, layerIdx):
-            assign(rootAt(i), merkleizer.combinedChunks[layerIdx][0])
+          when cached:
+            if chunk in totalChunkCount .. subChunks.b:
+              break
+            assign(rootAt(i), getCachedRootPtr(index, depth)[])
           else:
-            assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
+            if chunk == totalChunkCount:
+              break
+            let layerIdx = chunkLayer - indexLayer
+            if getBitLE(merkleizer.totalChunks, layerIdx):
+              assign(rootAt(i), merkleizer.combinedChunks[layerIdx][0])
+            else:
+              assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
           inc i
         else:
-          let subChunk = chunkForIndex(index shr (indexLayer - chunkLayer))
+          let
+            subIndex = index shr (indexLayer - chunkLayer)
+            subChunk = chunkForIndex(subIndex)
           if subChunk >= totalChunkCount:
             return err()
           if subChunk > chunks.b:
             break
-          addChunksUpThrough(subChunk - 1)
-          i += (? subChunk.getNestedRoot(
-            depth, batch, i, atLayer + chunkLayer.int, needTopRoot = true))
-          merkleizer.addChunkDirect:
-            assign(outChunk, batch.topRoot)
-          inc chunk
+          when cached:
+            let
+              requestNeedTopRoot = (subIndex == pendingIndex)
+              merkleizerNeedTopRoot = merkleizerNeedTopRoot(subChunk)
+            i += (? subChunk.getNestedRoot(
+              depth, batch, i, atLayer + chunkLayer.int,
+              needTopRoot = requestNeedTopRoot or merkleizerNeedTopRoot))
+            if requestNeedTopRoot:
+              assign(rootAt(i), batch.topRoot)
+              inc i
+            if merkleizerNeedTopRoot:
+              addChunksUpThrough(subChunk - 1)
+              merkleizer.addChunkDirect:
+                assign(outChunk, batch.topRoot)
+              inc chunk
+          else:
+            addChunksUpThrough(subChunk - 1)
+            i += (? subChunk.getNestedRoot(
+              depth, batch, i, atLayer + chunkLayer.int, needTopRoot = true))
+            merkleizer.addChunkDirect:
+              assign(outChunk, batch.topRoot)
+            inc chunk
       if not allFulfilled or needTopRoot:
         addChunksUpThrough(chunks.b)
-        let totalChunks = merkleizer.totalChunks
+        when not cached:
+          let totalChunks = merkleizer.totalChunks
         while i <= batch.loopOrderHigh:
           let (stem, index, indexLayer) = indexAt(i)
           if shouldStop:
@@ -1242,14 +1450,18 @@ func fulfill(
             else:
               merkleizer.combineToTop(
                 merkleizer.combinedChunks[merkleizer.topIndex][1])
-              if subChunks.b < totalChunks.Limit or
-                  layerIdx <= firstOne(max(totalChunks, 1)) - 1:
-                if getBitLE(totalChunks, layerIdx):
-                  assign(rootAt(i), merkleizer.combinedChunks[layerIdx][0])
+              when cached:
+                let cachedRoot = getCachedRootPtr(index, depth)
+                assign(rootAt(i), cachedRoot[])
+              else:
+                if subChunks.b < totalChunks.Limit or
+                    layerIdx <= firstOne(max(totalChunks, 1)) - 1:
+                  if getBitLE(totalChunks, layerIdx):
+                    assign(rootAt(i), merkleizer.combinedChunks[layerIdx][0])
+                  else:
+                    assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
                 else:
                   assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
-              else:
-                assign(rootAt(i), merkleizer.combinedChunks[layerIdx][1])
             inc i
           else:
             let subChunk = chunkForIndex(index shr (indexLayer - chunkLayer))
@@ -1281,8 +1493,26 @@ func fulfill(
           let subChunk = chunkForIndex(index shr (indexLayer - chunkLayer))
           if subChunk >= totalChunkCount:
             return err()
+          when cached:
+            var cachedRoot: ptr Digest
+            let isTopRootCached =
+              if height == 1:
+                cachedRoot = getCachedRootPtr(1.GeneralizedIndex, depth)
+                isCached(cachedRoot[])
+              else:
+                false
+          else:
+            const isTopRootCached = false
           i += (? subChunk.getNestedRoot(
-            depth, batch, i, atLayer + chunkLayer.int, needTopRoot = true))
+            depth, batch, i, atLayer + chunkLayer.int,
+            needTopRoot = not isTopRootCached))
+          when cached:
+            if isTopRootCached:
+              assign(batch.topRoot, cachedRoot[])
+            elif cachedRoot != nil:
+              assign(cachedRoot[], batch.topRoot)
+            else:
+              discard
           if not needTopRoot:
             assign(rootAt(i), batch.topRoot)
             inc i
@@ -1294,6 +1524,29 @@ func fulfill(
       i += (? subChunk.getNestedRoot(
         depth, batch, i, atLayer + chunkLayer.int))
   ok(i - first)
+
+func fulfill(
+    batch: ptr BatchRequest, first: int,
+    atLayer: int, needTopRoot: bool,
+    height: Limit | static Limit, numUsedChunks: int,
+    getTopRoot: GetTopRootForChunkProc,
+    getNestedRoot: GetNestedRootsForChunkProc,
+    getCachedRootPtr: GetCachedRootPtrProc,
+    depth = 0): Opt[int] =
+  batch.fulfillImpl(cached = true,
+    first, atLayer, needTopRoot, height, numUsedChunks,
+    getTopRoot, getNestedRoot, getCachedRootPtr, depth = depth)
+
+func fulfill(
+    batch: ptr BatchRequest, first: int,
+    atLayer: int, needTopRoot: bool,
+    height: Limit | static Limit, numUsedChunks: int,
+    getTopRoot: GetTopRootForChunkProc,
+    getNestedRoot: GetNestedRootsForChunkProc,
+    depth = 0): Opt[int] =
+  batch.fulfillImpl(cached = false,
+    first, atLayer, needTopRoot, height, numUsedChunks,
+    getTopRoot, getNestedRoot, depth = depth)
 
 type
   GetTopProgressiveRootProc =
@@ -1309,14 +1562,20 @@ type
       chunk: Limit, firstIdx: Limit, depth: Limit, atBottom: bool,
       batch: ptr BatchRequest, first: int,
       atLayer: int, needTopRoot = false): Opt[int] {.noSideEffect, raises: [].}
+  GetCachedProgressiveRootPtrProc =
+    proc (depth: Limit): ptr Digest {.noSideEffect, raises: [].}
 
-func fulfillProgressive(
-    batch: ptr BatchRequest, first: int,
+func fulfillProgressiveImpl(
+    batch: ptr BatchRequest, cached: static bool, first: int,
     atLayer: int, needTopRoot: bool, totalUsedChunks: int,
     getTopRoot: GetTopRootForChunkProc,
     getTopProgressiveRoot: GetTopProgressiveRootProc,
     getTopDataRoot: GetTopDataRootProc,
-    getNestedDataRoot: GetNestedDataRootProc): Opt[int] =
+    getNestedDataRoot: GetNestedDataRootProc,
+    getCachedTopRootPtr: GetCachedRootPtrProc = nil,
+    getCachedDataRootPtr: GetCachedRootPtrProc = nil,
+    getCachedProgressiveRootPtr: GetCachedProgressiveRootPtrProc = nil
+): Opt[int] =
   let (afterFirstIdx, afterDepth) = totalUsedChunks.progressiveBottom()
 
   func firstIdx(depth: Limit): Limit =
@@ -1336,16 +1595,35 @@ func fulfillProgressive(
       depth.firstIdx, depth, depth.atBottom,
       batch, first, atLayer, needTopRoot)
 
+  func getStemRoot(depth: int, res: var Digest) =
+    if depth == afterDepth:
+      assign(res, zeroHashes[0])
+      return
+    when cached:
+      let cachedRoot = getCachedProgressiveRootPtr(depth.Limit)
+      if isCached(cachedRoot[]):
+        assign(res, cachedRoot[])
+        return
+    getStemRoot(depth + 1, res)
+    var contentsHash {.noinit.}: Digest
+    getTopProgressiveRoot(depth.firstIdx, depth, depth.atBottom, contentsHash)
+    mergeBranches(contentsHash, res, res)
+    when cached:
+      assign(cachedRoot[], res)
+
   func getTopProgressiveRootWrapper(chunk: Limit, depth: int, res: var Digest) =
     if chunk == 0:
       getTopProgressiveRoot(depth.firstIdx, depth, depth.atBottom, res)
-    elif depth == afterDepth - 1:
-      assign(res, zeroHashes[0])
     else:
-      1.getTopProgressiveRootWrapper(depth + 1, res)
-      var contentsHash {.noinit.}: Digest
-      0.getTopProgressiveRootWrapper(depth + 1, contentsHash)
-      mergeBranches(contentsHash, res, res)
+      getStemRoot(depth + 1, res)
+
+  when cached:
+    func getCachedProgressiveRootWrapper(
+        index: GeneralizedIndex, depth = 0): ptr Digest =
+      doAssert index == 1.GeneralizedIndex
+      getCachedProgressiveRootPtr(depth.Limit)
+  else:
+    const getCachedProgressiveRootWrapper: GetCachedRootPtrProc = nil
 
   func getNestedProgressiveRoot(
       chunk: Limit, depth: int,
@@ -1356,15 +1634,17 @@ func fulfillProgressive(
         firstIdx = depth.firstIdx
         height = (depth shl 1) + 1
         numUsedChunks = min((firstIdx shl 2) or 1, totalUsedChunks) - firstIdx
-      batch.fulfill(
+      batch.fulfillImpl(cached,
         first, atLayer, needTopRoot, height.Limit, numUsedChunks.int,
-        getTopDataRootWrapper, getNestedDataRootWrapper, depth)
+        getTopDataRootWrapper, getNestedDataRootWrapper,
+        getCachedDataRootPtr, depth = depth)
     elif depth == afterDepth - 1:
       err()
     else:
-      batch.fulfill(
+      batch.fulfillImpl(cached,
         first, atLayer, needTopRoot, height = 2, numUsedChunks = 2,
-        getTopProgressiveRootWrapper, getNestedProgressiveRoot, depth + 1)
+        getTopProgressiveRootWrapper, getNestedProgressiveRoot,
+        getCachedProgressiveRootWrapper, depth = depth + 1)
 
   func getNestedRoot(
       chunk: Limit, depth: int,
@@ -1375,13 +1655,40 @@ func fulfillProgressive(
     elif afterDepth == 0:
       err()
     else:
-      batch.fulfill(
+      batch.fulfillImpl(cached,
         first, atLayer, needTopRoot, height = 2, numUsedChunks = 2,
-        getTopProgressiveRootWrapper, getNestedProgressiveRoot)
+        getTopProgressiveRootWrapper, getNestedProgressiveRoot,
+        getCachedProgressiveRootWrapper)
 
-  batch.fulfill(
+  batch.fulfillImpl(cached,
     first, atLayer, needTopRoot, height = 2, numUsedChunks = 2,
-    getTopRoot, getNestedRoot)
+    getTopRoot, getNestedRoot, getCachedTopRootPtr)
+
+func fulfillProgressive(
+    batch: ptr BatchRequest, first: int,
+    atLayer: int, needTopRoot: bool, totalUsedChunks: int,
+    getTopRoot: GetTopRootForChunkProc,
+    getTopProgressiveRoot: GetTopProgressiveRootProc,
+    getTopDataRoot: GetTopDataRootProc,
+    getNestedDataRoot: GetNestedDataRootProc,
+    getCachedTopRootPtr: GetCachedRootPtrProc,
+    getCachedDataRootPtr: GetCachedRootPtrProc,
+    getCachedProgressiveRootPtr: GetCachedProgressiveRootPtrProc): Opt[int] =
+  batch.fulfillProgressiveImpl(cached = true,
+    first, atLayer, needTopRoot, totalUsedChunks,
+    getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot,
+    getCachedTopRootPtr, getCachedDataRootPtr, getCachedProgressiveRootPtr)
+
+func fulfillProgressive(
+    batch: ptr BatchRequest, first: int,
+    atLayer: int, needTopRoot: bool, totalUsedChunks: int,
+    getTopRoot: GetTopRootForChunkProc,
+    getTopProgressiveRoot: GetTopProgressiveRootProc,
+    getTopDataRoot: GetTopDataRootProc,
+    getNestedDataRoot: GetNestedDataRootProc): Opt[int] =
+  batch.fulfillProgressiveImpl(cached = false,
+    first, atLayer, needTopRoot, totalUsedChunks,
+    getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot)
 
 func hashTreeRootAux[T](
     x: T,
@@ -1411,6 +1718,8 @@ func hashTreeRootAux[T](
     func getTopRoot(chunk: Limit, depth: int, res: var Digest) =
       if chunk == 1:
         x.len.uint64.hash_tree_root(res)
+      elif x.len == 0:
+        assign(res, zeroHashes[height - 1])
       else:
         bitListHashTreeRoot(height, BitSeq x, res)
 
@@ -1743,6 +2052,14 @@ template refreshHash[T](
       unpackArgs(cachedPtrImpl, [data, maxChunks, vIdx + 1, params])[],
       res)
 
+func cachedPtrArray(
+    hashes: openArray[Digest],
+    maxChunks: int64,
+    index: GeneralizedIndex): ptr Digest =
+  doAssert index in 1.GeneralizedIndex ..<
+    min(max(maxChunks, 2), hashes.len).GeneralizedIndex
+  addr hashes[index]
+
 func hashTreeRootCachedPtrArray[T](
     data: openArray[T],
     maxChunks: int64,
@@ -1763,6 +2080,24 @@ func hashTreeRootCachedPtrArray[T](
 func hashTreeRootCachedPtr(x: HashArray, vIdx: int64): ptr Digest =
   x.data.hashTreeRootCachedPtrArray(
     x.maxChunks, vIdx, x.hashes)
+
+func cachedPtrList*(
+    hashes: openArray[Digest],
+    indices: openArray[int64],
+    maxChunks: int64,
+    index: GeneralizedIndex): ptr Digest =
+  doAssert index >= 1.GeneralizedIndex
+
+  let
+    layer = layer(index.int64)
+    idxInLayer = index.int64 - (1'i64 shl layer)
+    layerIdx = idxInLayer + indices[layer]
+
+  doAssert layer < maxChunks.layer or layer == 0
+
+  doAssert layer + 1 < indices.len
+  doAssert layerIdx in 1 ..< min(indices[layer + 1], hashes.len)
+  addr hashes[layerIdx]
 
 func hashTreeRootCachedPtrList[T](
     data: openArray[T],
@@ -1835,9 +2170,11 @@ func hashTreeRootCached(x: HashArray): Digest {.noinit.} =
 
 func hashTreeRootCached(x: HashList): Digest {.noinit.} =
   if x.data.len == 0:
-    mergeBranches(
-      zeroHashes[x.maxDepth], zeroHashes[0],
-      result) # mixInLength with 0!
+    const emptyRoot = block:
+      var res: Digest
+      mergeBranches(zeroHashes[x.maxDepth], zeroHashes[0], res)  # mixInLength
+      res
+    result = emptyRoot
   else:
     if not isCached(x.hashes[0]):
       # TODO oops. so much for maintaining non-mutability.
@@ -1887,11 +2224,12 @@ func hashTreeRootCached(
       x.item(chunk).hash_tree_root_multi(
         batch, first, atLayer, needTopRoot)
 
+  func getCachedRootPtr(index: GeneralizedIndex, depth = 0): ptr Digest =
+    x.hashes.cachedPtrArray(x.maxChunks, index)
+
   assign(result, batch.fulfill(
-    first, atLayer, needTopRoot = false, height, numUsedChunks.int,
-    getTopRoot, getNestedRoot))
-  if needTopRoot and result.isOk:
-    batch.topRoot = x.hashTreeRootCached()
+    first, atLayer, needTopRoot, height, numUsedChunks.int,
+    getTopRoot, getNestedRoot, getCachedRootPtr))
 
 func hashTreeRootCached(
     x: HashList,
@@ -1926,6 +2264,9 @@ func hashTreeRootCached(
     else:
       assign(res, hashTreeRootCachedPtr(x, 1)[])
 
+  func getCachedDataRootPtr(index: GeneralizedIndex, depth = 0): ptr Digest =
+    x.hashes.cachedPtrList(x.indices, x.maxChunks, index)
+
   func getNestedRoot(
       chunk: Limit, depth: int,
       batch: ptr BatchRequest, first: int,
@@ -1936,12 +2277,17 @@ func hashTreeRootCached(
       let numUsedChunks = E.totalChunkCount(x.len)
       batch.fulfill(
         first, atLayer, needTopRoot, height, numUsedChunks.int,
-        getTopDataRoot, getNestedDataRoot)
+        getTopDataRoot, getNestedDataRoot, getCachedDataRootPtr)
+
+  func getCachedTopRootPtr(index: GeneralizedIndex, depth = 0): ptr Digest =
+    doAssert index == 1.GeneralizedIndex
+    doAssert x.hashes.len > 0
+    addr x.hashes[0]
 
   assign(result, batch.fulfill(
-    first, atLayer, needTopRoot = false,
-    height = 2, numUsedChunks = 2, getTopRoot, getNestedRoot))
-  if needTopRoot and result.isOk:
+    first, atLayer, needTopRoot and x.len > 0, height = 2, numUsedChunks = 2,
+    getTopRoot, getNestedRoot, getCachedTopRootPtr))
+  if needTopRoot and x.len == 0 and result.isOk:
     batch.topRoot = x.hashTreeRootCached()
 
 func hashTreeRootCached(
@@ -1974,6 +2320,19 @@ func hashTreeRootCached(
       height, x.progressiveRange(firstIdx),
       chunk .. chunk, height.int - 1, res)
 
+  func getCachedDataRootPtr(index: GeneralizedIndex, depth = 0): ptr Digest =
+    doAssert depth >= 0 and depth.int < x.hashes.len
+    let maxChunks = 1'i64 shl (depth.int shl 1)
+    if depth.int < x.hashes.high:
+      x.hashes[depth.int].cachedPtrArray(maxChunks, index)
+    else:
+      x.hashes[depth.int].cachedPtrList(x.indices, maxChunks, index)
+
+  func getCachedProgressiveRootPtr(depth: Limit): ptr Digest =
+    doAssert depth >= 0 and depth < x.hashes.len.Limit
+    doAssert x.hashes[depth].len > 0
+    addr x.hashes[depth][0]
+
   func getNestedDataRoot(
       chunk: Limit, firstIdx: Limit, depth: Limit, atBottom: bool,
       batch: ptr BatchRequest, first: int,
@@ -1984,10 +2343,15 @@ func hashTreeRootCached(
       x.item(firstIdx + chunk).hash_tree_root_multi(
         batch, first, atLayer, needTopRoot)
 
+  func getCachedTopRootPtr(index: GeneralizedIndex, depth = 0): ptr Digest =
+    doAssert index == 1.GeneralizedIndex
+    addr x.root
+
   assign(result, batch.fulfillProgressive(
-    first, atLayer, needTopRoot = false, totalUsedChunks.int,
-    getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot))
-  if needTopRoot and result.isOk:
+    first, atLayer, needTopRoot and x.len > 0, totalUsedChunks.int,
+    getTopRoot, getTopProgressiveRoot, getTopDataRoot, getNestedDataRoot,
+    getCachedTopRootPtr, getCachedDataRootPtr, getCachedProgressiveRootPtr))
+  if needTopRoot and x.len == 0 and result.isOk:
     batch.topRoot = x.hashTreeRootCached()
 
 func hash_tree_root*(x: auto, res: var Digest) =
