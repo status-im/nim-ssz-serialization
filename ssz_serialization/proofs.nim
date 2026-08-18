@@ -246,17 +246,24 @@ func calculate_multi_merkle_root*(
     return err("Length mismatch for leaves and indices")
   ? check_multiproof_acceptable(indices)
   let helper_indices = get_helper_indices(indices)
+  if proof.len != helper_indices.len:
+    return err("Length mismatch for proof and helper indices")
   calculate_multi_merkle_root_impl(leaves, proof, indices, helper_indices)
 
 func calculate_multi_merkle_root*(
     leaves: openArray[Digest],
     proof: openArray[Digest],
     indices: static openArray[GeneralizedIndex]): Result[Digest, string] =
-  if leaves.len != indices.len:
-    return err("Length mismatch for leaves and indices")
-  static: ? check_multiproof_acceptable(indices)
-  const helper_indices = get_helper_indices(indices)
-  calculate_multi_merkle_root_impl(leaves, proof, indices, helper_indices)
+  const v = check_multiproof_acceptable(indices)
+  when v.isErr:
+    result.err(v.error)
+  else:
+    if leaves.len != indices.len:
+      return err("Length mismatch for leaves and indices")
+    const helper_indices = get_helper_indices(indices)
+    if proof.len != helper_indices.len:
+      return err("Length mismatch for proof and helper indices")
+    calculate_multi_merkle_root_impl(leaves, proof, indices, helper_indices)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 func verify_merkle_multiproof*(
@@ -266,7 +273,8 @@ func verify_merkle_multiproof*(
     helper_indices: openArray[GeneralizedIndex],
     root: Digest): bool =
   let calc = calculate_multi_merkle_root(leaves, proof, indices, helper_indices)
-  if calc.isErr: return false
+  if calc.isErr:
+    return false
   calc.get == root
 
 func verify_merkle_multiproof*(
@@ -275,7 +283,8 @@ func verify_merkle_multiproof*(
     indices: openArray[GeneralizedIndex],
     root: Digest): bool =
   let calc = calculate_multi_merkle_root(leaves, proof, indices)
-  if calc.isErr: return false
+  if calc.isErr:
+    return false
   calc.get == root
 
 func verify_merkle_multiproof*(
@@ -283,9 +292,9 @@ func verify_merkle_multiproof*(
     proof: openArray[Digest],
     indices: static openArray[GeneralizedIndex],
     root: Digest): bool =
-  const helper_indices = get_helper_indices(indices)
-  let calc = calculate_multi_merkle_root(leaves, proof, indices, helper_indices)
-  if calc.isErr: return false
+  let calc = calculate_multi_merkle_root(leaves, proof, indices)
+  if calc.isErr:
+    return false
   calc.get == root
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/tests/core/pyspec/eth_consensus_specs/test/helpers/merkle.py#L4-L21

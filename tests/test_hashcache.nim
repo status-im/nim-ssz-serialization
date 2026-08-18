@@ -258,6 +258,12 @@ suite "Multiproof cache":
     res.y = i.uint64
     res
 
+  func copy[T](x: T): T =
+    try:
+      SSZ.decode(SSZ.encode(x), T)
+    except SerializationError:
+      raiseAssert "Valid SSZ"
+
   template runCachedTest(T: typedesc, maxGindex: GeneralizedIndex): untyped =
     let
       obj = initObj(T)
@@ -420,7 +426,7 @@ suite "Multiproof cache":
             cached.hash_tree_root() == root
             debugTotalSszHashes == numHashes
             cached.hash_tree_root(cachedGindices).isOk
-            # debugTotalSszHashes == numHashes
+            debugTotalSszHashes == numHashes
 
           if cached.len > 0:
             let numItemHashes = block:
@@ -446,10 +452,10 @@ suite "Multiproof cache":
             check debugTotalSszHashes <= numHashesBefore + 2 * numItemHashes +
               T.get_generalized_index(i).get.int64.layer.uint64
 
-            # let allHashes = debugTotalSszHashes
+            let allHashes = debugTotalSszHashes
             check:
               cached.hash_tree_root(cachedGindices).isOk
-              # debugTotalSszHashes == allHashes
+              debugTotalSszHashes == allHashes
 
           when T is HashList:
             if cached.len < T.maxLen:
@@ -463,12 +469,6 @@ suite "Multiproof cache":
       test "Random operations" & suffix:
         var cached = initObj(T)
 
-        template reference: T =
-          try:
-            SSZ.decode(SSZ.encode(cached), T)
-          except SerializationError:
-            raiseAssert "Valid SSZ"
-
         const NumRandomTests = 200
         for _ in 0 ..< NumRandomTests:
           case rand(8)
@@ -480,18 +480,18 @@ suite "Multiproof cache":
             let i = (0 ..< cached.len).rand()
             checkpoint "htr-leaf-" & $i
             check cached.hash_tree_root(T.get_generalized_index(i).get) ==
-              reference.hash_tree_root(T.get_generalized_index(i).get)
+              cached.copy.hash_tree_root(T.get_generalized_index(i).get)
           of 2:
             let i = allGindices.sample()
             checkpoint "htr-all-" & $i
-            check cached.hash_tree_root(i) == reference.hash_tree_root(i)
+            check cached.hash_tree_root(i) == cached.copy.hash_tree_root(i)
           of 3:
             let i = validGindices.sample()
             checkpoint "htr-valid-" & $i
-            check cached.hash_tree_root(i) == reference.hash_tree_root(i)
+            check cached.hash_tree_root(i) == cached.copy.hash_tree_root(i)
           of 4:
             checkpoint "htr-top"
-            check cached.hash_tree_root() == reference.hash_tree_root()
+            check cached.hash_tree_root() == cached.copy.hash_tree_root()
           of 5:
             when typeof(cached) isnot HashArray:
               let i = (0 ..< cached.len).rand()
@@ -508,7 +508,7 @@ suite "Multiproof cache":
             checkpoint "htr-multi-" & $indices
             let
               res1 = cached.hash_tree_root(indices, cachedRoots)
-              res2 = reference.hash_tree_root(indices, refRoots)
+              res2 = cached.copy.hash_tree_root(indices, refRoots)
             check res1 == res2
             if res1.isOk:
               check cachedRoots == refRoots
@@ -525,7 +525,7 @@ suite "Multiproof cache":
             checkpoint "htr-multitop-" & $indices
             let
               res1 = cached.hash_tree_root(indices, cachedRoots, cachedTopRoot)
-              res2 = reference.hash_tree_root(indices, refRoots, refTopRoot)
+              res2 = cached.copy.hash_tree_root(indices, refRoots, refTopRoot)
             check res1 == res2
             if res1.isOk:
               check:
@@ -538,12 +538,12 @@ suite "Multiproof cache":
           cachedTopRoot: Digest
           refTopRoot: Digest
         check:
-          cached.hash_tree_root() == reference.hash_tree_root()
+          cached.hash_tree_root() == cached.copy.hash_tree_root()
           cached.hash_tree_root(validGindices, cachedRoots) ==
-            reference.hash_tree_root(validGindices, refRoots)
+            cached.copy.hash_tree_root(validGindices, refRoots)
           cachedRoots == refRoots
           cached.hash_tree_root(validGindices, cachedRoots, cachedTopRoot) ==
-            reference.hash_tree_root(validGindices, refRoots, refTopRoot)
+            cached.copy.hash_tree_root(validGindices, refRoots, refTopRoot)
           cachedRoots == refRoots
           cachedTopRoot == refTopRoot
 
@@ -573,6 +573,7 @@ suite "Multiproof cache":
     template modObj(obj: untyped, i: int) =
       obj[i] = Foo.init(42)
 
+    HashArray[1, Foo].runCachedTest(3.GeneralizedIndex)
     HashArray[3, Foo].runCachedTest(31.GeneralizedIndex)
     HashArray[4, Foo].runCachedTest(63.GeneralizedIndex)
     HashArray[6, Foo].runCachedTest(63.GeneralizedIndex)
@@ -625,6 +626,19 @@ suite "Multiproof cache":
       obj.mitem(i) += 999'u64
 
     HashList[uint64, 4].runCachedTest(7.GeneralizedIndex)
+
+  for n in [0, 1]:
+    template initObj(T: typedesc): untyped =
+      block:
+        var res: T
+        for i in 0 ..< n:
+          doAssert res.add(Foo.init(i))
+        res
+
+    template modObj(obj: untyped, i: int) =
+      obj.mitem(i) = Foo.init(42)
+
+    HashList[Foo, 1].runCachedTest(7.GeneralizedIndex)
 
   for n in [0, 1, 2, 4, 5, 8, 16, 20, 21]:
     template initObj(T: typedesc): untyped =
@@ -703,3 +717,439 @@ suite "Multiproof cache":
       obj[i] = Foo.init(42)
 
     HashSeq[Foo].runCachedTest(1023.GeneralizedIndex)
+
+  test "Boundary at data end":
+    var cached = HashList[uint64, 128].init(toSeq(0'u64 ..< 9'u64))
+    discard hash_tree_root(cached)
+    cached.mitem(0) += 1
+
+    for i in [32.GeneralizedIndex, 16, 8, 4, 2]:
+      check not isCached(cached.hashes.cachedPtrList(
+        cached.indices, cached.maxChunks, i shr 1)[])
+    check not isCached(cached.hashes[0])
+
+    block:
+      let i = [16.GeneralizedIndex, 17]
+      var cachedRoots {.noinit.}, refRoots {.noinit.}: array[2, Digest]
+      check:
+        cached.hash_tree_root(i, cachedRoots) ==
+          cached.copy.hash_tree_root(i, refRoots)
+        cachedRoots == refRoots
+        cachedRoots[1] == zeroHashes[2]
+
+    block:
+      let i = [8.GeneralizedIndex, 9]
+      var cachedRoots {.noinit.}, refRoots {.noinit.}: array[2, Digest]
+      check:
+        cached.hash_tree_root(i, cachedRoots) ==
+          cached.copy.hash_tree_root(i, refRoots)
+        cachedRoots == refRoots
+        cachedRoots[1] == zeroHashes[3]
+
+  test "Progressive boundary at data end":
+    var cached = HashSeq[uint64].init(toSeq(0'u64 ..< 22'u64))
+    discard hash_tree_root(cached)
+    cached.mitem(0) += 1
+    check not isCached(cached.root)
+
+    for i in 2'u64 .. 128'u64:
+      checkpoint $i
+      var cachedRoots {.noinit.}, refRoots {.noinit.}: array[2, Digest]
+      let
+        res1 = cached.hash_tree_root([i.GeneralizedIndex, 4], cachedRoots)
+        res2 = cached.copy.hash_tree_root([i.GeneralizedIndex, 4], refRoots)
+      check res1 == res2
+      if res1.isOk:
+        check cachedRoots == refRoots
+    check cached.hash_tree_root() == cached.copy.hash_tree_root()
+
+  type
+    Inner = object
+      a, b, c, d: uint64
+    Outer = object
+      x: Inner
+      y: uint64
+
+  func initTestArray(maxLen: static Limit = 8): HashArray[maxLen, Outer] =
+    var res: HashArray[maxLen, Outer]
+    for i in 0'u64 ..< maxLen.uint64:
+      res.mitem(i).x.a = 100 + i
+      res.mitem(i).y = 500 + i
+    res
+
+  test "Overlapped item root":
+    let testArray = initTestArray()
+
+    when SSZ_DEBUG_COUNT_HASHES:
+      let numHalfHashes = block:
+        let numHashesBefore = debugTotalSszHashes
+        check testArray.copy.hash_tree_root(2.GeneralizedIndex).isOk
+        debugTotalSszHashes - numHashesBefore
+
+    block:
+      var roots {.noinit.}: array[3, Digest]
+      when SSZ_DEBUG_COUNT_HASHES:
+        let numHashesBefore = debugTotalSszHashes
+      check testArray.copy.hash_tree_root(
+        [2.GeneralizedIndex, 9, 18], roots).isOk
+      when SSZ_DEBUG_COUNT_HASHES:
+        check debugTotalSszHashes == numHashesBefore + numHalfHashes
+      check:
+        roots[1] == testArray.item(1).hash_tree_root()
+        roots[2] == testArray.item(1).x.hash_tree_root()
+
+    block:
+      var roots {.noinit.}: array[3, Digest]
+      when SSZ_DEBUG_COUNT_HASHES:
+        let numHashesBefore = debugTotalSszHashes
+      check testArray.copy.hash_tree_root(
+        [2.GeneralizedIndex, 9, 11], roots).isOk
+      when SSZ_DEBUG_COUNT_HASHES:
+        check debugTotalSszHashes == numHashesBefore + numHalfHashes
+      check:
+        roots[1] == testArray.item(1).hash_tree_root()
+        roots[2] == testArray.item(3).hash_tree_root()
+
+  when SSZ_DEBUG_COUNT_HASHES:
+    let
+      numOuterHashes = block:
+        let numHashesBefore = debugTotalSszHashes
+        discard default(Outer).hash_tree_root()
+        debugTotalSszHashes - numHashesBefore
+      numInnerHashes = block:
+        let numHashesBefore = debugTotalSszHashes
+        discard default(Inner).hash_tree_root()
+        debugTotalSszHashes - numHashesBefore
+
+  test "Multiproof hash counts":
+    when SSZ_DEBUG_COUNT_HASHES:
+      let numHalfHashes = block:
+        let numHashesBefore = debugTotalSszHashes
+        check initTestArray().copy.hash_tree_root(2.GeneralizedIndex).isOk
+        debugTotalSszHashes - numHashesBefore
+      check numHalfHashes == 4 * numOuterHashes + 3
+
+      block:
+        let
+          testArray = initTestArray()
+          tests = [
+            (@[72.GeneralizedIndex], 0'u64),
+            (@[18.GeneralizedIndex], numInnerHashes),
+            (@[9.GeneralizedIndex], numOuterHashes),
+            (@[9.GeneralizedIndex, 18], numOuterHashes),
+            (@[9.GeneralizedIndex, 72], numOuterHashes),
+          ]
+        for (indices, numHashes) in tests:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            testArray.hash_tree_root(indices).isOk
+            debugTotalSszHashes == numHashesBefore + numHashes
+
+      block:
+        let tests = [
+          (@[2.GeneralizedIndex, 9], numHalfHashes),
+          (@[2.GeneralizedIndex, 9, 18], numHalfHashes),
+          (@[2.GeneralizedIndex, 9, 11], numHalfHashes),
+          (@[2.GeneralizedIndex, 18], numHalfHashes),
+          (@[2.GeneralizedIndex, 18, 22], numHalfHashes),
+        ]
+        for (indices, numHashes) in tests:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            initTestArray().hash_tree_root(indices).isOk
+            debugTotalSszHashes == numHashesBefore + numHashes
+
+      block:
+        var testArray = initTestArray()
+        discard testArray.hash_tree_root()
+        let tests = [
+          (@[2.GeneralizedIndex], 0'u64),
+          (@[72.GeneralizedIndex], 0'u64),
+          (@[18.GeneralizedIndex], numInnerHashes),
+          (@[2.GeneralizedIndex, 18], numInnerHashes),
+          (@[2.GeneralizedIndex, 9, 18], numOuterHashes),
+        ]
+        for (indices, numHashes) in tests:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            testArray.hash_tree_root(indices).isOk
+            debugTotalSszHashes == numHashesBefore + numHashes
+
+        testArray.mitem(0).y += 1
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          testArray.hash_tree_root(2.GeneralizedIndex).isOk
+          debugTotalSszHashes == numHashesBefore + 2 * numOuterHashes + 2
+
+      for indices in [
+          @[2.GeneralizedIndex, 9],
+          @[2.GeneralizedIndex, 8],
+          @[2.GeneralizedIndex, 9, 18]]:
+        var testArray = initTestArray()
+        discard testArray.hash_tree_root()
+        testArray.mitem(0).y += 1
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          testArray.hash_tree_root(indices).isOk
+          debugTotalSszHashes == numHashesBefore + 2 * numOuterHashes + 2
+
+      block:
+        var testArray = initTestArray()
+        discard testArray.hash_tree_root()
+        testArray.mitem(6).y += 1
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          testArray.hash_tree_root([3.GeneralizedIndex]).isOk
+          debugTotalSszHashes == numHashesBefore + 2 * numOuterHashes + 2
+
+      block:
+        var testArray = initTestArray(16)
+        discard testArray.hash_tree_root()
+        testArray.mitem(14).y += 1
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          testArray.hash_tree_root([3.GeneralizedIndex]).isOk
+          debugTotalSszHashes == numHashesBefore + 2 * numOuterHashes + 3
+    else:
+      skip()
+
+  test "Multiproof with top root":
+    when SSZ_DEBUG_COUNT_HASHES:
+      let numOuterHashes = block:
+        let numHashesBefore = debugTotalSszHashes
+        discard hash_tree_root(default(Outer))
+        debugTotalSszHashes - numHashesBefore
+      block:
+        let
+          testArray = initTestArray()
+          numTotalHashes = block:
+            let numHashesBefore = debugTotalSszHashes
+            discard testArray.copy.hash_tree_root()
+            debugTotalSszHashes - numHashesBefore
+        var
+          roots {.noinit.}: array[1, Digest]
+          topRoot {.noinit.}: Digest
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            testArray.hash_tree_root([8.GeneralizedIndex], roots, topRoot).isOk
+            debugTotalSszHashes == numHashesBefore + numTotalHashes
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            testArray.hash_tree_root([8.GeneralizedIndex], roots, topRoot).isOk
+            debugTotalSszHashes == numHashesBefore + numOuterHashes
+        check:
+          roots == [testArray.data[0].hash_tree_root()]
+          topRoot == testArray.copy.hash_tree_root()
+
+      block:
+        let
+          x = HashSeq[Outer].init(
+            (0'u64 ..< 6'u64).mapIt(Outer(x: Inner(a: 100 + it), y: 500 + it)))
+          numTotalHashes = block:
+            let numHashesBefore = debugTotalSszHashes
+            discard x.copy.hash_tree_root()
+            debugTotalSszHashes - numHashesBefore
+        var
+          roots {.noinit.}: array[1, Digest]
+          topRoot {.noinit.}: Digest
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            x.hash_tree_root([4.GeneralizedIndex], roots, topRoot).isOk
+            debugTotalSszHashes == numHashesBefore + numTotalHashes
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            x.hash_tree_root([4.GeneralizedIndex], roots, topRoot).isOk
+            debugTotalSszHashes == numHashesBefore
+        check:
+          roots == [x.data[0].hash_tree_root()]
+          topRoot == x.copy.hash_tree_root()
+    else:
+      skip()
+
+  test "Single chunk with top root":
+    when SSZ_DEBUG_COUNT_HASHES:
+      block:
+        let x = initTestArray(1)
+        var
+          roots {.noinit.}: array[1, Digest]
+          topRoot {.noinit.}: Digest
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            x.hash_tree_root([3.GeneralizedIndex], roots, topRoot).isOk
+            debugTotalSszHashes == numHashesBefore + numOuterHashes
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            x.hash_tree_root([3.GeneralizedIndex], roots, topRoot).isOk
+            debugTotalSszHashes == numHashesBefore
+            topRoot == x.copy.hash_tree_root()
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            x.hash_tree_root([1.GeneralizedIndex], roots).isOk
+            debugTotalSszHashes == numHashesBefore
+            roots == [topRoot]
+      block:
+        let x = HashList[Outer, 1].init(@[Outer(x: Inner(a: 100), y: 500)])
+        var
+          roots {.noinit.}: array[1, Digest]
+          topRoot {.noinit.}: Digest
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            x.hash_tree_root([5.GeneralizedIndex], roots, topRoot).isOk
+            debugTotalSszHashes == numHashesBefore + numOuterHashes + 1
+            topRoot == x.copy.hash_tree_root()
+        block:
+          let numHashesBefore = debugTotalSszHashes
+          check:
+            x.hash_tree_root([2.GeneralizedIndex], roots).isOk
+            debugTotalSszHashes == numHashesBefore
+    else:
+      skip()
+
+  test "Mutation with top root":
+    when SSZ_DEBUG_COUNT_HASHES:
+      var
+        roots {.noinit.}: array[1, Digest]
+        topRoot {.noinit.}: Digest
+      for i in [8.GeneralizedIndex, 2]:
+        var x = initTestArray()
+        discard x.hash_tree_root()
+        x.mitem(0).y += 1
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          x.hash_tree_root([i], roots, topRoot).isOk
+          debugTotalSszHashes == numHashesBefore + 2 * numOuterHashes + 3
+          topRoot == x.copy.hash_tree_root()
+      block:
+        var x = HashList[Outer, 8].init(
+          (0'u64 ..< 6'u64).mapIt(Outer(x: Inner(a: 100 + it), y: 500 + it)))
+        discard x.hash_tree_root()
+        x.mitem(0).y += 1
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          x.hash_tree_root([16.GeneralizedIndex], roots, topRoot).isOk
+          debugTotalSszHashes == numHashesBefore + 2 * numOuterHashes + 4
+          topRoot == x.copy.hash_tree_root()
+      block:
+        var x = HashSeq[Outer].init(
+          (0'u64 ..< 6'u64).mapIt(Outer(x: Inner(a: 100 + it), y: 500 + it)))
+        discard x.hash_tree_root()
+        x.mitem(5).y += 1
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          x.hash_tree_root([88.GeneralizedIndex], roots, topRoot).isOk
+          debugTotalSszHashes == numHashesBefore + 2 * numOuterHashes + 4
+          topRoot == x.copy.hash_tree_root()
+    else:
+      skip()
+
+  test "Caching across batches":
+    when SSZ_DEBUG_COUNT_HASHES:
+      block:
+        let x = initTestArray()
+        check x.hash_tree_root(2.GeneralizedIndex).isOk
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          x.hash_tree_root(2.GeneralizedIndex).isOk
+          debugTotalSszHashes == numHashesBefore
+      block:
+        let x = HashSeq[uint64].init(toSeq(0'u64 ..< 21'u64))
+        check x.hash_tree_root(5.GeneralizedIndex).isOk
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          x.hash_tree_root(5.GeneralizedIndex).isOk
+          debugTotalSszHashes == numHashesBefore
+      block:
+        let x = HashList[uint64, 128].init(toSeq(0'u64 ..< 9'u64))
+        check x.hash_tree_root([16.GeneralizedIndex, 17]).isOk
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          x.hash_tree_root([16.GeneralizedIndex, 17]).isOk
+          debugTotalSszHashes == numHashesBefore
+    else:
+      skip()
+
+  test "Top hash_tree_root uses partial cache":
+    when SSZ_DEBUG_COUNT_HASHES:
+      let
+        x = HashSeq[uint64].init(toSeq(0'u64 ..< 21'u64))
+        numHashesBefore = debugTotalSszHashes
+      discard x.copy.hash_tree_root()
+      let numHashes = debugTotalSszHashes - numHashesBefore
+      check x.hash_tree_root(5.GeneralizedIndex).isOk
+      discard x.hash_tree_root()
+      check debugTotalSszHashes == numHashesBefore + 2 * numHashes
+    else:
+      skip()
+
+  test "Progressive item root reuse":
+    when SSZ_DEBUG_COUNT_HASHES:
+      var x: HashSeq[Outer]
+      for e in 0'u64 ..< 6'u64:
+        doAssert x.add Outer(x: Inner(a: 100 + e), y: 500 + e)
+      discard x.hash_tree_root()
+      var roots {.noinit.}: array[2, Digest]
+      for (i, numHashes) in [
+          (9.GeneralizedIndex, 0'u64),
+          (32.GeneralizedIndex, 0'u64),
+          (81.GeneralizedIndex, 0'u64),
+          (88.GeneralizedIndex, 0'u64),
+          (40.GeneralizedIndex, numOuterHashes),
+          (80.GeneralizedIndex, numInnerHashes)]:
+        let numHashesBefore = debugTotalSszHashes
+        check:
+          x.hash_tree_root([4.GeneralizedIndex, i], roots).isOk
+          debugTotalSszHashes == numHashesBefore + numHashes
+          roots[0] == x.data[0].hash_tree_root()
+    else:
+      skip()
+
+  test "Empty lists":
+    let
+      implicit = default(HashList[uint64, 128])
+      explicit = HashList[uint64, 128].init(newSeq[uint64]())
+      uncached = default(List[uint64, 128])
+
+      emptyBits = BitList[100].init(0)
+      bigBits = BitList[3000].init(0)
+      implicitBigBits = default(BitList[3000])
+      emptyBitSeq = BitSeq.init(0)
+
+      cachedSeq = default(HashSeq[uint64])
+      uncachedSeq = newSeq[uint64]()
+    var
+      roots {.noinit.}: array[2, Digest]
+      topRoot {.noinit.}: Digest
+
+    when SSZ_DEBUG_COUNT_HASHES:
+      let numHashesBefore = debugTotalSszHashes
+
+    check:
+      implicit.hash_tree_root() == uncached.hash_tree_root()
+      explicit.hash_tree_root() == uncached.hash_tree_root()
+      cachedSeq.hash_tree_root() == uncachedSeq.hash_tree_root()
+
+      implicit.hash_tree_root(1.GeneralizedIndex).get ==
+        uncached.hash_tree_root()
+      implicit.hash_tree_root([2.GeneralizedIndex, 9]) ==
+        uncached.hash_tree_root([2.GeneralizedIndex, 9])
+
+      emptyBits.hash_tree_root() == zeroHashes[1]
+      bigBits.hash_tree_root() ==
+        [zeroHashes[4], zeroHashes[0]].hash_tree_root()
+      implicitBigBits.hash_tree_root([2.GeneralizedIndex, 3]) ==
+        bigBits.hash_tree_root([2.GeneralizedIndex, 3])
+      emptyBitSeq.hash_tree_root() == zeroHashes[1]
+
+      cachedSeq.hash_tree_root([2.GeneralizedIndex, 3], roots, topRoot).isOk
+      topRoot == uncachedSeq.hash_tree_root()
+
+    when SSZ_DEBUG_COUNT_HASHES:
+      check debugTotalSszHashes == numHashesBefore + 1
