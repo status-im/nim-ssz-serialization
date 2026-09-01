@@ -48,10 +48,7 @@ func setOutputSize[T](x: var seq[T], length: int) {.raises: [SszError].} =
   # We will overwrite all bytes
   when T is SomeNumber:
     if x.len != length:
-      when (NimMajor, NimMinor) < (2, 2):
-        x = newSeqUninitialized[T](length)
-      else:
-        x = newSeqUninit[T](length)
+      x = newSeqUninit[T](length)
   else:
     x.setLen(length)
 
