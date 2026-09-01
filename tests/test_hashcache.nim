@@ -243,10 +243,6 @@ type Bar = object
   x: HashArray[BarXMaxLen, uint64]
   y: uint64
 
-when (NimMajor, NimMinor) < (2, 2):
-  template newSeqUninit[T](len: Natural): seq[T] =
-    newSeq[T](len)
-
 suite "Multiproof cache":
   func init(T: typedesc[Foo], i: int): T =
     T(x: foo.x, y: (i + 1).uint64)

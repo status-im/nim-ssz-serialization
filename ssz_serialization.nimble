@@ -1,13 +1,13 @@
 mode = ScriptMode.Verbose
 
 packageName   = "ssz_serialization"
-version       = "0.1.0"
+version       = "0.1.1"
 author        = "Status Research & Development GmbH"
 description   = "Simple Serialize (SSZ) serialization and merkleization"
 license       = "Apache License 2.0"
 skipDirs      = @["tests"]
 
-requires "nim >= 2.0.10",
+requires "nim >= 2.2.10",
          "serialization >= 0.5.0",
          "json_serialization",
          "stew >= 0.4.2",

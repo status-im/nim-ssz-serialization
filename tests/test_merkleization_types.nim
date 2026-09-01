@@ -1989,11 +1989,7 @@ suite "Merkleization types":
       let helpers = get_helper_indices(indices)
       checkpoint $helpers.mapIt(toBin(it.int64))
       let r = helpers.mapIt(roots.getOrDefault(it.int64))
-      var roots =
-        when (NimMajor, NimMinor) < (2, 2):
-          newSeq[Digest](helpers.len)
-        else:
-          newSeqUninit[Digest](helpers.len)
+      var roots = newSeqUninit[Digest](helpers.len)
       hash_tree_root(x, helpers, roots).get
       check:
         roots == r
@@ -2070,11 +2066,7 @@ suite "Merkleization types":
     for i in tests:
       checkpoint $i.mapIt(toBin(it.int64))
       let r = i.mapIt(roots.getOrDefault(it.int64))
-      var roots =
-        when (NimMajor, NimMinor) < (2, 2):
-          newSeq[Digest](i.len)
-        else:
-          newSeqUninit[Digest](i.len)
+      var roots = newSeqUninit[Digest](i.len)
       for x in roots.mitems:
         x.data[0] = 0xba
         x.data[1] = 0xad
@@ -2096,11 +2088,7 @@ suite "Merkleization types":
         i.toSeq
       checkpoint $i.mapIt(toBin(it.int64))
       let r = i.mapIt(roots.getOrDefault(it.int64))
-      var roots =
-        when (NimMajor, NimMinor) < (2, 2):
-          newSeq[Digest](i.len)
-        else:
-          newSeqUninit[Digest](i.len)
+      var roots = newSeqUninit[Digest](i.len)
       hash_tree_root(x, i, roots).get
       check:
         roots == r
@@ -2170,11 +2158,7 @@ suite "Merkleization types":
     ]
     for i in tests:
       checkpoint $i
-      var roots =
-        when (NimMajor, NimMinor) < (2, 2):
-          newSeq[Digest](i.len)
-        else:
-          newSeqUninit[Digest](i.len)
+      var roots = newSeqUninit[Digest](i.len)
       for x in roots.mitems:
         x.data[0] = 0xba
         x.data[1] = 0xad
