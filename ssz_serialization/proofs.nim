@@ -310,11 +310,31 @@ func build_proof*(
 func build_proof*(
     anchor: auto,
     indices: openArray[GeneralizedIndex],
+    helper_indices: openArray[GeneralizedIndex],
+    proof: var openArray[Digest],
+    topRoot: var Digest): Result[void, string] =
+  doAssert proof.len == helper_indices.len
+  ? check_multiproof_acceptable(indices)
+  hash_tree_root(anchor, helper_indices, proof, topRoot)
+
+func build_proof*(
+    anchor: auto,
+    indices: openArray[GeneralizedIndex],
     proof: var openArray[Digest]): Result[void, string] =
   ? check_multiproof_acceptable(indices)
   let helper_indices = get_helper_indices(indices)
   doAssert proof.len == helper_indices.len
   hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    indices: openArray[GeneralizedIndex],
+    proof: var openArray[Digest],
+    topRoot: var Digest): Result[void, string] =
+  ? check_multiproof_acceptable(indices)
+  let helper_indices = get_helper_indices(indices)
+  doAssert proof.len == helper_indices.len
+  hash_tree_root(anchor, helper_indices, proof, topRoot)
 
 func build_proof*(
     anchor: auto,
@@ -330,12 +350,35 @@ func build_proof*(
 
 func build_proof*(
     anchor: auto,
+    indices: static openArray[GeneralizedIndex],
+    proof: var openArray[Digest],
+    topRoot: var Digest): Result[void, string] =
+  const v = check_multiproof_acceptable(indices)
+  when v.isErr:
+    result.err(v.error)
+  else:
+    const helper_indices = get_helper_indices(indices)
+    doAssert proof.len == helper_indices.len
+    hash_tree_root(anchor, helper_indices, proof, topRoot)
+
+func build_proof*(
+    anchor: auto,
     index: GeneralizedIndex,
     proof: var openArray[Digest]): Result[void, string] =
   ? check_multiproof_acceptable(index)
   let helper_indices = get_helper_indices(index)
   doAssert proof.len == helper_indices.len
   hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    index: GeneralizedIndex,
+    proof: var openArray[Digest],
+    topRoot: var Digest): Result[void, string] =
+  ? check_multiproof_acceptable(index)
+  let helper_indices = get_helper_indices(index)
+  doAssert proof.len == helper_indices.len
+  hash_tree_root(anchor, helper_indices, proof, topRoot)
 
 func build_proof*(
     anchor: auto,
@@ -348,6 +391,19 @@ func build_proof*(
     const helper_indices = get_helper_indices(index)
     doAssert proof.len == helper_indices.len
     hash_tree_root(anchor, helper_indices, proof)
+
+func build_proof*(
+    anchor: auto,
+    index: static GeneralizedIndex,
+    proof: var openArray[Digest],
+    topRoot: var Digest): Result[void, string] =
+  const v = check_multiproof_acceptable(index)
+  when v.isErr:
+    result.err(v.error)
+  else:
+    const helper_indices = get_helper_indices(index)
+    doAssert proof.len == helper_indices.len
+    hash_tree_root(anchor, helper_indices, proof, topRoot)
 
 func build_proof*(
     anchor: auto,

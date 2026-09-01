@@ -136,6 +136,7 @@ suite "Merkle proofs":
         nodes[index_int] == foo.hash_tree_root(index).get
         nodes[index_int] == allLeaves.hash_tree_root(index).get
 
+    var checkKind = 0
     proc verify(indices_int: openArray[int]) =
       let
         indices = indices_int.mapIt(it.GeneralizedIndex)
@@ -144,10 +145,31 @@ suite "Merkle proofs":
         proof = helper_indices.mapIt(nodes[it])
         root = nodes[1]
       checkpoint "Verifying " & $indices & "---" & $helper_indices
-      check:
-        proof == foo.build_proof(indices).get
-        proof == allLeaves.build_proof(indices).get
-        verify_merkle_multiproof(leaves, proof, indices, root)
+
+      template doVerify(anchor: auto) =
+        case checkKind
+        of 0:
+          check proof == anchor.build_proof(indices).get
+        of 1:
+          var proof2 = newSeqUninit[Digest](proof.len)
+          check:
+            anchor.build_proof(indices, proof2).isOk
+            proof2 == proof
+        of 2:
+          var
+            proof2 = newSeqUninit[Digest](proof.len)
+            top_root: Digest
+          check:
+            anchor.build_proof(indices, proof2, top_root).isOk
+            proof2 == proof
+            top_root == root
+        else:
+          discard
+        checkKind = (checkKind + 1) mod 3
+
+      foo.doVerify()
+      allLeaves.doVerify()
+      check verify_merkle_multiproof(leaves, proof, indices, root)
 
     verify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
@@ -167,9 +189,18 @@ suite "Merkle proofs":
         union_indices: openArray[GeneralizedIndex],
         index: static GeneralizedIndex) =
       let branch = union_roots.extract_branch(union_indices, index)
+      var
+        proof1 = newSeqUninit[Digest](branch.get.len)
+        proof2 = newSeqUninit[Digest](branch.get.len)
+        top_root: Digest
       check:
         branch.isOk
         branch.get == foo.build_proof(index).get
+        foo.build_proof(index, proof1).isOk
+        foo.build_proof(index, proof2, top_root).isOk
+        branch.get == proof1
+        branch.get == proof2
+        top_root == nodes[1]
         is_valid_merkle_branch(
           nodes[index], branch.get, log2trunc(index),
           get_subtree_index(index), nodes[1])
