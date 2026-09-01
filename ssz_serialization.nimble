@@ -1,7 +1,7 @@
 mode = ScriptMode.Verbose
 
 packageName   = "ssz_serialization"
-version       = "0.1.0"
+version       = "0.1.1"
 author        = "Status Research & Development GmbH"
 description   = "Simple Serialize (SSZ) serialization and merkleization"
 license       = "Apache License 2.0"
