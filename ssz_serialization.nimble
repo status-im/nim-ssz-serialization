@@ -7,7 +7,7 @@ description   = "Simple Serialize (SSZ) serialization and merkleization"
 license       = "Apache License 2.0"
 skipDirs      = @["tests"]
 
-requires "nim >= 2.0.10",
+requires "nim >= 2.2.10",
          "serialization >= 0.5.0",
          "json_serialization",
          "stew >= 0.4.2",
