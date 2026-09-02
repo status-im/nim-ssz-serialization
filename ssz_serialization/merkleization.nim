@@ -2623,6 +2623,7 @@ func hash_tree_root*(
     topRoot: var Digest
 ): Result[seq[Digest], string] =
   if indices.len == 0:
+    topRoot = hash_tree_root(x)
     ok(newSeq[Digest](0))
   elif indices.len == 1 and indices[0] == 1.GeneralizedIndex:
     topRoot = hash_tree_root(x)
@@ -2674,6 +2675,7 @@ func hash_tree_root*(
 ): auto =
   type ResultType = Result[array[indices.len, Digest], string]
   when indices.len == 0:
+    topRoot = hash_tree_root(x)
     ResultType.ok([])
   else:
     when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
