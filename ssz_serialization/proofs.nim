@@ -415,6 +415,17 @@ func build_proof*(
 
 func build_proof*(
     anchor: auto,
+    indices: openArray[GeneralizedIndex],
+    topRoot: var Digest
+): Result[seq[Digest], string] =
+  ? check_multiproof_acceptable(indices)
+  let helper_indices = get_helper_indices(indices)
+  var roots = newSeqUninit[Digest](helper_indices.len)
+  ? hash_tree_root(anchor, helper_indices, roots, topRoot)
+  ok roots
+
+func build_proof*(
+    anchor: auto,
     indices: static openArray[GeneralizedIndex]
 ): auto =
   const v = check_multiproof_acceptable(indices)
@@ -426,11 +437,38 @@ func build_proof*(
 
 func build_proof*(
     anchor: auto,
+    indices: static openArray[GeneralizedIndex],
+    topRoot: var Digest
+): auto =
+  const v = check_multiproof_acceptable(indices)
+  when v.isErr:
+    Result[array[0, Digest], string].err(v.error)
+  else:
+    const helper_indices = get_helper_indices(indices)
+    type ResultType = Result[array[helper_indices.len, Digest], string]
+    var roots {.noinit.}: array[helper_indices.len, Digest]
+    hash_tree_root(anchor, helper_indices, roots, topRoot).isOkOr:
+      return ResultType.err error
+    ResultType.ok roots
+
+func build_proof*(
+    anchor: auto,
     index: GeneralizedIndex
 ): Result[seq[Digest], string] =
   ? check_multiproof_acceptable(index)
   let helper_indices = get_helper_indices(index)
   hash_tree_root(anchor, helper_indices)
+
+func build_proof*(
+    anchor: auto,
+    index: GeneralizedIndex,
+    topRoot: var Digest
+): Result[seq[Digest], string] =
+  ? check_multiproof_acceptable(index)
+  let helper_indices = get_helper_indices(index)
+  var roots = newSeqUninit[Digest](helper_indices.len)
+  ? hash_tree_root(anchor, helper_indices, roots, topRoot)
+  ok roots
 
 func build_proof*(
     anchor: auto,
@@ -442,6 +480,22 @@ func build_proof*(
   else:
     const helper_indices = get_helper_indices(index)
     hash_tree_root(anchor, helper_indices)
+
+func build_proof*(
+    anchor: auto,
+    index: static GeneralizedIndex,
+    topRoot: var Digest
+): auto =
+  const v = check_multiproof_acceptable(index)
+  when v.isErr:
+    Result[array[0, Digest], string].err(v.error)
+  else:
+    const helper_indices = get_helper_indices(index)
+    type ResultType = Result[array[helper_indices.len, Digest], string]
+    var roots {.noinit.}: array[helper_indices.len, Digest]
+    hash_tree_root(anchor, helper_indices, roots, topRoot).isOkOr:
+      return ResultType.err error
+    ResultType.ok roots
 
 func extract_branch*(
     roots: openArray[Digest],
@@ -465,7 +519,7 @@ func extract_branch*(
     roots: openArray[Digest],
     union_indices: openArray[GeneralizedIndex],
     indices: openArray[GeneralizedIndex]): Result[seq[Digest], string] =
-  var branch = newSeq[Digest](indices.len)
+  var branch = newSeqUninit[Digest](indices.len)
   ? roots.extract_branch(union_indices, indices, branch)
   ok branch
 

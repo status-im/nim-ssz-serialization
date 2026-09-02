@@ -151,11 +151,16 @@ suite "Merkle proofs":
         of 0:
           check proof == anchor.build_proof(indices).get
         of 1:
+          var top_root: Digest
+          check:
+            proof == anchor.build_proof(indices, topRoot).get
+            top_root == root
+        of 2:
           var proof2 = newSeqUninit[Digest](proof.len)
           check:
             anchor.build_proof(indices, proof2).isOk
             proof2 == proof
-        of 2:
+        of 3:
           var
             proof2 = newSeqUninit[Digest](proof.len)
             top_root: Digest
@@ -165,7 +170,7 @@ suite "Merkle proofs":
             top_root == root
         else:
           discard
-        checkKind = (checkKind + 1) mod 3
+        checkKind = (checkKind + 1) mod 4
 
       foo.doVerify()
       allLeaves.doVerify()
@@ -192,15 +197,18 @@ suite "Merkle proofs":
       var
         proof1 = newSeqUninit[Digest](branch.get.len)
         proof2 = newSeqUninit[Digest](branch.get.len)
-        top_root: Digest
+        top_root1: Digest
+        top_root2: Digest
       check:
         branch.isOk
         branch.get == foo.build_proof(index).get
+        branch.get == foo.build_proof(index, top_root1).get
         foo.build_proof(index, proof1).isOk
-        foo.build_proof(index, proof2, top_root).isOk
+        foo.build_proof(index, proof2, top_root2).isOk
         branch.get == proof1
         branch.get == proof2
-        top_root == nodes[1]
+        top_root1 == nodes[1]
+        top_root2 == nodes[1]
         is_valid_merkle_branch(
           nodes[index], branch.get, log2trunc(index),
           get_subtree_index(index), nodes[1])
