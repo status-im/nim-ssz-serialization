@@ -2610,7 +2610,7 @@ func hash_tree_root*(
     let loopOrder = merkleizationLoopOrder(indices)
     ? validateIndices(indices, loopOrder)
     var
-      roots = newSeq[Digest](indices.len)
+      roots = newSeqUninit[Digest](indices.len)
       batch = BatchRequest.init(indices, roots, loopOrder)
     let numFulfilled = hash_tree_root_multi(x, addr batch).valueOr:
       return err(unsupportedIndex)
