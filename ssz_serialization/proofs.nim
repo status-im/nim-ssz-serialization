@@ -78,7 +78,8 @@ iterator get_path_indices*(
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 func get_helper_indices_impl(
     withPathIndices: static bool,
-    indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
+    indices: openArray[GeneralizedIndex],
+    extra_indices: openArray[GeneralizedIndex] = []): seq[GeneralizedIndex] =
   ## Get the generalized indices of all "extra" chunks in the tree needed
   ## to prove the chunks with the given generalized indices. Note that the
   ## decreasing order is chosen deliberately to ensure equivalence to the order
@@ -91,6 +92,8 @@ func get_helper_indices_impl(
     for index in indices:
       for idx in get_path_indices(index):
         all_helper_indices.excl idx
+  for idx in extra_indices:
+    all_helper_indices.incl idx
 
   var res = newSeqOfCap[GeneralizedIndex](all_helper_indices.len)
   for idx in all_helper_indices.items():
@@ -105,6 +108,11 @@ template get_helper_indices*(
 template get_union_indices*(
     indices: varargs[GeneralizedIndex]): seq[GeneralizedIndex] =
   get_helper_indices_impl(withPathIndices = true, indices)
+
+template get_union_indices*(
+    indices: openArray[GeneralizedIndex],
+    extra_indices: openArray[GeneralizedIndex]): seq[GeneralizedIndex] =
+  get_helper_indices_impl(withPathIndices = true, indices, extra_indices)
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.3/ssz/merkle-proofs.md#merkle-multiproofs
 func check_multiproof_acceptable*(
@@ -409,7 +417,7 @@ func extract_branch*(
     roots: openArray[Digest],
     union_indices: openArray[GeneralizedIndex],
     indices: openArray[GeneralizedIndex]): Result[seq[Digest], string] =
-  var branch = newSeq[Digest](indices.len)
+  var branch = newSeqUninit[Digest](indices.len)
   ? roots.extract_branch(union_indices, indices, branch)
   ok branch
 
@@ -419,11 +427,9 @@ func extract_branch*(
     indices: static openArray[GeneralizedIndex]): auto =
   type ResultType = Result[array[indices.len, Digest], string]
   var branch {.noinit.}: array[indices.len, Digest]
-  let v = roots.extract_branch(union_indices, indices, branch)
-  if v.isErr:
-    ResultType.err(v.error)
-  else:
-    ResultType.ok(branch)
+  roots.extract_branch(union_indices, indices, branch).isOkOr:
+    return ResultType.err(error)
+  ResultType.ok(branch)
 
 func extract_branch*(
     roots: openArray[Digest],
@@ -438,6 +444,14 @@ func extract_branch*(
     index: static GeneralizedIndex): auto =
   const indices = get_helper_indices(index)
   roots.extract_branch(union_indices, indices)
+
+func extract_root*(
+    roots: openArray[Digest],
+    union_indices: openArray[GeneralizedIndex],
+    index: GeneralizedIndex | static GeneralizedIndex): Result[Digest, string] =
+  let branch = ? roots.extract_branch(union_indices, [index])
+  doAssert branch.len == 1
+  ok(branch[0])
 
 # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.6/specs/phase0/beacon-chain.md#compute_merkle_branch_root
 func compute_merkle_branch_root*(

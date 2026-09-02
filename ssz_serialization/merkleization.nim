@@ -2610,11 +2610,35 @@ func hash_tree_root*(
     let loopOrder = merkleizationLoopOrder(indices)
     ? validateIndices(indices, loopOrder)
     var
-      roots = newSeq[Digest](indices.len)
+      roots = newSeqUninit[Digest](indices.len)
       batch = BatchRequest.init(indices, roots, loopOrder)
     let numFulfilled = hash_tree_root_multi(x, addr batch).valueOr:
       return err(unsupportedIndex)
     doAssert numFulfilled == loopOrder.len
+    ok(roots)
+
+func hash_tree_root*(
+    x: auto,
+    indices: openArray[GeneralizedIndex],
+    topRoot: var Digest
+): Result[seq[Digest], string] =
+  if indices.len == 0:
+    topRoot = hash_tree_root(x)
+    ok(newSeq[Digest](0))
+  elif indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+    topRoot = hash_tree_root(x)
+    ok(@[topRoot])
+  else:
+    let loopOrder = merkleizationLoopOrder(indices)
+    ? validateIndices(indices, loopOrder)
+    var
+      roots = newSeqUninit[Digest](indices.len)
+      batch = BatchRequest.init(indices, roots, loopOrder)
+    let numFulfilled = hash_tree_root_multi(
+        x, addr batch, needTopRoot = true).valueOr:
+      return err(unsupportedIndex)
+    doAssert numFulfilled == loopOrder.len
+    topRoot = batch.topRoot
     ok(roots)
 
 func hash_tree_root*(
@@ -2642,6 +2666,37 @@ func hash_tree_root*(
           ResultType.err(unsupportedIndex)
         else:
           doAssert w.get == loopOrder.len
+          ResultType.ok(roots)
+
+func hash_tree_root*(
+    x: auto,
+    indices: static openArray[GeneralizedIndex],
+    topRoot: var Digest
+): auto =
+  type ResultType = Result[array[indices.len, Digest], string]
+  when indices.len == 0:
+    topRoot = hash_tree_root(x)
+    ResultType.ok([])
+  else:
+    when indices.len == 1 and indices[0] == 1.GeneralizedIndex:
+      topRoot = hash_tree_root(x)
+      ResultType.ok([topRoot])
+    else:
+      const
+        loopOrder = merkleizationLoopOrder(indices)
+        v = validateIndices(indices, loopOrder)
+      when v.isErr:
+        ResultType.err(v.error)
+      else:
+        var
+          roots {.noinit.}: array[indices.len, Digest]
+          batch = BatchRequest.init(indices, roots, loopOrder)
+        let w = hash_tree_root_multi(x, addr batch, needTopRoot = true)
+        if w.isErr:
+          ResultType.err(unsupportedIndex)
+        else:
+          doAssert w.get == loopOrder.len
+          topRoot = batch.topRoot
           ResultType.ok(roots)
 
 func hash_tree_root*(
