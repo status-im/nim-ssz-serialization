@@ -14,15 +14,24 @@ import std/strutils, nimcrypto/[hash, sha2], stew/ptrops, ./types
 # * hashtree is specialized for hashing 64-byte chunks as happens in a merkle
 #   tree - it has limited hardware and compiler support but is faster than
 #   blst for the cases it supports
+# * an externally supplied backend, provided as a module named `sha256_external`
+#   on the search path. It takes priority over the others.
 #
 # Depending on the below preference flags, we'll enable the faster backends
 # the faster backends will be used where they are supported
 
 const PREFER_BLST_SHA256* {.booldefine.} = true
+const PREFER_EXTERNAL_SHA256* {.booldefine.} = false
 # TODO https://github.com/prysmaticlabs/hashtree/issues/28
 const PREFER_HASHTREE_SHA256* {.booldefine.} = true
 
-when PREFER_BLST_SHA256:
+when PREFER_EXTERNAL_SHA256:
+  import sha256_external
+  const USE_EXTERNAL_SHA256 = true
+else:
+  const USE_EXTERNAL_SHA256 = false
+
+when PREFER_BLST_SHA256 and not PREFER_EXTERNAL_SHA256:
   import blscurve
   when BLS_BACKEND == BLST:
     const USE_BLST_SHA256 = true
@@ -34,11 +43,16 @@ else:
 when USE_BLST_SHA256:
   {.hint: "BLST SHA256 backend enabled".}
   type DigestCtx* = BLST_SHA256_CTX
+elif USE_EXTERNAL_SHA256:
+  {.hint: "External SHA256 backend enabled (not for computeDigest)".}
+  # The external backend supplies the one-shot `sha256` only, so the streaming
+  # context that `computeDigest` uses stays on nimcrypto.
+  type DigestCtx* = sha2.sha256
 else:
   {.hint: "nimcrypto SHA256 backend enabled".}
   type DigestCtx* = sha2.sha256
 
-when PREFER_HASHTREE_SHA256 and (defined(arm64) or defined(amd64)) and (
+when PREFER_HASHTREE_SHA256 and not PREFER_EXTERNAL_SHA256 and (defined(arm64) or defined(amd64)) and (
   (defined(linux) and defined(gcc)) or
   # llvm-mingw doesn't support hashtree well even with "-fno-integrated-as"
   # this is true with clang-17(19th June 2024).
@@ -108,7 +122,9 @@ func digest*(a: openArray[byte], res: var Digest) =
         hashtree_hash(baseAddr res.data, baseAddr a, 1)
         return
 
-    when USE_BLST_SHA256:
+    when USE_EXTERNAL_SHA256:
+      sha256_external.sha256(a, res.data)
+    elif USE_BLST_SHA256:
       # BLST has a fast assembly optimized SHA256
       res.data.bls_sha256_digest(a)
     else:
@@ -147,7 +163,9 @@ func digest*(a, b: openArray[byte], res: var Digest) =
       digest(buf, res)
     else:
       debugCountHash()  # Other branches are counted via single-input `digest`
-      when USE_BLST_SHA256:
+      when USE_EXTERNAL_SHA256:
+        sha256_external.sha256(a, b, res.data)
+      elif USE_BLST_SHA256:
         # BLST has a fast assembly optimized SHA256
         res.data.bls_sha256_digest(a, b)
       else:
