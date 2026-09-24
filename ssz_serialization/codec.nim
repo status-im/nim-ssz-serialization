@@ -197,9 +197,9 @@ proc readSszValue*[T](
           raise ex
 
       v.setOutputSize input.len div elemSize
-      when supportsBulkCopy(type v[0]):
+      when supportsBulkCopy(type v[v.low]):
         if v.len > 0:
-          copyMem addr v[0], addr input[0], input.len
+          copyMem addr v[v.low], addr input[0], input.len
 
         when val is HashList|HashSeq:
           # There's no selective invalidation here, because it would require a
@@ -216,7 +216,8 @@ proc readSszValue*[T](
           when val is HashList|HashSeq:
             assign(prevValue, toSszType(v[i]))
           readSszBytes(
-            input.toOpenArray(offset, offset + elemSize - 1), toSszType(v[i]))
+            input.toOpenArray(offset, offset + elemSize - 1),
+            toSszType(v[v.low.succ(i)]))
           when val is HashList|HashSeq:
             if prevValue != toSszType(v[i]):
               val.clearCaches(i)
@@ -261,14 +262,16 @@ proc readSszValue*[T](
           when val is HashList|HashSeq:
             assign(prevValue, toSszType(v[i - 1]))
           readSszBytes(
-            input.toOpenArray(offset, nextOffset - 1), toSszType(v[i - 1]))
+            input.toOpenArray(offset, nextOffset - 1),
+            toSszType(v[v.low.succ(i - 1)]))
           when val is HashList|HashSeq:
             if prevValue != toSszType(v[i - 1]):
               val.clearCaches(i - 1)
         offset = nextOffset
 
       readSszBytes(
-        input.toOpenArray(offset, input.len - 1), toSszType(v[resultLen - 1]))
+        input.toOpenArray(offset, input.len - 1),
+        toSszType(v[v.low.succ(resultLen - 1)]))
 
       when val is HashList|HashSeq:
         # Unconditionally trigger small, O(1) updates to handle when the list
