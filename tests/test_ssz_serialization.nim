@@ -545,3 +545,26 @@ suite "Distinct":
     check:
       SSZ.decode(SSZ.encode(Simple()), Simple).ignored != ""
       SSZ.decode(SSZ.encode(Nested()), Nested).simple.ignored != ""
+
+suite "Array index types":
+  template roundtrip(T: type, value: T) =
+    let encoded = SSZ.encode(value)
+    check:
+      encoded == SSZ.encode(@value)
+      SSZ.decode(encoded, T) == value
+
+  template doTest(I: typed): untyped =
+    roundtrip(array[I, uint64], [1'u64, 2, 3])
+    roundtrip(array[I, bool], [false, true, true])
+    roundtrip(array[I, List[byte, 4]], [
+      List[byte, 4].init(@[]), List[byte, 4].init(@[byte 1]),
+      List[byte, 4].init(@[byte 2, 3])])
+
+  test "uint64":
+    doTest(3'u64)
+
+  test "enum":
+    doTest(SomeEnum)
+
+  test "non-0 low":
+    doTest(3..5)
