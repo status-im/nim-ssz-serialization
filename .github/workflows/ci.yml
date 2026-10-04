@@ -1,4 +1,4 @@
-name: CI (hashtree_abi via vendor directory import)
+name: CI (hashtree_abi via vendor directory)
 on:
   push:
     branches:
