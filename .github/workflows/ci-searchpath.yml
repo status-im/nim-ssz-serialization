@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-searchpath:
     uses: status-im/nimbus-common-workflow/.github/workflows/common.yml@main
     with:
       nim-versions: '["version-2-2", "version-2-4", "devel"]'
@@ -15,7 +15,7 @@ jobs:
         rm -rf vendor
         nimble test
 
-  fuzz:
+  fuzz-searchpath:
     strategy:
       fail-fast: false
       matrix:

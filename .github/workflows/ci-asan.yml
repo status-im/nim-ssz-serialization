@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-asan:
     uses: status-im/nimbus-common-workflow/.github/workflows/common.yml@main
     with:
       nim-versions: '["version-2-2", "version-2-4", "devel"]'
