@@ -1,4 +1,4 @@
-name: CI
+name: CI (hashtree_abi via search path)
 on:
   push:
     branches:
