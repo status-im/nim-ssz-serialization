@@ -79,5 +79,6 @@ jobs:
           sudo afl-system-config
 
       - name: Run fuzzing tests
-        run: rm -rf vendor
-        run: nimble fuzzHashtree
+        run: |
+          rm -rf vendor
+          nimble fuzzHashtree
