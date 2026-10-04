@@ -1,4 +1,4 @@
-name: CI (hashtree_abi via vendor directory)
+name: CI
 on:
   push:
     branches:
