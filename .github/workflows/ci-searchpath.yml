@@ -1,4 +1,4 @@
-name: CI (hashtree_abi via vendor directory)
+name: CI (hashtree_abi via search path)
 on:
   push:
     branches:
@@ -7,14 +7,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-searchpath:
     uses: status-im/nimbus-common-workflow/.github/workflows/common.yml@main
     with:
       nim-versions: '["version-2-2", "version-2-4", "devel"]'
       test-command: |
+        rm -rf vendor
         nimble test
 
-  fuzz:
+  fuzz-searchpath:
     strategy:
       fail-fast: false
       matrix:
@@ -78,4 +79,6 @@ jobs:
           sudo afl-system-config
 
       - name: Run fuzzing tests
-        run: nimble fuzzHashtree
+        run: |
+          rm -rf vendor
+          nimble fuzzHashtree
