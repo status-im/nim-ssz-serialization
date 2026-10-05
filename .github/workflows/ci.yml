@@ -1,4 +1,4 @@
-name: CI (hashtree_abi via vendor directory)
+name: CI
 on:
   push:
     branches:
@@ -7,12 +7,27 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-vendor:
     uses: status-im/nimbus-common-workflow/.github/workflows/common.yml@main
     with:
-      nim-versions: '["version-2-2", "version-2-4", "devel"]'
+      concurrency-suffix: vendor
       test-command: |
         nimble test
+
+  build-searchpath:
+    uses: status-im/nimbus-common-workflow/.github/workflows/common.yml@main
+    with:
+      concurrency-suffix: searchpath
+      test-command: |
+        rm -rf vendor
+        nimble test
+
+  build-asan:
+    uses: status-im/nimbus-common-workflow/.github/workflows/common.yml@main
+    with:
+      concurrency-suffix: asan
+      test-command: |
+        nimble test_asan
 
   fuzz:
     strategy:
@@ -21,6 +36,9 @@ jobs:
         target:
           - os: linux
           - os: macos
+        hashtree:
+          - vendor
+          - searchpath
         include:
           - target:
               os: linux
@@ -29,7 +47,7 @@ jobs:
               os: macos
             builder: macos-latest
 
-    name: '${{ matrix.target.os }} Fuzz'
+    name: '${{ matrix.target.os }} Fuzz (hashtree_abi via ${{ matrix.hashtree }})'
     runs-on: ${{ matrix.builder }}
     steps:
       - name: Checkout
@@ -76,6 +94,10 @@ jobs:
           # afl
           brew install afl++
           sudo afl-system-config
+
+      - name: Remove vendor directory
+        if: matrix.hashtree == 'searchpath'
+        run: rm -rf vendor
 
       - name: Run fuzzing tests
         run: nimble fuzzHashtree
