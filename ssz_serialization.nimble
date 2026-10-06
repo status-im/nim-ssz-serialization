@@ -10,7 +10,7 @@ skipDirs      = @["tests"]
 requires "nim >= 2.2.10",
          "serialization >= 0.5.0",
          "json_serialization",
-         "stew >= 0.4.2",
+         "stew >= 0.6.0",
          "stint >= 0.8.2",
          "nimcrypto",
          "blscurve",
