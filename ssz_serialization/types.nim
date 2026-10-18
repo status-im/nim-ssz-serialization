@@ -740,15 +740,18 @@ template sum*[maxLen; T](a: var HashArray[maxLen, T]): T =
 template progressiveRange*[T](x: HashSeq[T], firstIdx: Limit): openArray[T] =
   asSeq(x).progressiveRange(firstIdx)
 
-macro unsupported*(T: typed): untyped =
+macro unsupportedImpl(T: typed, isEnum: static bool): untyped =
   # TODO: {.fatal.} breaks compilation even in `compiles()` context,
   # so we use this macro instead. It's also much better at figuring
   # out the actual type that was used in the instantiation.
   # File both problems as issues.
-  when T is enum:
+  if isEnum:
     error "Nim `enum` types map poorly to SSZ and make it easy to introduce security issues because of spurious Defect's"
   else:
     error "SSZ serialization of the type " & humaneTypeName(T) & " is not supported, overload toSszType and fromSszBytes"
+
+template unsupported*(T: typed): untyped =
+  unsupportedImpl(T, T is enum)
 
 template ElemType*(T0: type HashArray): untyped =
   T0.T
