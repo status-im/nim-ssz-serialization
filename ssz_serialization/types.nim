@@ -39,14 +39,11 @@ type
 template sszActiveFields*(_: openArray[int]) {.pragma.}
 
 template isProgressiveContainer*(T: typedesc): bool =
-  when compiles(T.hasCustomPragma(sszActiveFields)):
-    T.hasCustomPragma(sszActiveFields)
-  else:
-    false
+  T.hasCustomPragmaFixed(sszActiveFields)
 
 func activeFields*(T: typedesc): BitArray[256] {.compileTime.} =
   static: doAssert isProgressiveContainer(T)
-  const activeFields = T.getCustomPragmaVal(sszActiveFields)
+  const activeFields = T.getCustomPragmaFixed(sszActiveFields)
   doAssert activeFields.len > 0 and activeFields[^1] == 1
   doAssert activeFields.allIt it in [0, 1]
   doAssert activeFields.countIt(it == 1) == T.totalSerializedFields
@@ -70,7 +67,7 @@ macro doIsUnion(typ: typedesc): bool =
     if field.caseField == nil:
       return quote do: false  # Fields after the case
     if field.isDiscriminator:
-      return quote do: false  # Nested case discriminator
+      error "unexpected field", field.name
     if field.caseBranch == branch:
       return quote do: false  # Multiple fields in the same branch
     branch = field.caseBranch
