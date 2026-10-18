@@ -109,9 +109,57 @@ type
     f2: array[20, byte]
     f3: Digest
 
+  CaseObjWithFields = object
+    f0: uint8
+    case f1: bool
+    of false:
+      f2: uint32
+    of true:
+      f3: array[20, byte]
+
+  CaseObjWithTwoCases = object
+    case f0: bool
+    of false:
+      f1: uint32
+    of true:
+      discard
+    case f2: bool
+    of false:
+      f3: uint32
+    of true:
+      discard
+
+  CaseObjWithNestedCase = object
+    case f0: bool
+    of false:
+      case f1: bool
+      of false:
+        f2: uint32
+      of true:
+        discard
+    of true:
+      discard
+
 static:
   doAssert fixedPortionSize(ObjWithFields) ==
     1 + 4 + sizeof(array[20, byte]) + (256 div 8)
+
+  doAssert not isUnion(CaseObjWithFields)
+  doAssert not isUnion(CaseObjWithTwoCases)
+  doAssert not isUnion(CaseObjWithNestedCase)
+
+  reject isFixedSize(CaseObjWithFields)
+  reject fixedPortionSize(CaseObjWithFields)
+  reject minSize(CaseObjWithFields)
+  reject maxSize(CaseObjWithFields)
+  reject getFieldBoundingOffsets(CaseObjWithFields, "f2")
+  reject sszSize(default(CaseObjWithFields))
+  reject SSZ.encode(default(CaseObjWithFields))
+  reject SSZ.decode([byte 1, 0, 7, 0, 0, 0], CaseObjWithFields)
+  reject hash_tree_root(default(CaseObjWithFields))
+  reject hash_tree_root(default(CaseObjWithFields), [2.GeneralizedIndex])
+  reject SSZ.encode(default(CaseObjWithTwoCases))
+  reject SSZ.encode(default(CaseObjWithNestedCase))
 
 func toDigest[N: static int](x: array[N, byte]): Digest =
   result.data[0 .. N-1] = x
