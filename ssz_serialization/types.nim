@@ -70,7 +70,7 @@ macro doIsUnion(typ: typedesc): bool =
     if field.caseField == nil:
       return quote do: false  # Fields after the case
     if field.isDiscriminator:
-      error "unexpected field", field.name
+      return quote do: false  # Nested case discriminator
     if field.caseBranch == branch:
       return quote do: false  # Multiple fields in the same branch
     branch = field.caseBranch
