@@ -95,7 +95,7 @@ template unionSelector*[T: object](x: T): auto =
   block:
     let selector = x.field(T.unionSelectorKey)
     when sizeof(selector) != 1:
-      {.error: "selector out of range: " & $`T` & "." & `key`.}
+      {.error: "selector out of range: " & $`T` & "." & T.unionSelectorKey.}
     selector
 
 # A few index types from here onwards:
