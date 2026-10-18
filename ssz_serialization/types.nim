@@ -39,14 +39,11 @@ type
 template sszActiveFields*(_: openArray[int]) {.pragma.}
 
 template isProgressiveContainer*(T: typedesc): bool =
-  when compiles(T.hasCustomPragma(sszActiveFields)):
-    T.hasCustomPragma(sszActiveFields)
-  else:
-    false
+  T.hasCustomPragmaFixed(sszActiveFields)
 
 func activeFields*(T: typedesc): BitArray[256] {.compileTime.} =
   static: doAssert isProgressiveContainer(T)
-  const activeFields = T.getCustomPragmaVal(sszActiveFields)
+  const activeFields = T.getCustomPragmaFixed(sszActiveFields)
   doAssert activeFields.len > 0 and activeFields[^1] == 1
   doAssert activeFields.allIt it in [0, 1]
   doAssert activeFields.countIt(it == 1) == T.totalSerializedFields
