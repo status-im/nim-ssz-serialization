@@ -736,13 +736,9 @@ func hash_tree_root_multi(
     atLayer = 0, needTopRoot = false): Opt[int] {.gcsafe, raises: [].}
 
 func unionHashTreeRoot[T: object](x: T, res: var Digest) =
-  var isSome = false
-  x.withFieldPairs(key, val):
-    when key != T.unionSelectorKey:
-      doAssert not isSome
-      isSome = true
-      val.hash_tree_root(res)
-  if not isSome:
+  x.withUnionValue(val):
+    val.hash_tree_root(res)
+  do:
     res.reset()
 
 func allFieldNames*(T: typedesc[object|tuple]): auto #[{.compileTime.}]# =
@@ -1906,14 +1902,10 @@ func hashTreeRootAux[T](
       if chunk == 1:
         result = err()
       else:
-        var isSome = false
-        x.withFieldPairs(key, val):
-          when key != T.unionSelectorKey:
-            doAssert not isSome
-            isSome = true
-            assign(result, val.hash_tree_root_multi(
-              batch, first, atLayer, needTopRoot))
-        if not isSome:
+        x.withUnionValue(val):
+          assign(result, val.hash_tree_root_multi(
+            batch, first, atLayer, needTopRoot))
+        do:
           result = err()
 
     batch.fulfill(

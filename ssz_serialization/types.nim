@@ -98,6 +98,22 @@ template unionSelector*[T: object](x: T): auto =
       {.error: "selector out of range: " & $`T` & "." & T.unionSelectorKey.}
     selector
 
+template withUnionValue*[T: object](
+    x: T, valParam, body: untyped) =
+  x.withFieldPairs(key, valParam):
+    when key != T.unionSelectorKey:
+      body
+
+template withUnionValue*[T: object](
+    x: T, valParam, body, noneBody: untyped) =
+  var isSome = false
+  x.withUnionValue(valParam):
+    doAssert not isSome
+    isSome = true
+    body
+  if not isSome:
+    noneBody
+
 # A few index types from here onwards:
 # * dataIdx - leaf index starting from 0 to maximum length of collection
 # * chunkIdx - leaf data index after chunking starting from 0

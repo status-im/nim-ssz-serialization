@@ -165,13 +165,12 @@ proc writeVarSizeType(w: var SszWriter, value: auto) {.raises: [IOError].} =
     when isUnion(type(value)):
       trs "WRITING SSZ Union"
       w.stream.writeFixedSized value.unionSelector.ord.uint8
-      value.withFieldPairs(key, val):
-        when key != typeof(value).unionSelectorKey:
-          type E = typeof toSszType(val)
-          when isFixedSize(E):
-            w.stream.writeFixedSized toSszType(val)
-          else:
-            w.writeVarSizeType toSszType(val)
+      value.withUnionValue(val):
+        type E = typeof toSszType(val)
+        when isFixedSize(E):
+          w.stream.writeFixedSized toSszType(val)
+        else:
+          w.writeVarSizeType toSszType(val)
     else:
       trs "WRITING OBJECT"
       var ctx = beginRecord(w, type value)
@@ -201,9 +200,8 @@ func sszSizeForVarSizeList[T](value: openArray[T]): int {.gcsafe, raises:[].} =
 
 func sszSizeForUnion[T: object](value: T): int =
   result = 1
-  value.withFieldPairs(key, val):
-    when key != T.unionSelectorKey:
-      result += sszSize(toSszType val)
+  value.withUnionValue(val):
+    result += sszSize(toSszType val)
 
 func sszSize*(value: auto): int {.gcsafe, raises:[].} =
   mixin toSszType
