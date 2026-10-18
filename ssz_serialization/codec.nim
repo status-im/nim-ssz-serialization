@@ -111,15 +111,10 @@ func initSszUnion(T: type, input: openArray[byte]): T {.raises: [SszError].} =
   if not selector.checkedEnumAssign(input[0].uint8):
     raiseMalformedSszError(T, "union selector is out of bounds")
 
-  var
-    isSome = false
-    res = T.doInit(T.unionSelectorKey, selector)
-  res.withFieldPairs(key, val):
-    when key != T.unionSelectorKey:
-      doAssert not isSome
-      isSome = true
-      readSszBytes(input.toOpenArray(1, input.len - 1), val)
-  if not isSome:
+  var res = T.doInit(T.unionSelectorKey, selector)
+  res.withUnionValue(val):
+    readSszBytes(input.toOpenArray(1, input.len - 1), val)
+  do:
     if input.len != 1:
       raiseMalformedSszError(T, "Union None should have no value")
   res

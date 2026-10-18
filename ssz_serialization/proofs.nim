@@ -593,15 +593,11 @@ func sszSchema(T: typedesc): lent SszSchema =
         for selector in S.unionSelectorType.items():
           doAssert selector.int in 0 .. uint8.high.int
           let sample = S.doInit(S.unionSelectorKey, selector)
-          var isSome = false
-          sample.withFieldPairs(key, val):
-            when key != S.unionSelectorKey:
-              doAssert not isSome
-              isSome = true
-              variants.add SszUnionVariant(
-                selector: selector.int.uint8,
-                schema: sszSchemaRef(typeof(val)))
-          if not isSome:
+          sample.withUnionValue(val):
+            variants.add SszUnionVariant(
+              selector: selector.int.uint8,
+              schema: sszSchemaRef(typeof(val)))
+          do:
             variants.add SszUnionVariant(
               selector: selector.int.uint8)
         SszSchema(kind: sszUnion, unionVariants: variants)
