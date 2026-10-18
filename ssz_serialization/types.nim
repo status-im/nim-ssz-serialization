@@ -88,16 +88,12 @@ macro doUnionSelectorKey(typ: typedesc): string =
 func unionSelectorKey*[T](t: typedesc[T]): string =
   T.doUnionSelectorKey
 
-macro get(x: typed, key: static string): auto =
-  let keyId = ident key
-  quote do: `x`.`keyId`
-
 template unionSelectorType*[T](t: typedesc[T]): typedesc =
-  T.get(T.unionSelectorKey)
+  T.field(T.unionSelectorKey)
 
 template unionSelector*[T: object](x: T): auto =
   block:
-    let selector = x.get(T.unionSelectorKey)
+    let selector = x.field(T.unionSelectorKey)
     when sizeof(selector) != 1:
       {.error: "selector out of range: " & $`T` & "." & `key`.}
     selector
