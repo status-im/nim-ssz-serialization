@@ -98,6 +98,9 @@ static:
   reject fixedPortionSize(int)
   reject minSize(int)
   reject maxSize(int)
+  reject fixedPortionSize(SomeEnum)
+  reject minSize(SomeEnum)
+  reject maxSize(SomeEnum)
 
 type
   ObjWithFields = object
