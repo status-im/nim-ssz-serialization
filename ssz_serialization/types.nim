@@ -8,7 +8,7 @@
 {.push raises: [].}
 
 import
-  std/[macros, sequtils, tables, typetraits, strformat],
+  std/[enumutils, sequtils, typetraits, strformat],
   stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
   results,
   stint,
@@ -55,27 +55,34 @@ func activeFields*(T: typedesc): BitArray[256] {.compileTime.} =
     res
   res
 
-macro doIsUnion(typ: typedesc): bool =
-  ## Indicate if `typ` refers to a tagged SSZ union with a
-  ## single selector field of which each value refers to up to one data field
-  let fields = recordFields(typ)
+func isUnion(fields: seq[FieldDescription]): bool =
   if fields.len == 0 or not fields[0].isDiscriminator:
-    return quote do: false  # Not a case object, or fields before the case
+    return false  # Not a case object, or fields before the case
   var branch: NimNode
   for i in 1 ..< fields.len:
     let field = fields[i]
     if field.caseField == nil:
-      return quote do: false  # Fields after the case
+      return false  # Fields after the case
     if field.isDiscriminator:
-      return quote do: false  # Nested case discriminator
+      return false  # Nested case discriminator
     if field.caseBranch == branch:
-      return quote do: false  # Multiple fields in the same branch
+      return false  # Multiple fields in the same branch
     branch = field.caseBranch
-  quote do: true
+  true
 
-func isUnion*[T](t: typedesc[T]): bool =
+func isUnion*[T](t: typedesc[T]): bool {.compileTime.} =
+  ## Indicate if `T` refers to a tagged SSZ union with a
+  ## single selector field of which each value refers to up to one data field
   when T is object:
-    T.doIsUnion
+    const res = T.recordFields.isUnion
+    res
+  else:
+    false
+
+func isUnsupportedCaseObject*[T](t: typedesc[T]): bool {.compileTime.} =
+  when T is object:
+    const res = T.isCaseObject and not T.isUnion
+    res
   else:
     false
 
@@ -756,18 +763,25 @@ template sum*[maxLen; T](a: var HashArray[maxLen, T]): T =
 template progressiveRange*[T](x: HashSeq[T], firstIdx: Limit): openArray[T] =
   asSeq(x).progressiveRange(firstIdx)
 
-macro unsupportedImpl(T: typed, isEnum: static bool): untyped =
+macro unsupportedImpl(
+    T: typed, isEnum, isUnsupportedCaseObject: static bool): untyped =
   # TODO: {.fatal.} breaks compilation even in `compiles()` context,
   # so we use this macro instead. It's also much better at figuring
   # out the actual type that was used in the instantiation.
   # File both problems as issues.
   if isEnum:
-    error "Nim `enum` types map poorly to SSZ and make it easy to introduce security issues because of spurious Defect's"
+    error "Nim `enum` types map poorly to SSZ and make it easy to introduce " &
+      "security issues because of spurious Defects"
+  elif isUnsupportedCaseObject:
+    error "SSZ serialization of " & humaneTypeName(T) & " is not supported, " &
+      "SSZ only supports unions with a single top-level selector " &
+      "over branches with at most one data field, and no extra fields"
   else:
-    error "SSZ serialization of the type " & humaneTypeName(T) & " is not supported, overload toSszType and fromSszBytes"
+    error "SSZ serialization of " & humaneTypeName(T) & " is not supported, " &
+      "overload toSszType and fromSszBytes"
 
 template unsupported*(T: typed): untyped =
-  unsupportedImpl(T, T is enum)
+  unsupportedImpl(T, T is enum, T.isUnsupportedCaseObject)
 
 template ElemType*(T0: type HashArray): untyped =
   T0.T
@@ -815,6 +829,8 @@ func isFixedSize*(T0: type): bool {.compileTime.} =
     return false
   elif T.isUnion:
     return false
+  elif T.isUnsupportedCaseObject:
+    unsupported T0
   elif T is object|tuple:
     enumAllSerializedFields(T):
       when not isFixedSize(FieldType):
@@ -835,6 +851,8 @@ func fixedPortionSize*(T0: type): int {.compileTime.} =
     0
   elif T.isUnion:
     1
+  elif T.isUnsupportedCaseObject:
+    unsupported T0
   elif T is object|tuple:
     enumAllSerializedFields(T):
       when isFixedSize(FieldType):
@@ -898,45 +916,28 @@ func maxSize*(T0: type): int {.compileTime.} =
 
 iterator fieldInfos(RecordType: type): tuple[name: string,
                                              offset: int,
-                                             fixedSize: int,
-                                             branchKey: string] =
+                                             fixedSize: int] =
   mixin enumAllSerializedFields
 
-  var
-    offsetInBranch = {"": 0}.toTable
-    nestedUnder = initTable[string, string]()
-
+  var fieldOffset = 0
   enumAllSerializedFields(RecordType):
     const
       isFixed = isFixedSize(FieldType)
       fixedSize = when isFixed: fixedPortionSize(FieldType)
                   else: 0
-      branchKey = when  fieldCaseDiscriminator.len == 0: ""
-                  else: fieldCaseDiscriminator & ":" & $fieldCaseBranches
       fieldSize = when isFixed: fixedSize
                   else: offsetSize
 
-    nestedUnder[fieldName] = branchKey
-
-    var fieldOffset: int
-    offsetInBranch.withValue(branchKey, val):
-      fieldOffset = val[]
-      val[] += fieldSize
-    do:
-      try:
-        let parentBranch = nestedUnder.getOrDefault(fieldCaseDiscriminator, "")
-        fieldOffset = offsetInBranch[parentBranch]
-        offsetInBranch[branchKey] = fieldOffset + fieldSize
-      except KeyError as e:
-        raiseAssert e.msg
-
-    yield (fieldName, fieldOffset, fixedSize, branchKey)
+    yield (fieldName, fieldOffset, fixedSize)
+    fieldOffset += fieldSize
 
 func getFieldBoundingOffsetsImpl(RecordType: type,
-                                 fieldName: static string):
+                                 fieldName: string):
      tuple[fieldOffset, nextFieldOffset: int, isFirstOffset: bool] {.compileTime.} =
+  when RecordType.isUnsupportedCaseObject:
+    unsupported RecordType
+  static: doAssert not RecordType.isUnion
   result = (-1, -1, false)
-  var fieldBranchKey: string
   var isFirstOffset = true
 
   for f in fieldInfos(RecordType):
@@ -945,13 +946,9 @@ func getFieldBoundingOffsetsImpl(RecordType: type,
       if f.fixedSize > 0:
         result[1] = result[0] + f.fixedSize
         return
-      else:
-        fieldBranchKey = f.branchKey
       result.isFirstOffset = isFirstOffset
 
-    elif result[0] != -1 and
-         f.fixedSize == 0 and
-         f.branchKey == fieldBranchKey:
+    elif result[0] != -1 and f.fixedSize == 0:
       # We have found the next variable sized field
       result[1] = f.offset
       return

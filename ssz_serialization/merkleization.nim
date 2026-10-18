@@ -1254,6 +1254,8 @@ func hashTreeRootAux[T](x: T, res: var Digest) =
   elif T.isUnion:
     x.unionHashTreeRoot(res)
     mixInSelector(res, x.unionSelector.ord.uint8, res)
+  elif T.isUnsupportedCaseObject:
+    unsupported T
   elif T is object|tuple:
     when T.isProgressiveContainer:
       x.progressiveMerkleizeFields(res)
@@ -1911,6 +1913,8 @@ func hashTreeRootAux[T](
     batch.fulfill(
       first, atLayer, needTopRoot, height = 2, numUsedChunks = 2,
       getTopRoot, getNestedRoot)
+  elif T.isUnsupportedCaseObject:
+    unsupported T
   elif T.isProgressiveContainer:
     const
       fieldNames = T.allFieldNames

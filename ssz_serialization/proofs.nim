@@ -601,6 +601,8 @@ func sszSchema(T: typedesc): lent SszSchema =
             variants.add SszUnionVariant(
               selector: selector.int.uint8)
         SszSchema(kind: sszUnion, unionVariants: variants)
+      elif S.isUnsupportedCaseObject:
+        unsupported S
       elif S is object|tuple:
         when S.isProgressiveContainer:
           const
