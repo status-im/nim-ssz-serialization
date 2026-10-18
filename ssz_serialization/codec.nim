@@ -98,7 +98,7 @@ macro doInit*[T](
     t: typedesc[T], selectorKey: static string, selector: typed): T =
   let selectorId = ident(selectorKey)
   quote do:
-    when compiles(`t`(`selectorId`: `selector`)):
+    when `t`.hasField(`selectorKey`):
       `t`(`selectorId`: `selector`)
     else:
       #[case_objects.]#init(`t`, `selectorId` = `selector`)
