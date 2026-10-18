@@ -399,6 +399,60 @@ type
     of ouInner:
       inner: InnerUnion
 
+  MultiFieldBranch = object
+    case kind: UKind
+    of UKind.None:
+      discard
+    of UKind.Some:
+      a: uint64
+      b: uint64
+
+  MultiIdentBranch = object
+    case kind: UKind
+    of UKind.None:
+      discard
+    of UKind.Some:
+      a, b: uint64
+
+  FieldBeforeCase = object
+    x: uint64
+    case kind: UKind
+    of UKind.None:
+      discard
+    of UKind.Some:
+      a: uint64
+
+  FieldAfterCase = object
+    case kind: UKind
+    of UKind.None:
+      discard
+    of UKind.Some:
+      a: uint64
+    x: uint64
+
+  NestedCase = object
+    case kind: UKind
+    of UKind.None:
+      discard
+    of UKind.Some:
+      case inner: UKind
+      of UKind.None:
+        discard
+      of UKind.Some:
+        a: uint64
+
+static:
+  doAssert TestCaseObject.isUnion
+  doAssert TUnion[uint64].isUnion
+  doAssert OuterUnion.isUnion
+  doAssert not TestFixedObject.isUnion
+  doAssert not MultiFieldBranch.isUnion
+  doAssert not MultiIdentBranch.isUnion
+  doAssert not FieldBeforeCase.isUnion
+  doAssert not FieldAfterCase.isUnion
+  doAssert not NestedCase.isUnion
+  doAssert TestCaseObject.unionSelectorKey == "selector"
+
 suite "SSZ Union: nested union sanity":
   test "encode/decode nested union":
     let

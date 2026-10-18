@@ -58,115 +58,35 @@ func activeFields*(T: typedesc): BitArray[256] {.compileTime.} =
     res
   res
 
-func getRealImpl(typ: NimNode): NimNode =
-  let typeDef = typ.getTypeImpl()
-  typeDef.expectKind nnkBracketExpr
-  if typeDef[0].strVal != "typeDesc":
-    error "unexpected typedesc", typeDef
-  var impl = typeDef[1]
-  if impl.kind == nnkBracketExpr and impl[0] != bindSym "array":
-    impl = impl[0]
-  if impl.kind == nnkSym:
-    impl = impl.getImpl()
-  impl
-
 macro doIsUnion(typ: typedesc): bool =
   ## Indicate if `typ` refers to a tagged SSZ union with a
   ## single selector field of which each value refers to up to one data field
-  let impl = typ.getRealImpl()
-  if impl.kind != nnkTypeDef:
-    return quote do: false
-  let def = impl[2]
-  if def.kind != nnkObjectTy:
-    return quote do: false
-  let recList = def[2]
-
-  func isUnionCase(recList: NimNode): bool =
-    if recList.kind != nnkRecList:
-      return false  # Object without any fields
-    if recList.len != 1:
-      return false
-    let rec = recList[0]
-    case rec.kind
-    of nnkRecWhen:
-      for branch in rec:
-        let recList =
-          if branch.kind == nnkElifBranch:
-            branch[1]
-          else:
-            doAssert branch.kind == nnkElse
-            branch[0]
-        if not recList.isUnionCase:
-          return false
-      true
-    of nnkRecCase:
-      for i, branch in rec:
-        case branch.kind
-        of nnkIdentDefs:
-          doAssert i == 0
-        of nnkOfBranch, nnkElse:
-          let
-            content =
-              if branch.kind == nnkOfBranch:
-                branch[^1]
-              else:
-                branch[0]
-            field =
-              if content.kind == nnkRecList:
-                if content.len == 0:
-                  continue  # `discard` on separate line
-                if content.len != 1:
-                  return false
-                content[0]
-              else:
-                content  # Content defined on same line as branch label
-          case field.kind
-          of nnkNilLit:
-            continue  # `discard`, i.e., no fields defined for this branch
-          of nnkIdentDefs:
-            if field.len != 3:
-              return false  # Multiple fields of same type
-          else:
-            error "unexpected field", field
-        else:
-          error "unexpected branch", branch
-      true
-    else:
-      false  # Not a case object
-
-  if not recList.isUnionCase:
-    return quote do: false
-
+  let fields = recordFields(typ)
+  if fields.len == 0 or not fields[0].isDiscriminator:
+    return quote do: false  # Not a case object, or fields before the case
+  var branch: NimNode
+  for i in 1 ..< fields.len:
+    let field = fields[i]
+    if field.caseField == nil:
+      return quote do: false  # Fields after the case
+    if field.isDiscriminator:
+      return quote do: false  # Nested case discriminator
+    if field.caseBranch == branch:
+      return quote do: false  # Multiple fields in the same branch
+    branch = field.caseBranch
   quote do: true
 
 func isUnion*[T](t: typedesc[T]): bool =
-  T.doIsUnion
+  when T is object:
+    T.doIsUnion
+  else:
+    false
 
 macro doUnionSelectorKey(typ: typedesc): string =
-  func getSelector(recList: NimNode): string =
-    let rec = recList[0]
-    if rec.kind == nnkRecWhen:
-      var name: Opt[string]
-      for branch in rec:
-        let recList =
-          if branch.kind == nnkElifBranch:
-            branch[1]
-          else:
-            doAssert branch.kind == nnkElse
-            branch[0]
-        if name.isNone:
-          name.ok recList.getSelector()
-        else:
-          if recList.getSelector() != name.get:
-            error "inconsistent selector names across when branches", recList
-      doAssert name.isSome
-      name.get
-    else:
-      doAssert rec.kind == nnkRecCase
-      rec[0][0].getOriginalFieldName()
-
-  let name = typ.getRealImpl()[2][2].getSelector()
-  quote do: `name`
+  let
+    selector = recordFields(typ)[0]
+    originalName = selector.readPragmaValue "originalFieldName"
+  newLit(if originalName != nil: $originalName else: $selector.name)
 
 func unionSelectorKey*[T](t: typedesc[T]): string =
   T.doUnionSelectorKey
