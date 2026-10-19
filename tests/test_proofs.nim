@@ -401,6 +401,18 @@ type
     of SelectorAB.a: aData: TestUnion
     of SelectorAB.b: bData: Inner
 
+  SelectorABCD {.pure.} = enum
+    a = 0
+    b = 1
+    c = 2
+    d = 3
+
+  BranchUnion = object
+    case selector: SelectorABCD
+    of SelectorABCD.a, SelectorABCD.c: acData: Inner
+    of SelectorABCD.b: discard
+    else: dData: Nested
+
   HoleySelector {.pure.} = enum
     a = 1
     b = 3
@@ -415,6 +427,11 @@ type
     of HoleySelector.c: cData: uint64
     of HoleySelector.d: dData: uint32
     of HoleySelector.e: eData: uint64
+
+  HoleyElseUnion {.allowDiscriminatorsWithoutZero.} = object
+    case selector: HoleySelector
+    of HoleySelector.a: aData: uint64
+    else: otherData: Inner
 
   ProgTestStruct {.sszActiveFields: [1, 0, 1, 0, 1].} = object
     a: uint64
@@ -550,6 +567,14 @@ suite "get_generalized_index":
     TestUnion.checkErr(1, "z")
     DeepUnion.checkErr(0, "inner", "x")
     MixedUnion.checkErr(1, "__len__")
+    BranchUnion.checkOk(0b1_0_0.GeneralizedIndex, 0, "x")
+    BranchUnion.checkOk(0b1_0.GeneralizedIndex, 1)
+    BranchUnion.checkOk(0b1_0_1.GeneralizedIndex, 2, "y")
+    BranchUnion.checkOk(0b1_0_0_1.GeneralizedIndex, 3, "inner", "y")
+    BranchUnion.checkOk(0b1_0_1.GeneralizedIndex, 3, "z")
+    BranchUnion.checkErr(0, "z")
+    BranchUnion.checkErr(1, "x")
+    BranchUnion.checkErr(4)
     HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 1)
     HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 3)
     HoleyUnion.checkOk(0b1_0.GeneralizedIndex, 99)
@@ -560,6 +585,12 @@ suite "get_generalized_index":
     HoleyUnion.checkErr(4)
     HoleyUnion.checkErr(98)
     HoleyUnion.checkErr(100)
+    HoleyElseUnion.checkOk(0b1_0.GeneralizedIndex, 1)
+    HoleyElseUnion.checkOk(0b1_0_1.GeneralizedIndex, 3, "y")
+    HoleyElseUnion.checkOk(0b1_0_0.GeneralizedIndex, 127, "x")
+    HoleyElseUnion.checkErr(0)
+    HoleyElseUnion.checkErr(1, "x")
+    HoleyElseUnion.checkErr(4)
 
   test "Progressive container":
     ProgTestStruct.checkOk(0b1_0_0.GeneralizedIndex, "a")
