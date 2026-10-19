@@ -11,7 +11,6 @@ import
   std/[algorithm, enumutils, macros, sequtils, sets, tables],
   results,
   stew/[bitops2, objects],
-  serialization/case_objects,
   "."/[codec, digest, merkleization]
 
 export digest, merkleization
@@ -592,14 +591,12 @@ func sszSchema(T: typedesc): lent SszSchema =
         var variants: seq[SszUnionVariant]
         for selector in S.unionSelectorType.items():
           doAssert selector.int in 0 .. uint8.high.int
-          let sample = S.doInit(S.unionSelectorKey, selector)
-          sample.withUnionValue(val):
-            variants.add SszUnionVariant(
-              selector: selector.int.uint8,
-              schema: sszSchemaRef(typeof(val)))
-          do:
-            variants.add SszUnionVariant(
-              selector: selector.int.uint8)
+          var variant = SszUnionVariant(selector: selector.int.uint8)
+          S.enumAllSerializedFields:
+            when fieldCaseDiscriminator.len > 0:
+              if selector in fieldCaseBranches:
+                variant.schema = sszSchemaRef(FieldType)
+          variants.add variant
         SszSchema(kind: sszUnion, unionVariants: variants)
       elif S.isUnsupportedCaseObject:
         unsupported S
