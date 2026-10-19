@@ -442,9 +442,11 @@ type
 
   DistinctInt = distinct uint64
   DistinctList = distinct seq[DistinctInt]
+  DistinctObject = distinct ThreeFields
 
 template toSszType(v: DistinctInt): auto = distinctBase(v)
 template toSszType(v: DistinctList): auto = distinctBase(v)
+template toSszType(v: DistinctObject): auto = distinctBase(v)
 
 static:
   doAssert ProgTestStruct.isProgressiveContainer
@@ -611,6 +613,8 @@ suite "get_generalized_index":
     seq[DistinctInt].checkOk(0b1_0_10_00.GeneralizedIndex, 5)
     DistinctList.checkOk(0b1_0_0.GeneralizedIndex, 0)
     DistinctList.checkOk(0b1_1.GeneralizedIndex, "__len__")
+    DistinctObject.checkOk(0b1_00.GeneralizedIndex, "a")
+    DistinctObject.checkOk(0b1_10.GeneralizedIndex, "c")
 
   test "Round-trip with build_proof":
     let

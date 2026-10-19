@@ -611,7 +611,7 @@ func sszSchema(T: typedesc): lent SszSchema =
           var i = 0
         else:
           const
-            totalChunks = T.totalSerializedFields
+            totalChunks = S.totalSerializedFields
             firstIdx = nextPow2(totalChunks.uint64).Limit
         when S is object:
           var fields: seq[SszObjectField]
