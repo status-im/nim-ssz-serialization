@@ -491,6 +491,7 @@ type
 
 static:
   doAssert TestCaseObject.isUnion
+  doAssert HoleyCaseObject.isUnion
   doAssert TUnion[uint64].isUnion
   doAssert OuterUnion.isUnion
   doAssert not TestFixedObject.isUnion
@@ -500,6 +501,15 @@ static:
   doAssert not FieldAfterCase.isUnion
   doAssert not NestedCase.isUnion
   doAssert TestCaseObject.unionSelectorKey == "selector"
+  doAssert HoleyCaseObject.unionSelectorKey == "selector"
+  doAssert $HoleyCaseObject.recordFields[0].name != "selector"
+  doAssert minSize(TestCaseObject) == 1
+  doAssert maxSize(TestCaseObject) == 1 + 4 + 4 + 4 + 16
+  doAssert minSize(HoleyCaseObject) == 1
+  doAssert maxSize(HoleyCaseObject) == 1 + 16
+  doAssert minSize(InnerUnion) == 1 + 1
+  doAssert maxSize(InnerUnion) == 1 + 8
+  doAssert maxSize(List[TestCaseObject, 2]) == 2 * (4 + 1 + 4 + 4 + 4 + 16)
 
 suite "SSZ Union: nested union sanity":
   test "encode/decode nested union":

@@ -872,6 +872,18 @@ func minSize*(T0: type): int {.compileTime.} =
     0
   elif T is BitList:
     1  # Trailing 1-bit
+  elif T.isUnion:
+    var res = int.high
+    for selector in T.unionSelectorType.items():
+      var size = 0
+      enumAllSerializedFields(T):
+        when fieldCaseDiscriminator.len > 0:
+          if selector in fieldCaseBranches:
+            size = minSize(FieldType)
+      res = min(res, size)
+    1 + res
+  elif T.isUnsupportedCaseObject:
+    unsupported T0
   elif T is object:
     var res = fixedPortionSize(T)
     enumAllSerializedFields(T):
@@ -900,6 +912,18 @@ func maxSize*(T0: type): int {.compileTime.} =
       T.maxLen * (offsetSize + maxSize(E))
   elif T is BitList:
     ((T.maxLen + 1) + 7) div 8
+  elif T.isUnion:
+    var res = 0
+    for selector in T.unionSelectorType.items():
+      var size = 0
+      enumAllSerializedFields(T):
+        when fieldCaseDiscriminator.len > 0:
+          if selector in fieldCaseBranches:
+            size = maxSize(FieldType)
+      res = max(res, size)
+    1 + res
+  elif T.isUnsupportedCaseObject:
+    unsupported T0
   elif T is object:
     var res = fixedPortionSize(T)
     enumAllSerializedFields(T):
