@@ -86,14 +86,9 @@ func isUnsupportedCaseObject*[T](t: typedesc[T]): bool {.compileTime.} =
   else:
     false
 
-macro doUnionSelectorKey(typ: typedesc): string =
-  let
-    selector = recordFields(typ)[0]
-    originalName = selector.readPragmaValue "originalFieldName"
-  newLit(if originalName != nil: $originalName else: $selector.name)
-
-func unionSelectorKey*[T](t: typedesc[T]): string =
-  T.doUnionSelectorKey
+func unionSelectorKey*[T](t: typedesc[T]): string {.compileTime.} =
+  const res = T.recordFields[0].getOriginalFieldName()
+  res
 
 template unionSelectorType*[T](t: typedesc[T]): typedesc =
   T.field(T.unionSelectorKey)
