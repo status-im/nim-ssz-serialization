@@ -1,5 +1,5 @@
 # ssz_serialization
-# Copyright (c) 2021 Status Research & Development GmbH
+# Copyright (c) 2021-2026 Status Research & Development GmbH
 # Licensed and distributed under either of
 #   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
@@ -10,6 +10,7 @@
 import
   unittest2,
   stew/byteutils,
+  serialization/case_objects,
   ../ssz_serialization
 
 type
@@ -46,6 +47,17 @@ type
       variablePart*: List[byte, 16]
     of SomeVariableObject:
       variableObj*: TestVariableObject
+
+  HoleyCaseObjectType* = enum
+    HoleyFixed = 0x01
+    HoleyVariable = 0x03
+
+  HoleyCaseObject* {.allowDiscriminatorsWithoutZero.} = object
+    case selector*: HoleyCaseObjectType
+    of HoleyFixed:
+      fixedPart*: uint16
+    of HoleyVariable:
+      variablePart*: List[byte, 16]
 
 suite "SSZ Union serialization":
   test "Union serialize different object branches":
@@ -125,6 +137,32 @@ suite "SSZ Union serialization":
       test.selector == decoded.selector
       test.variablePart == decoded.variablePart
 
+  test "Union without zero selector":
+    block:
+      let test = HoleyCaseObject.init(selector = HoleyFixed, fixedPart = 2'u16)
+      let encoded = SSZ.encode(test)
+
+      check encoded.toHex() == "010200"
+
+      let decoded = SSZ.decode(encoded, HoleyCaseObject)
+
+      check:
+        test.selector == decoded.selector
+        test.fixedPart == decoded.fixedPart
+
+    block:
+      let test = HoleyCaseObject.init(selector = HoleyVariable,
+        variablePart = List[byte, 16](@[byte 1, 2, 3, 4]))
+      let encoded = SSZ.encode(test)
+
+      check encoded.toHex() == "0301020304"
+
+      let decoded = SSZ.decode(encoded, HoleyCaseObject)
+
+      check:
+        test.selector == decoded.selector
+        test.variablePart == decoded.variablePart
+
 suite "SSZ Union invalid inputs":
   test "No data":
     var encoded: seq[byte]
@@ -150,6 +188,16 @@ suite "SSZ Union invalid inputs":
     let encoded = [byte 5, 2, 3]
     expect MalformedSszError:
       discard SSZ.decode(encoded, TestCaseObject)
+
+  test "Selector byte zero without zero selector":
+    let encoded = [byte 0]
+    expect MalformedSszError:
+      discard SSZ.decode(encoded, HoleyCaseObject)
+
+  test "Selector byte in enum hole":
+    let encoded = [byte 2, 2, 0]
+    expect MalformedSszError:
+      discard SSZ.decode(encoded, HoleyCaseObject)
 
 type
   UKind {.pure.} = enum
