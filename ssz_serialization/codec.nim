@@ -366,4 +366,4 @@ template toSszType*(v: ByteSeq | ByteList | ByteVector): auto =
 func fromSszBytes*(
     T: typedesc[ByteSeq | ByteList | ByteVector], bytes: openArray[byte]
 ): T {.raises: [SszError].} =
-  readSszValue(bytes, distinctBase(result, recursive = false))
+  readSszValue(bytes, toSszType(result))
