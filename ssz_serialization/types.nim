@@ -17,8 +17,6 @@ import
   json_serialization,
   "."/bitseqs
 
-from nimcrypto/utils import fromHex  # needed to disambiguate properly
-
 export stint, bitseqs, json_serialization
 
 const
@@ -165,7 +163,14 @@ func hashListIndicesLen[T](t: typedesc[T], maxLen: Limit | static Limit): int =
 type
   List*[T; maxLen: static Limit] = distinct seq[T]
   BitList*[maxLen: static Limit] = distinct BitSeq
+
+  # `byte` is an alias for `uint8` in Nim, but the JSON mapping encodes
+  # `ProgressiveList`, `List`, and `Vector` of `Byte` as hex strings,
+  # while those of `uint8` are encoded as JSON arrays
+  # https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.13/ssz/simple-serialize.md#json-mapping
   ByteSeq* = distinct seq[byte]
+  ByteList*[maxLen: static Limit] = distinct List[byte, maxLen]
+  ByteVector*[maxLen: static Limit] = distinct array[maxLen, byte]
 
   HashArray*[maxLen: static Limit; T] = object
     ## Array implementation that caches the hash of each chunk of data - see
@@ -231,10 +236,6 @@ type
   SszType* =
     BasicType | array | HashArray | List | HashList | seq | HashSeq |
     BitArray | BitList | BitSeq | Digest | object | tuple
-
-  # Convenience aliases from specification
-  ByteList*[maxLen: static Limit] = List[byte, maxLen]
-  ByteVector*[maxLen: static Limit] = array[maxLen, byte]
 
 template asSeq*(x: List): auto = distinctBase(x)
 
@@ -310,25 +311,34 @@ template `$`*(a: BitList): string = $(BitSeq(a))
 template items*(x: BitList): untyped = items(BitSeq(x))
 template pairs*(x: BitList): untyped = pairs(BitSeq(x))
 
-template asSeq*(x: ByteSeq): auto = distinctBase(x)
-template init*(T: type ByteSeq, x: seq[byte]): auto = ByteSeq(x)
-template `$`*(x: ByteSeq): auto = $(distinctBase(x))
-template len*(x: ByteSeq): auto = len(distinctBase(x))
-template low*(x: ByteSeq): auto = low(distinctBase(x))
-template high*(x: ByteSeq): auto = high(distinctBase(x))
-template `[]`*(x: ByteSeq, idx: auto): untyped = distinctBase(x)[idx]
-template `[]=`*(x: var ByteSeq, idx: auto, val: byte) =
+template asSeq*(x: ByteSeq | ByteList): auto = distinctBase(x)
+template init*(T: typedesc[ByteSeq | ByteList], x: seq[byte]): auto = T(x)
+template `$`*(x: ByteSeq | ByteList | ByteVector): auto = $(distinctBase(x))
+template len*(x: ByteSeq | ByteList | ByteVector): auto = len(distinctBase(x))
+template low*(x: ByteSeq | ByteList | ByteVector): auto = low(distinctBase(x))
+template high*(x: ByteSeq | ByteList | ByteVector): auto = high(distinctBase(x))
+template `[]`*(x: ByteSeq | ByteList | ByteVector, idx: auto): untyped =
+  distinctBase(x)[idx]
+template `[]=`*(
+    x: var (ByteSeq | ByteList | ByteVector), idx: auto, val: byte) =
   distinctBase(x)[idx] = val
-template `==`*(a, b: ByteSeq): bool = distinctBase(a) == distinctBase(b)
+template `==`*(a, b: ByteSeq | ByteList | ByteVector): bool =
+  distinctBase(a) == distinctBase(b)
 template `&`*(a, b: ByteSeq): auto = ByteSeq(distinctBase(a) & distinctBase(b))
-template items*(x: ByteSeq): untyped = items(distinctBase(x))
-template pairs*(x: ByteSeq): untyped = pairs(distinctBase(x))
-template mitems*(x: var ByteSeq): untyped = mitems(distinctBase(x))
-template mpairs*(x: var ByteSeq): untyped = mpairs(distinctBase(x))
-template contains*(x: ByteSeq, val: byte): untyped =
+template items*(x: ByteSeq | ByteList | ByteVector): untyped =
+  items(distinctBase(x))
+template pairs*(x: ByteSeq | ByteList | ByteVector): untyped =
+  pairs(distinctBase(x))
+template mitems*(x: var (ByteSeq | ByteList | ByteVector)): untyped =
+  mitems(distinctBase(x))
+template mpairs*(x: var (ByteSeq | ByteList | ByteVector)): untyped =
+  mpairs(distinctBase(x))
+template contains*(x: ByteSeq | ByteList | ByteVector, val: byte): untyped =
   contains(distinctBase(x), val)
-template add*(x: var ByteSeq, val: byte) = add(distinctBase(x), val)
-template setLen*(x: var ByteSeq, newLen: int) = setLen(distinctBase(x), newLen)
+template add*(x: var (ByteSeq | ByteList), val: byte): untyped =
+  add(distinctBase(x, recursive = false), byte(val))
+template setLen*(x: var (ByteSeq | ByteList), newLen: int): untyped =
+  setLen(distinctBase(x, recursive = false), newLen)
 
 template isCached*(v: Digest): bool =
   ## An entry is "in the cache" if it does not start with 8 zero bytes,
@@ -796,6 +806,9 @@ template ElemType*(T: type seq): untyped =
 template ElemType*(T0: type List): untyped =
   T0.T
 
+template ElemType*(T: typedesc[ByteSeq | ByteList | ByteVector]): untyped =
+  byte
+
 func supportsBulkCopy*(T: type): bool {.compileTime.} =
   # Bulk copy types are those that match the following requirements:
   # * have no padding / alignment differences compared to their raw SSZ encoding
@@ -1010,24 +1023,47 @@ method formatMsg*(
 proc readValue*(
     reader: var JsonReader, value: var ByteSeq
 ) {.raises: [IOError, SerializationError].} =
-  value = ByteSeq utils.fromHex(reader.readValue(string))
+  let hex = reader.readValue(string)
+  if hex.len < 2 or hex[0] != '0' or hex[1] != 'x':
+    reader.raiseUnexpectedValue("hex string must start with 0x")
+  try:
+    distinctBase(value) = hexToSeqByte(hex)
+  except ValueError as exc:
+    reader.raiseUnexpectedValue(exc.msg)
+
+proc readValue*(
+    reader: var JsonReader, value: var ByteList
+) {.raises: [IOError, SerializationError].} =
+  value = typeof(value)(
+    distinctBase(reader.readValue(ByteSeq)))
+  if value.len > value.maxLen:
+    value.reset()
+    reader.raiseUnexpectedValue("length exceeds list limit")
+
+proc readValue*(
+    reader: var JsonReader, value: var ByteVector
+) {.raises: [IOError, SerializationError].} =
+  var data: ByteSeq
+  reader.readValue(data)
+  if data.len != value.len:
+    reader.raiseUnexpectedValue("incorrect size")
+  assign(distinctBase(value), distinctBase(data))
 
 proc writeValue*(
-    writer: var JsonWriter, value: ByteSeq) {.raises: [IOError].} =
+    writer: var JsonWriter, value: ByteSeq | ByteList | ByteVector
+) {.raises: [IOError].} =
   writeValue(writer, to0xHex(distinctBase(value)))
 
 template readValue*(reader: var JsonReader, value: var List) =
   mixin readValue
-  when type(value[0]) is byte:
-    value = type(value)(utils.fromHex(reader.readValue(string)))
-  else:
-    value = type(value)(readValue(reader, seq[type value[0]]))
+  value = typeof(value)(
+    readValue(reader, distinctBase(typeof(value), recursive = false)))
+  if value.len > value.maxLen:
+    value.reset()
+    reader.raiseUnexpectedValue("length exceeds list limit")
 
 template writeValue*(writer: var JsonWriter, value: List) =
-  when type(value[0]) is byte:
-    writeValue(writer, to0xHex(distinctBase(value)))
-  else:
-    writeValue(writer, asSeq value)
+  writeValue(writer, distinctBase(value, recursive = false))
 
 proc writeValue*(
     writer: var JsonWriter, value: HashList) {.raises: [IOError].} =

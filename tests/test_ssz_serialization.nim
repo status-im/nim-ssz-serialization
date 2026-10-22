@@ -592,6 +592,86 @@ suite "Distinct":
       Json.encode(distinctBase(obj)) == "[222,173,190,239]"
       Json.decode(encodedObj, ByteSeq) == obj
 
+  test "List JSON round-trip and limits":
+    let
+      list = List[uint8, 2].init(@[1'u8, 2])
+      byteList = ByteList[2].init(@[byte 1, 2])
+      byteVector = ByteVector[2]([byte 1, 2])
+
+    check:
+      Json.encode(list) == "[1,2]"
+      Json.encode(byteList) == "\"0x0102\""
+      Json.encode(byteVector) == "\"0x0102\""
+      Json.decode("[1,2]", List[uint8, 2]) == list
+      Json.decode("\"0x0102\"", ByteList[2]) == byteList
+      Json.decode("\"0x0102\"", ByteVector[2]) == byteVector
+
+    expect SerializationError:
+      discard Json.decode("[1,2,3]", List[uint8, 2])
+    expect SerializationError:
+      discard Json.decode("[1,2,3]", HashList[uint8, 2])
+    expect SerializationError:
+      discard Json.decode("\"0x010203\"", ByteList[2])
+    expect SerializationError:
+      discard Json.decode("\"0x01\"", ByteVector[2])
+    expect SerializationError:
+      discard Json.decode("\"0x010203\"", ByteVector[2])
+
+  test "Hex JSON strictness":
+    check Json.decode("\"0xABcd\"", ByteSeq) == ByteSeq @[byte 0xab, 0xcd]
+    for hex in ["\"\"", "\"0102\"", "\"0X01\"", "\"0x0\"", "\"0xzz\"",
+                "\" 0x01\""]:
+      expect SerializationError:
+        discard Json.decode(hex, ByteSeq)
+      expect SerializationError:
+        discard Json.decode(hex, ByteList[2])
+      expect SerializationError:
+        discard Json.decode(hex, ByteVector[1])
+
+  test "ByteList and ByteVector SSZ":
+    type
+      ByteFields = object
+        list: ByteList[2]
+        vector: ByteVector[2]
+      BaseFields = object
+        list: List[byte, 2]
+        vector: array[2, byte]
+
+    let
+      obj = ByteFields(
+        list: ByteList[2].init(@[byte 1, 2]),
+        vector: ByteVector[2]([byte 3, 4]))
+      base = BaseFields(
+        list: List[byte, 2].init(@[byte 1, 2]),
+        vector: [byte 3, 4])
+
+    check:
+      SSZ.encode(obj) == SSZ.encode(base)
+      SSZ.decode(SSZ.encode(obj), ByteFields) == obj
+      hash_tree_root(obj) == hash_tree_root(base)
+      hash_tree_root(obj.list) == hash_tree_root(base.list)
+      hash_tree_root(obj.vector) == hash_tree_root(base.vector)
+
+    expect SszError:
+      discard SSZ.decode(@[byte 1, 2, 3], ByteList[2])
+    expect SszError:
+      discard SSZ.decode(@[byte 1], ByteVector[2])
+
+  test "ByteSeq and ByteList add / setLen":
+    var
+      byteSeq: ByteSeq
+      byteList: ByteList[2]
+    byteSeq.add 1
+    byteSeq.setLen 3
+
+    check:
+      byteSeq == ByteSeq @[byte 1, 0, 0]
+      byteList.add 1
+      byteList.setLen 2
+      not byteList.add 3
+      not byteList.setLen 3
+      byteList == ByteList[2].init(@[byte 1, 0])
+
   test "readSszBytes overload works in nested objects":
     check:
       SSZ.decode(SSZ.encode(Simple()), Simple).ignored != ""
