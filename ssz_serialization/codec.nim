@@ -360,7 +360,10 @@ template toSszType*(v: auto): auto =
   else:
     unsupported T
 
-template toSszType*(v: ByteSeq): seq[byte] = distinctBase(v)
+template toSszType*(v: ByteSeq | ByteList | ByteVector): auto =
+  distinctBase(v, recursive = false)
 
-template fromSszBytes*(T: type ByteSeq, bytes: openArray[byte]): T =
-  T(@bytes)
+func fromSszBytes*(
+    T: typedesc[ByteSeq | ByteList | ByteVector], bytes: openArray[byte]
+): T {.raises: [SszError].} =
+  readSszValue(bytes, toSszType(result))
