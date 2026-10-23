@@ -1081,9 +1081,16 @@ proc readValue*(reader: var JsonReader, value: var HashSeq)
                {.raises: [IOError, SerializationError].} =
   readValue(reader, value.data)
 
-template readValue*(reader: var JsonReader, value: var BitList) =
-  type T = type(value)
-  value = T readValue(reader, BitSeq)
+proc readValue*(
+    reader: var JsonReader, value: var (BitSeq | BitList | BitArray)
+) {.raises: [IOError, SerializationError].} =
+  mixin readSszValue
+  try:
+    readSszValue(distinctBase(reader.readValue(ByteSeq)), value)
+  except SszError as exc:
+    reader.raiseUnexpectedValue(exc.msg)
 
-template writeValue*(writer: var JsonWriter, value: BitList) =
-  writeValue(writer, BitSeq value)
+proc writeValue*(
+    writer: var JsonWriter, value: BitSeq | BitList | BitArray
+) {.raises: [IOError].} =
+  writeValue(writer, to0xHex(value.bytes))

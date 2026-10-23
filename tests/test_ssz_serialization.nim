@@ -627,6 +627,44 @@ suite "Distinct":
         discard Json.decode(hex, ByteList[2])
       expect SerializationError:
         discard Json.decode(hex, ByteVector[1])
+      expect SerializationError:
+        discard Json.decode(hex, BitSeq)
+      expect SerializationError:
+        discard Json.decode(hex, BitList[8])
+      expect SerializationError:
+        discard Json.decode(hex, BitArray[8])
+
+  test "Bit JSON round-trip and validity":
+    var
+      bitSeq = BitSeq.init(3)
+      bitList = BitList[4].init(3)
+      bitArray: BitArray[4]
+    bitSeq.setBit(1)
+    bitList.setBit(1)
+    bitArray.setBit(1)
+
+    check:
+      Json.encode(bitSeq) == "\"0x0a\""
+      Json.encode(bitList) == "\"0x0a\""
+      Json.encode(bitArray) == "\"0x02\""
+      Json.decode("\"0x0a\"", BitSeq) == bitSeq
+      Json.decode("\"0x0a\"", BitList[4]) == bitList
+      Json.decode("\"0x02\"", BitArray[4]) == bitArray
+      Json.encode(Json.decode("\"0x10\"", BitList[4])) == "\"0x10\""
+
+    # Empty, or trailing zero byte without termination bit
+    for hex in ["\"0x\"", "\"0x00\"", "\"0x0a00\""]:
+      expect SerializationError:
+        discard Json.decode(hex, BitSeq)
+      expect SerializationError:
+        discard Json.decode(hex, BitList[16])
+    # Too many bits or bytes, wrong size
+    for hex in ["\"0x20\"", "\"0x0a01\""]:
+      expect SerializationError:
+        discard Json.decode(hex, BitList[4])
+    for hex in ["\"0x\"", "\"0x12\"", "\"0x0202\""]:
+      expect SerializationError:
+        discard Json.decode(hex, BitArray[4])
 
   test "ByteList and ByteVector SSZ":
     type
