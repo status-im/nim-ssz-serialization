@@ -18,11 +18,11 @@
 
 import
   std/[algorithm, options, sequtils],
-  stew/[assign2, bitops2, endians2, objects, ptrops, shims/macros],
+  stew/[assign2, bitops2, endians2, objects, ptrops, shims/macros, shims/sequninit],
   results,
   nimcrypto/[hash, sha2],
   serialization/[case_objects, testing/tracing],
-  "."/[bitseqs, codec, digest, types]
+  ./[bitseqs, codec, digest, types]
 
 export
   results, hash.fromHex, codec, bitseqs, types, digest
@@ -2470,7 +2470,7 @@ func sortForMerkleization(
       1
 
 func merkleizationLoopOrder(indices: openArray[GeneralizedIndex]): seq[int] =
-  result.setLen(2 * indices.len)
+  result.setLenUninit(2 * indices.len)
   for i in 0 ..< indices.len:
     # bit 0-6: leading zeroes of the indices entry
     # bit 7:   whether this is first occurrence of the indices entry
