@@ -13,7 +13,7 @@
 import
   std/typetraits,
   results,
-  stew/[endians2, objects], stew/shims/macros,
+  stew/[endians2, objects], stew/shims/[macros, sequninit],
   serialization/case_objects,
   ./types
 
@@ -45,12 +45,7 @@ func setOutputSize(list: var List, length: int) {.raises: [SszError].} =
     raiseMalformedSszError(typeof(list), "length exceeds list limit")
 
 func setOutputSize[T](x: var seq[T], length: int) {.raises: [SszError].} =
-  # We will overwrite all bytes
-  when T is SomeNumber:
-    if x.len != length:
-      x = newSeqUninit[T](length)
-  else:
-    x.setLen(length)
+  x.setLenUninit(length)
 
 # fromSszBytes copies the wire representation to a Nim variable,
 # assuming there's enough data in the buffer

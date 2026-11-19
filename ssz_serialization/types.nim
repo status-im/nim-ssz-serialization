@@ -9,13 +9,13 @@
 
 import
   std/[enumutils, sequtils, typetraits, strformat],
-  stew/shims/macros, stew/[assign2, byteutils, bitops2, objects],
+  stew/shims/[macros, sequninit], stew/[assign2, byteutils, bitops2, objects],
   results,
   stint,
   nimcrypto/hash,
   serialization/[case_objects, object_serialization, errors],
   json_serialization,
-  "."/bitseqs
+  ./bitseqs
 
 export stint, bitseqs, json_serialization
 
@@ -268,11 +268,7 @@ func add*(x: var List, val: auto): bool =
 func setLenUninitialized*(x: var List, newLen: int): bool =
   if newLen <= x.maxLen:
     # TODO https://github.com/nim-lang/Nim/issues/19727
-    when List.T is SomeNumber:
-      if x.len != newLen:
-        distinctBase(x) = newSeqUninit[x.T](newLen)
-    else:
-      setLen(distinctBase(x), newLen)
+    setLenUninit(distinctBase(x), newLen)
     true
   else:
     false
